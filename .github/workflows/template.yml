@@ -34,8 +34,11 @@ jobs:
         run: |
           echo Add other actions to build,
           echo test, and deploy your project.
-
-          - name: Junit Test Dashboard
+      test:
+        needs: build # Só roda depois que o job 'build' terminar com sucesso
+        runs-on: ubuntu-latest
+        steps:
+        - name: Junit Test Dashboard
           # You may pin to the exact commit or the version.
           # uses: janisz/action@2920bc1b1b377c787227b204af6981e8f41bbef3
           uses: janisz/action@v2
