@@ -63,9 +63,11 @@ CREATE TABLE IF NOT EXISTS usuario (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     nome VARCHAR(100) NOT NULL,
     email VARCHAR(255) NOT NULL,
+    telefone VARCHAR(13),
     senha VARCHAR(255) NOT NULL,
     perfil_id UUID NOT NULL,
     status BOOLEAN NOT NULL DEFAULT TRUE,
+    data_ultima_atualizacao TIMESTAMP WITHOUT TIME ZONE,
     data_criacao TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_usuario_perfil
@@ -74,6 +76,13 @@ CREATE TABLE IF NOT EXISTS usuario (
         ON UPDATE CASCADE
         ON DELETE RESTRICT
 );
+
+-- Atualiza bancos criados com uma versão anterior deste script.
+ALTER TABLE usuario
+    ADD COLUMN IF NOT EXISTS data_ultima_atualizacao TIMESTAMP WITHOUT TIME ZONE;
+
+ALTER TABLE usuario
+    ADD COLUMN IF NOT EXISTS telefone VARCHAR(13);
 
 -- Garante unicidade do e-mail sem diferenciar maiúsculas/minúsculas.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_usuario_email_lower
@@ -84,6 +93,24 @@ CREATE INDEX IF NOT EXISTS idx_usuario_perfil_id
 
 CREATE INDEX IF NOT EXISTS idx_usuario_status
     ON usuario (status);
+
+-- Mantém data_ultima_atualizacao sincronizada nas alterações de usuário.
+CREATE OR REPLACE FUNCTION atualizar_data_usuario()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.data_ultima_atualizacao := CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_usuario_data_ultima_atualizacao ON usuario;
+
+CREATE TRIGGER trg_usuario_data_ultima_atualizacao
+BEFORE UPDATE ON usuario
+FOR EACH ROW
+EXECUTE FUNCTION atualizar_data_usuario();
 
 -- ================================================================
 -- CATEGORIAS E PRODUTOS
@@ -335,4 +362,7 @@ COMMIT;
 
 -- Consultas úteis após a instalação:
 -- SELECT id_perfil, nome, descricao FROM perfil ORDER BY nome;
--- SELECT id, nome, email, status, perfil_id FROM usuario ORDER BY data_criacao;
+-- SELECT id, nome, email, telefone, status, perfil_id,
+--        data_ultima_atualizacao, data_criacao
+-- FROM usuario
+-- ORDER BY data_criacao;

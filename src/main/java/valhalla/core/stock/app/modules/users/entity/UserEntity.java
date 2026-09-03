@@ -2,6 +2,7 @@ package valhalla.core.stock.app.modules.users.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.UpdateTimestamp;
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 
 import java.time.LocalDateTime;
@@ -27,6 +28,9 @@ public class UserEntity {
     @Column(name = "email", nullable = false, unique = true, length = 255)
     private String email;
 
+    @Column(name = "telefone", length = 13)
+    private String phone;
+
     @Column(name = "senha", nullable = false, length = 255)
     private String passwordHash;
 
@@ -36,6 +40,10 @@ public class UserEntity {
 
     @Column(name = "status", nullable = false)
     private Boolean active;
+
+    @UpdateTimestamp
+    @Column(name = "data_ultima_atualizacao")
+    private LocalDateTime updatedAt;
 
     @Column(name = "data_criacao", nullable = false)
     private LocalDateTime createdAt;

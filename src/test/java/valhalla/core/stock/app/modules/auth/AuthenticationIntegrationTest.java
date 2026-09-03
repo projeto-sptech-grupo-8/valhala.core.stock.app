@@ -20,6 +20,7 @@ import java.util.regex.Pattern;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
@@ -44,6 +45,8 @@ class AuthenticationIntegrationTest {
 
     private ProfileEntity gerenteProfile;
     private ProfileEntity atendenteProfile;
+    private UserEntity gerenteUser;
+    private UserEntity atendenteUser;
 
     @BeforeEach
     void setUp() {
@@ -56,8 +59,8 @@ class AuthenticationIntegrationTest {
                 .description("Operação da adega")
                 .build());
 
-        saveUser("gerente@meraki.com", "senha-gerente", gerenteProfile);
-        saveUser("atendente@meraki.com", "senha-atendente", atendenteProfile);
+        gerenteUser = saveUser("gerente@meraki.com", "senha-gerente", gerenteProfile);
+        atendenteUser = saveUser("atendente@meraki.com", "senha-atendente", atendenteProfile);
     }
 
     @Test
@@ -177,8 +180,94 @@ class AuthenticationIntegrationTest {
                         .value("Perfil não encontrado: Perfil inexistente"));
     }
 
-    private void saveUser(String email, String password, ProfileEntity profile) {
-        userRepository.save(UserEntity.builder()
+    @Test
+    void atendenteDeveAtualizarAPropriaConta() throws Exception {
+        String token = login("atendente@meraki.com", "senha-atendente");
+        String request = """
+                {
+                  "name": "Atendente Atualizado",
+                  "email": "atendente.novo@meraki.com",
+                  "phone": "11999999999",
+                  "password": "nova-senha-atendente"
+                }
+                """;
+
+        mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Atendente Atualizado"))
+                .andExpect(jsonPath("$.email").value("atendente.novo@meraki.com"))
+                .andExpect(jsonPath("$.phone").value("11999999999"))
+                .andExpect(jsonPath("$.updatedAt").isNotEmpty());
+
+        // O token continua identificando o proprietário pelo userId mesmo após trocar o e-mail.
+        mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"11888888888\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.phone").value("11888888888"));
+
+        login("atendente.novo@meraki.com", "nova-senha-atendente");
+    }
+
+    @Test
+    void atendenteNaoDeveAtualizarContaDeOutroUsuario() throws Exception {
+        String token = login("atendente@meraki.com", "senha-atendente");
+
+        mockMvc.perform(patch("/usuario/{id}", gerenteUser.getId())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Alteração indevida\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void atendenteNaoDeveAlterarOProprioPerfilOuStatus() throws Exception {
+        String token = login("atendente@meraki.com", "senha-atendente");
+
+        mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"profileName\":\"Gerente\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void gerenteDeveAlterarPerfilEStatusDeOutroUsuario() throws Exception {
+        String token = login("gerente@meraki.com", "senha-gerente");
+        String request = """
+                {
+                  "profileName": "Gerente",
+                  "active": false
+                }
+                """;
+
+        mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.profileName").value("Gerente"))
+                .andExpect(jsonPath("$.active").value(false));
+    }
+
+    @Test
+    void gerenteDeveReceberNotFoundParaUsuarioInexistente() throws Exception {
+        String token = login("gerente@meraki.com", "senha-gerente");
+
+        mockMvc.perform(patch("/usuario/{id}", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Usuário inexistente\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Usuário não encontrado"));
+    }
+
+    private UserEntity saveUser(String email, String password, ProfileEntity profile) {
+        return userRepository.save(UserEntity.builder()
                 .name(profile.getName() + " Meraki")
                 .email(email)
                 .passwordHash(passwordEncoder.encode(password))
@@ -217,6 +306,7 @@ class AuthenticationIntegrationTest {
                 {
                   "name": "Novo Usuário",
                   "email": "%s",
+                  "phone": "11977777777",
                   "password": "senha-novo-usuario",
                   "profileName": "atendente"
                 }

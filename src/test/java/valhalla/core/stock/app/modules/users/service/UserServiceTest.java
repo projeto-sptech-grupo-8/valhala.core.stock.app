@@ -14,6 +14,7 @@ import valhalla.core.stock.app.modules.users.dto.UserCreateRequestDto;
 import valhalla.core.stock.app.modules.users.dto.UserResponseDto;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
+import valhalla.core.stock.app.modules.users.security.UserAuthorizationService;
 import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 
@@ -35,11 +36,19 @@ class UserServiceTest {
     @Mock
     private PasswordEncoder passwordEncoder;
 
+    @Mock
+    private UserAuthorizationService userAuthorizationService;
+
     private UserService userService;
 
     @BeforeEach
     void setUp() {
-        userService = new UserService(userRepository, profileRepository, passwordEncoder);
+        userService = new UserService(
+                userRepository,
+                profileRepository,
+                passwordEncoder,
+                userAuthorizationService
+        );
     }
 
     @Test
@@ -53,6 +62,7 @@ class UserServiceTest {
         UserCreateRequestDto request = new UserCreateRequestDto(
                 "  Lucas Peres  ",
                 "  LUCAS@EXEMPLO.COM  ",
+                "11999999999",
                 "senha-segura",
                 "  Administrador  "
         );
@@ -77,6 +87,7 @@ class UserServiceTest {
                 () -> assertEquals(userId, response.id()),
                 () -> assertEquals("Lucas Peres", savedUser.getName()),
                 () -> assertEquals("lucas@exemplo.com", savedUser.getEmail()),
+                () -> assertEquals("11999999999", savedUser.getPhone()),
                 () -> assertEquals("senha-codificada", savedUser.getPasswordHash()),
                 () -> assertNotEquals(request.password(), savedUser.getPasswordHash()),
                 () -> assertTrue(savedUser.getActive())
@@ -139,6 +150,7 @@ class UserServiceTest {
         return new UserCreateRequestDto(
                 "Lucas Peres",
                 "lucas@exemplo.com",
+                null,
                 "senha-segura",
                 "Atendente"
         );

@@ -13,6 +13,9 @@ public record UserCreateRequestDto(
         @Email(message = "E-mail inválido")
         String email,
 
+        @Size(max = 13, message = "O telefone deve ter no máximo 13 caracteres")
+        String phone,
+
         @NotBlank(message = "A senha é obrigatória")
         @Size(min = 8, max = 72)
         String password,

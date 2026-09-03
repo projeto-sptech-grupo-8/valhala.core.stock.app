@@ -20,6 +20,7 @@ public final class UserMapper {
         return UserEntity.builder()
                 .name(dto.name().trim())
                 .email(dto.email().trim().toLowerCase(Locale.ROOT))
+                .phone(normalizePhone(dto.phone()))
                 .passwordHash(passwordHash)
                 .profile(profile)
                 .active(true)
@@ -31,10 +32,16 @@ public final class UserMapper {
                 user.getId(),
                 user.getName(),
                 user.getEmail(),
+                user.getPhone(),
                 user.getProfile().getId(),
                 user.getProfile().getName(),
                 user.getActive(),
+                user.getUpdatedAt(),
                 user.getCreatedAt()
         );
+    }
+
+    private static String normalizePhone(String phone) {
+        return phone == null || phone.isBlank() ? null : phone.trim();
     }
 }

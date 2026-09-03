@@ -80,6 +80,7 @@ Body:
 {
   "name": "Atendente Teste",
   "email": "atendente.teste@meraki.com",
+  "phone": "11999999999",
   "password": "senha-segura",
   "profileName": "Atendente"
 }
@@ -87,6 +88,35 @@ Body:
 
 O backend localiza o perfil pelo nome, sem diferenciar letras maiúsculas e
 minúsculas, e grava o respectivo UUID no usuário.
+
+### Atualizar usuário
+
+`PATCH /usuario/{id}` — exige JWT. O usuário pode atualizar a própria conta e a
+gerente pode atualizar qualquer conta.
+
+Dados pessoais disponíveis para o proprietário:
+
+```json
+{
+  "name": "Nome atualizado",
+  "email": "novo.email@meraki.com",
+  "phone": "11999999999",
+  "password": "nova-senha-segura"
+}
+```
+
+Somente a gerente pode enviar também:
+
+```json
+{
+  "profileName": "Gerente",
+  "active": true
+}
+```
+
+Todos os campos são opcionais, mas a requisição deve informar pelo menos um.
+Os nomes antigos `nome`, `telefone`, `senha`, `perfil` e `status` também são
+aceitos para compatibilidade.
 
 ## Testes
 

@@ -7,8 +7,10 @@ public record UserResponseDto(
         UUID id,
         String name,
         String email,
+        String phone,
         UUID profileId,
         String profileName,
         Boolean active,
+        LocalDateTime updatedAt,
         LocalDateTime createdAt
 ) {}
