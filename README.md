@@ -28,6 +28,14 @@ $env:JWT_SECRET = 'secret-base64-com-pelo-menos-32-bytes'
 $env:FRONTEND_URL = 'http://localhost:5173'
 ```
 
+Em produção, habilite cookies seguros e, se necessário, ajuste a duração do
+refresh token (o padrão é sete dias):
+
+```powershell
+$env:COOKIE_SECURE = 'true'
+$env:JWT_REFRESH_EXPIRATION = 'P7D'
+```
+
 Para gerar um novo secret compatível com versões antigas do PowerShell:
 
 ```powershell
@@ -64,15 +72,20 @@ Depois, inicie a aplicação:
 }
 ```
 
+Em caso de sucesso, os tokens são enviados exclusivamente nos cookies
+`HttpOnly` `accessToken` e `refreshToken`. O corpo contém apenas a mensagem e o
+nome do usuário. O frontend deve enviar as requisições com credenciais, por
+exemplo usando `credentials: "include"` no `fetch`.
+
+### Renovar autenticação
+
+`POST /auth/refresh` — público, mas exige o cookie `refreshToken`. O endpoint
+valida e troca o par de tokens, devolvendo os novos valores nos cookies.
+
 ### Criar usuário
 
-`POST /usuario` — exige um JWT de usuário com perfil `Gerente`.
-
-Header:
-
-```text
-Authorization: Bearer SEU_ACCESS_TOKEN
-```
+`POST /usuario` — exige o cookie `accessToken` de um usuário com perfil
+`Gerente`.
 
 Body:
 
@@ -91,8 +104,8 @@ minúsculas, e grava o respectivo UUID no usuário.
 
 ### Atualizar usuário
 
-`PATCH /usuario/{id}` — exige JWT. O usuário pode atualizar a própria conta e a
-gerente pode atualizar qualquer conta.
+`PATCH /usuario/{id}` — exige o cookie `accessToken`. O usuário pode atualizar a
+própria conta e a gerente pode atualizar qualquer conta.
 
 Dados pessoais disponíveis para o proprietário:
 
@@ -117,6 +130,12 @@ Somente a gerente pode enviar também:
 Todos os campos são opcionais, mas a requisição deve informar pelo menos um.
 Os nomes antigos `nome`, `telefone`, `senha`, `perfil` e `status` também são
 aceitos para compatibilidade.
+
+### Excluir usuário
+
+`DELETE /usuario/{id}` — exige o cookie `accessToken`. O usuário pode excluir a
+própria conta e a gerente pode excluir qualquer conta. A resposta de sucesso é
+`204 No Content`; usuários com registros vinculados retornam `409 Conflict`.
 
 ## Testes
 

@@ -4,7 +4,6 @@ import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -24,8 +23,7 @@ import valhalla.core.stock.app.modules.users.security.UserAuthorizationService;
 import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.InvalidUserUpdateException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
-import valhalla.core.stock.app.shared.error.UsuarioNaoAutorizadoException;
-import valhalla.core.stock.app.shared.utils.AuthenticatorUtils;
+import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
 
 import java.util.Locale;
 import java.util.UUID;
@@ -38,7 +36,6 @@ public class UserService {
     private final ProfileRepository profileRepository;
     private final PasswordEncoder passwordEncoder;
     private final UserAuthorizationService userAuthorizationService;
-    private final AuthenticatorUtils authenticatorUtils;
 
     @Transactional
     @PreAuthorize("hasRole('GERENTE')")
@@ -143,19 +140,23 @@ public class UserService {
         return UserMapper.toResponse(savedUser);
     }
 
-    public ResponseEntity<Void> deleteUsuarioId(UUID id) {
+    @Transactional
+    @PreAuthorize("@userAuthorizationService.canUpdate(#idUsuario, authentication)")
+    public void deletarUsuario(UUID idUsuario) {
+        UserEntity user = userRepository.findById(idUsuario)
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "Usuário não encontrado"
+                ));
 
-        if (!userRepository.existsById(id)) {
-            return ResponseEntity.status(404).build();
+        try {
+            userRepository.delete(user);
+            userRepository.flush();
+        } catch (DataIntegrityViolationException exception) {
+            throw new UserDeletionConflictException(
+                    "Usuário não pode ser excluído porque possui registros vinculados",
+                    exception
+            );
         }
-
-        UUID idUsuarioAutenticado = authenticatorUtils.getUserId();
-
-        if (!(idUsuarioAutenticado.equals(id)) || !(authenticatorUtils.hasRole("gerente"))) {
-            throw new UsuarioNaoAutorizadoException("Usuario não possui permissão para excluir esse usuario");
-        }
-
-        return ResponseEntity.ok().build();
     }
 
     private void validateUpdateRequest(UserUpdateDto updateDto) {

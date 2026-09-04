@@ -34,7 +34,7 @@ public class CustomUserDetailsService implements UserDetailsService {
                 .build();
     }
 
-    static String normalizeRole(String profileName) {
+    public static String normalizeRole(String profileName) {
         String withoutAccents = Normalizer.normalize(profileName, Normalizer.Form.NFD)
                 .replaceAll("\\p{M}", "");
 

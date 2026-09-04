@@ -1,5 +1,6 @@
 package valhalla.core.stock.app.modules.users.service;
 
+import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,6 +18,7 @@ import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.modules.users.security.UserAuthorizationService;
 import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
+import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -143,6 +145,58 @@ class UserServiceTest {
         assertThrows(
                 EmailAlreadyExistsException.class,
                 () -> userService.criarUsuario(request)
+        );
+    }
+
+    @Test
+    void deveExcluirUsuarioExistente() {
+        UserEntity user = UserEntity.builder()
+                .id(UUID.randomUUID())
+                .name("Usuário")
+                .email("usuario@exemplo.com")
+                .build();
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+
+        userService.deletarUsuario(user.getId());
+
+        verify(userRepository).delete(user);
+        verify(userRepository).flush();
+    }
+
+    @Test
+    void naoDeveExcluirUsuarioInexistente() {
+        UUID userId = UUID.randomUUID();
+        when(userRepository.findById(userId)).thenReturn(Optional.empty());
+
+        EntityNotFoundException exception = assertThrows(
+                EntityNotFoundException.class,
+                () -> userService.deletarUsuario(userId)
+        );
+
+        assertEquals("Usuário não encontrado", exception.getMessage());
+        verify(userRepository, never()).delete(any());
+    }
+
+    @Test
+    void deveInformarConflitoQuandoUsuarioPossuirVinculos() {
+        UserEntity user = UserEntity.builder()
+                .id(UUID.randomUUID())
+                .name("Usuário")
+                .email("usuario@exemplo.com")
+                .build();
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        doThrow(new DataIntegrityViolationException("registro vinculado"))
+                .when(userRepository)
+                .flush();
+
+        UserDeletionConflictException exception = assertThrows(
+                UserDeletionConflictException.class,
+                () -> userService.deletarUsuario(user.getId())
+        );
+
+        assertEquals(
+                "Usuário não pode ser excluído porque possui registros vinculados",
+                exception.getMessage()
         );
     }
 

@@ -9,7 +9,6 @@ import org.springframework.stereotype.Service;
 import valhalla.core.stock.app.modules.auth.config.JwtProperties;
 
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -34,8 +33,10 @@ public class JwtService {
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
                 .subject(authentication.getName())
+                .id(UUID.randomUUID().toString())
                 .claim("userId", userId.toString())
                 .claim("roles", roles)
+                .claim("purpose", "access")
                 .build();
 
         return encodeToken(claims);
@@ -43,13 +44,14 @@ public class JwtService {
 
     public String generateRefreshToken(Authentication authentication, UUID userId) {
         Instant issuedAt = Instant.now();
-        Instant expiresAt = issuedAt.plus(7, ChronoUnit.DAYS);
+        Instant expiresAt = issuedAt.plus(properties.refreshExpiration());
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
                 .subject(authentication.getName())
-                .claim("userID", userId.toString())
+                .id(UUID.randomUUID().toString())
+                .claim("userId", userId.toString())
                 .claim("purpose", "refresh")
                 .build();
 

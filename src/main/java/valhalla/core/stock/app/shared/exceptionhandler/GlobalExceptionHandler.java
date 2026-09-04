@@ -8,8 +8,10 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
+import valhalla.core.stock.app.shared.error.InvalidRefreshTokenException;
 import valhalla.core.stock.app.shared.error.InvalidUserUpdateException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
+import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -23,6 +25,17 @@ public class GlobalExceptionHandler {
         return buildResponse(
                 HttpStatus.UNAUTHORIZED,
                 "E-mail ou senha inválidos",
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(InvalidRefreshTokenException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidRefreshToken(
+            InvalidRefreshTokenException exception
+    ) {
+        return buildResponse(
+                HttpStatus.UNAUTHORIZED,
+                exception.getMessage(),
                 Map.of()
         );
     }
@@ -53,6 +66,13 @@ public class GlobalExceptionHandler {
             InvalidUserUpdateException exception
     ) {
         return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(UserDeletionConflictException.class)
+    public ResponseEntity<ApiErrorResponse> handleUserDeletionConflict(
+            UserDeletionConflictException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

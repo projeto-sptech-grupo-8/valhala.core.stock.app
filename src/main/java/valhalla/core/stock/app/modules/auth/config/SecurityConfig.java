@@ -1,9 +1,12 @@
 package valhalla.core.stock.app.modules.auth.config;
 
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.security.config.Customizer;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -11,7 +14,10 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -21,6 +27,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -53,7 +60,8 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
-            JwtAuthenticationConverter jwtAuthenticationConverter
+            JwtAuthenticationConverter jwtAuthenticationConverter,
+            JwtDecoder jwtDecoder
     ) throws Exception {
         http
                 .cors(Customizer.withDefaults())
@@ -62,12 +70,20 @@ public class SecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers(HttpMethod.POST, "/auth/login").permitAll()
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/auth/login",
+                                "/auth/refresh"
+                        ).permitAll()
                         .requestMatchers(HttpMethod.POST, "/usuario").hasRole("GERENTE")
                         .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
+                        .bearerTokenResolver(accessTokenCookieResolver())
+                        .jwt(jwt -> jwt
+                                .decoder(jwtDecoder)
+                                .jwtAuthenticationConverter(jwtAuthenticationConverter)
+                        )
                 );
 
         return http.build();
@@ -79,15 +95,14 @@ public class SecurityConfig {
     }
 
     @Bean
+    @Primary
     public JwtDecoder jwtDecoder(JwtProperties properties) {
-        NimbusJwtDecoder decoder = NimbusJwtDecoder
-                .withSecretKey(secretKey(properties))
-                .macAlgorithm(MacAlgorithm.HS256)
-                .build();
+        return jwtDecoder(properties, "access");
+    }
 
-        OAuth2TokenValidator<Jwt> validator = JwtValidators.createDefault();
-        decoder.setJwtValidator(validator);
-        return decoder;
+    @Bean("refreshTokenDecoder")
+    public JwtDecoder refreshTokenDecoder(JwtProperties properties) {
+        return jwtDecoder(properties, "refresh");
     }
 
     @Bean
@@ -99,8 +114,9 @@ public class SecurityConfig {
         configuration.setAllowedMethods(
                 List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
         );
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        configuration.setAllowedHeaders(List.of("Content-Type"));
         configuration.setExposedHeaders(List.of("Location"));
+        configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
@@ -118,6 +134,62 @@ public class SecurityConfig {
                 new JwtAuthenticationConverter();
         authenticationConverter.setJwtGrantedAuthoritiesConverter(authoritiesConverter);
         return authenticationConverter;
+    }
+
+    private BearerTokenResolver accessTokenCookieResolver() {
+        return request -> {
+            if (isAuthenticationEndpoint(request)) {
+                return null;
+            }
+
+            Cookie[] cookies = request.getCookies();
+            if (cookies == null) {
+                return null;
+            }
+
+            for (Cookie cookie : cookies) {
+                if ("accessToken".equals(cookie.getName())) {
+                    return cookie.getValue();
+                }
+            }
+
+            return null;
+        };
+    }
+
+    private boolean isAuthenticationEndpoint(HttpServletRequest request) {
+        return request.getServletPath().equals("/auth/login")
+                || request.getServletPath().equals("/auth/refresh");
+    }
+
+    private JwtDecoder jwtDecoder(JwtProperties properties, String purpose) {
+        NimbusJwtDecoder decoder = NimbusJwtDecoder
+                .withSecretKey(secretKey(properties))
+                .macAlgorithm(MacAlgorithm.HS256)
+                .build();
+
+        OAuth2TokenValidator<Jwt> validator =
+                new DelegatingOAuth2TokenValidator<>(
+                        JwtValidators.createDefault(),
+                        purposeValidator(purpose)
+                );
+        decoder.setJwtValidator(validator);
+        return decoder;
+    }
+
+    private OAuth2TokenValidator<Jwt> purposeValidator(String expectedPurpose) {
+        return token -> {
+            if (expectedPurpose.equals(token.getClaimAsString("purpose"))) {
+                return OAuth2TokenValidatorResult.success();
+            }
+
+            OAuth2Error error = new OAuth2Error(
+                    "invalid_token",
+                    "Token com finalidade inválida",
+                    null
+            );
+            return OAuth2TokenValidatorResult.failure(error);
+        };
     }
 
     private SecretKey secretKey(JwtProperties properties) {
