@@ -16,6 +16,7 @@ import valhalla.core.stock.app.modules.auth.dto.LoginRequestDto;
 import valhalla.core.stock.app.modules.auth.dto.TokenResponseDto;
 import valhalla.core.stock.app.modules.auth.service.AuthService;
 
+import java.time.Duration;
 import java.util.Map;
 
 @RestController
@@ -65,6 +66,17 @@ public class AuthController {
         );
     }
 
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(
+            @CookieValue(name = "refreshToken", required = false) String refreshToken,
+            @CookieValue(name = "accessToken", required = false) String accessToken,
+            HttpServletResponse response
+    ) {
+        authService.logout(refreshToken, accessToken);
+        clearAuthenticationCookies(response);
+        return ResponseEntity.noContent().build();
+    }
+
     private void addAuthenticationCookies(
             HttpServletResponse response,
             TokenResponseDto tokenResponse
@@ -82,13 +94,31 @@ public class AuthController {
                 .from("refreshToken", tokenResponse.refreshToken())
                 .httpOnly(true)
                 .secure(secureCookies)
-                .path("/auth/refresh")
+                .path("/auth")
                 .maxAge(jwtProperties.refreshExpiration())
                 .sameSite("Strict")
                 .build();
 
         response.addHeader(HttpHeaders.SET_COOKIE, accessCookie.toString());
         response.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+    }
+
+    private void clearAuthenticationCookies(HttpServletResponse response) {
+        ResponseCookie accessCookie = expiredCookie("accessToken", "/");
+        ResponseCookie refreshCookie = expiredCookie("refreshToken", "/auth");
+
+        response.addHeader(HttpHeaders.SET_COOKIE, accessCookie.toString());
+        response.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+    }
+
+    private ResponseCookie expiredCookie(String name, String path) {
+        return ResponseCookie.from(name, "")
+                .httpOnly(true)
+                .secure(secureCookies)
+                .path(path)
+                .maxAge(Duration.ZERO)
+                .sameSite("Strict")
+                .build();
     }
 
     private ResponseEntity<Map<String, String>> authenticationResponse(

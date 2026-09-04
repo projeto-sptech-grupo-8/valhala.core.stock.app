@@ -19,7 +19,12 @@ public class JwtService {
     private final JwtEncoder jwtEncoder;
     private final JwtProperties properties;
 
-    public String generateToken(Authentication authentication, UUID userId) {
+    public String generateToken(
+            Authentication authentication,
+            UUID userId,
+            UUID accessJti,
+            UUID sessionJti
+    ) {
         Instant issuedAt = Instant.now();
         Instant expiresAt = issuedAt.plus(properties.expiration());
 
@@ -33,8 +38,9 @@ public class JwtService {
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
                 .subject(authentication.getName())
-                .id(UUID.randomUUID().toString())
+                .id(accessJti.toString())
                 .claim("userId", userId.toString())
+                .claim("sessionJti", sessionJti.toString())
                 .claim("roles", roles)
                 .claim("purpose", "access")
                 .build();
@@ -42,20 +48,28 @@ public class JwtService {
         return encodeToken(claims);
     }
 
-    public String generateRefreshToken(Authentication authentication, UUID userId) {
+    public String generateRefreshToken(
+            Authentication authentication,
+            UUID userId,
+            UUID refreshJti,
+            Instant expiresAt
+    ) {
         Instant issuedAt = Instant.now();
-        Instant expiresAt = issuedAt.plus(properties.refreshExpiration());
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
                 .subject(authentication.getName())
-                .id(UUID.randomUUID().toString())
+                .id(refreshJti.toString())
                 .claim("userId", userId.toString())
                 .claim("purpose", "refresh")
                 .build();
 
         return encodeToken(claims);
+    }
+
+    public Instant refreshTokenExpiresAt() {
+        return Instant.now().plus(properties.refreshExpiration());
     }
 
     private String encodeToken(JwtClaimsSet claimsSet) {

@@ -9,10 +9,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.repository.ProfileRepository;
+import valhalla.core.stock.app.modules.auth.service.TokenStateService;
 import valhalla.core.stock.app.modules.users.dto.UserCreateRequestDto;
 import valhalla.core.stock.app.modules.users.dto.UserResponseDto;
 import valhalla.core.stock.app.modules.users.dto.UserUpdateDto;
@@ -26,6 +28,8 @@ import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
 
 import java.util.Locale;
+import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -36,6 +40,7 @@ public class UserService {
     private final ProfileRepository profileRepository;
     private final PasswordEncoder passwordEncoder;
     private final UserAuthorizationService userAuthorizationService;
+    private final TokenStateService tokenStateService;
 
     @Transactional
     @PreAuthorize("hasRole('GERENTE')")
@@ -71,6 +76,26 @@ public class UserService {
     }
 
     @Transactional
+    @PreAuthorize("hasRole('GERENTE')")
+    public List<UserResponseDto> listarUsuarios() {
+        return userRepository.findAll(Sort.by(Sort.Direction.ASC, "name"))
+                .stream()
+                .map(UserMapper::toResponse)
+                .toList();
+    }
+
+    @Transactional
+    @PreAuthorize("@userAuthorizationService.canUpdate(#idUsuario, authentication)")
+    public UserResponseDto buscarUsuario(UUID idUsuario) {
+        UserEntity user = userRepository.findById(idUsuario)
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "Usuário não encontrado"
+                ));
+
+        return UserMapper.toResponse(user);
+    }
+
+    @Transactional
     @PreAuthorize("@userAuthorizationService.canUpdate(#idUsuario, authentication)")
     public UserResponseDto atualizarUsuario(UUID idUsuario, UserUpdateDto updateDto) {
         UserEntity user = userRepository.findById(idUsuario)
@@ -81,6 +106,7 @@ public class UserService {
         Authentication authentication = SecurityContextHolder.getContext()
                 .getAuthentication();
         boolean manager = userAuthorizationService.isManager(authentication);
+        boolean authenticationChanged = false;
 
         if (!manager && (updateDto.profileName() != null || updateDto.active() != null)) {
             throw new AccessDeniedException(
@@ -112,6 +138,7 @@ public class UserService {
             String senhaCriptografada = passwordEncoder.encode(updateDto.password());
 
             user.setPasswordHash(senhaCriptografada);
+            authenticationChanged = true;
         }
 
         if (StringUtils.hasText(updateDto.profileName())) {
@@ -121,11 +148,16 @@ public class UserService {
                     .orElseThrow(() -> new ProfileNotFoundException(
                             "Perfil não encontrado: " + profileName
                     ));
-            user.setProfile(profile);
+            if (!Objects.equals(user.getProfile().getId(), profile.getId())) {
+                user.setProfile(profile);
+                authenticationChanged = true;
+            }
         }
 
-        if (updateDto.active() != null) {
+        if (updateDto.active() != null
+                && !Objects.equals(user.getActive(), updateDto.active())) {
             user.setActive(updateDto.active());
+            authenticationChanged = true;
         }
 
         UserEntity savedUser;
@@ -135,6 +167,10 @@ public class UserService {
             throw new EmailAlreadyExistsException(
                     "Email informado já está em uso por outro usuário"
             );
+        }
+
+        if (authenticationChanged) {
+            tokenStateService.revokeAll(savedUser.getId());
         }
 
         return UserMapper.toResponse(savedUser);
@@ -151,6 +187,7 @@ public class UserService {
         try {
             userRepository.delete(user);
             userRepository.flush();
+            tokenStateService.revokeAll(idUsuario);
         } catch (DataIntegrityViolationException exception) {
             throw new UserDeletionConflictException(
                     "Usuário não pode ser excluído porque possui registros vinculados",

@@ -11,6 +11,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.repository.ProfileRepository;
+import valhalla.core.stock.app.modules.auth.service.TokenStateService;
 import valhalla.core.stock.app.modules.users.dto.UserCreateRequestDto;
 import valhalla.core.stock.app.modules.users.dto.UserResponseDto;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
@@ -41,6 +42,9 @@ class UserServiceTest {
     @Mock
     private UserAuthorizationService userAuthorizationService;
 
+    @Mock
+    private TokenStateService tokenStateService;
+
     private UserService userService;
 
     @BeforeEach
@@ -49,7 +53,8 @@ class UserServiceTest {
                 userRepository,
                 profileRepository,
                 passwordEncoder,
-                userAuthorizationService
+                userAuthorizationService,
+                tokenStateService
         );
     }
 
@@ -161,6 +166,7 @@ class UserServiceTest {
 
         verify(userRepository).delete(user);
         verify(userRepository).flush();
+        verify(tokenStateService).revokeAll(user.getId());
     }
 
     @Test
@@ -198,6 +204,7 @@ class UserServiceTest {
                 "Usuário não pode ser excluído porque possui registros vinculados",
                 exception.getMessage()
         );
+        verifyNoInteractions(tokenStateService);
     }
 
     private UserCreateRequestDto requestValido() {

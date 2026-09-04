@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -75,7 +76,7 @@ class AuthenticationIntegrationTest {
                 .andExpect(cookie().path("accessToken", "/"))
                 .andExpect(cookie().exists("refreshToken"))
                 .andExpect(cookie().httpOnly("refreshToken", true))
-                .andExpect(cookie().path("refreshToken", "/auth/refresh"))
+                .andExpect(cookie().path("refreshToken", "/auth"))
                 .andExpect(jsonPath("$.message")
                         .value("Autenticação realizada com sucesso"))
                 .andExpect(jsonPath("$.user").value(gerenteUser.getName()))
@@ -89,6 +90,7 @@ class AuthenticationIntegrationTest {
                 "gerente@meraki.com",
                 "senha-gerente"
         );
+        Cookie oldAccessToken = requireCookie(loginResult, "accessToken");
         Cookie refreshToken = requireCookie(loginResult, "refreshToken");
 
         MvcResult refreshResult = mockMvc.perform(post("/auth/refresh")
@@ -106,7 +108,24 @@ class AuthenticationIntegrationTest {
                 .andReturn();
 
         Cookie newRefreshToken = requireCookie(refreshResult, "refreshToken");
+        Cookie newAccessToken = requireCookie(refreshResult, "accessToken");
         assertNotEquals(refreshToken.getValue(), newRefreshToken.getValue());
+
+        mockMvc.perform(post("/usuario")
+                        .cookie(oldAccessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createUserJson("access-antigo@meraki.com")))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/auth/refresh").cookie(refreshToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Refresh token inválido"));
+
+        mockMvc.perform(post("/usuario")
+                        .cookie(newAccessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createUserJson("access-novo@meraki.com")))
+                .andExpect(status().isCreated());
     }
 
     @Test
@@ -115,6 +134,85 @@ class AuthenticationIntegrationTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message")
                         .value("Refresh token não informado"));
+    }
+
+    @Test
+    void deveRevogarSessaoELimparCookiesNoLogout() throws Exception {
+        MvcResult loginResult = performLogin(
+                "gerente@meraki.com",
+                "senha-gerente"
+        );
+        Cookie accessToken = requireCookie(loginResult, "accessToken");
+        Cookie refreshToken = requireCookie(loginResult, "refreshToken");
+
+        mockMvc.perform(post("/auth/logout")
+                        .cookie(accessToken, refreshToken))
+                .andExpect(status().isNoContent())
+                .andExpect(cookie().value("accessToken", ""))
+                .andExpect(cookie().maxAge("accessToken", 0))
+                .andExpect(cookie().value("refreshToken", ""))
+                .andExpect(cookie().maxAge("refreshToken", 0));
+
+        mockMvc.perform(post("/usuario")
+                        .cookie(accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createUserJson("apos-logout@meraki.com")))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/auth/refresh").cookie(refreshToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Refresh token inválido"));
+    }
+
+    @Test
+    void logoutDeveSerIdempotenteSemCookies() throws Exception {
+        mockMvc.perform(post("/auth/logout"))
+                .andExpect(status().isNoContent())
+                .andExpect(cookie().maxAge("accessToken", 0))
+                .andExpect(cookie().maxAge("refreshToken", 0));
+    }
+
+    @Test
+    void logoutDeveRevogarSessaoMesmoSemRefreshCookie() throws Exception {
+        MvcResult loginResult = performLogin(
+                "gerente@meraki.com",
+                "senha-gerente"
+        );
+        Cookie accessToken = requireCookie(loginResult, "accessToken");
+        Cookie refreshToken = requireCookie(loginResult, "refreshToken");
+
+        mockMvc.perform(post("/auth/logout").cookie(accessToken))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(post("/auth/refresh").cookie(refreshToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Refresh token inválido"));
+    }
+
+    @Test
+    void novoLoginDeveInvalidarSessaoAnterior() throws Exception {
+        MvcResult firstLogin = performLogin(
+                "gerente@meraki.com",
+                "senha-gerente"
+        );
+        MvcResult secondLogin = performLogin(
+                "gerente@meraki.com",
+                "senha-gerente"
+        );
+        Cookie firstAccess = requireCookie(firstLogin, "accessToken");
+        Cookie secondAccess = requireCookie(secondLogin, "accessToken");
+
+        mockMvc.perform(post("/usuario")
+                        .cookie(firstAccess)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createUserJson("primeira-sessao@meraki.com")))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/usuario")
+                        .cookie(secondAccess)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createUserJson("segunda-sessao@meraki.com")))
+                .andExpect(status().isCreated());
     }
 
     @Test
@@ -146,7 +244,11 @@ class AuthenticationIntegrationTest {
                         .cookie(invalidAccessCookie)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createUserJson("token-invalido@meraki.com")))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.message").value("Token inválido ou expirado"))
+                .andExpect(jsonPath("$.fieldErrors").isEmpty());
     }
 
     @Test
@@ -181,7 +283,11 @@ class AuthenticationIntegrationTest {
         mockMvc.perform(post("/usuario")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createUserJson("sem-token@meraki.com")))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.message").value("Token inválido ou expirado"))
+                .andExpect(jsonPath("$.fieldErrors").isEmpty());
     }
 
     @Test
@@ -209,7 +315,33 @@ class AuthenticationIntegrationTest {
                         .cookie(accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createUserJson("novo@meraki.com")))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.message").value("Acesso negado"))
+                .andExpect(jsonPath("$.fieldErrors").isEmpty());
+    }
+
+    @Test
+    void deveRetornarMensagemPadronizadaParaSenhaCurtaNoCadastro() throws Exception {
+        Cookie accessToken = login("gerente@meraki.com", "senha-gerente");
+        String request = """
+                {
+                  "name": "Novo Usuário",
+                  "email": "senha-curta@meraki.com",
+                  "password": "curta",
+                  "profileName": "Atendente"
+                }
+                """;
+
+        mockMvc.perform(post("/usuario")
+                        .cookie(accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Dados de entrada inválidos"))
+                .andExpect(jsonPath("$.fieldErrors.password")
+                        .value("A senha deve ter entre 8 e 72 caracteres"));
     }
 
     @Test
@@ -260,18 +392,89 @@ class AuthenticationIntegrationTest {
     }
 
     @Test
-    void atendenteDeveAtualizarAPropriaConta() throws Exception {
+    void gerenteDeveListarUsuariosOrdenadosPorNome() throws Exception {
+        Cookie accessToken = login("gerente@meraki.com", "senha-gerente");
+
+        mockMvc.perform(get("/usuario").cookie(accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].id")
+                        .value(atendenteUser.getId().toString()))
+                .andExpect(jsonPath("$[0].email")
+                        .value("atendente@meraki.com"))
+                .andExpect(jsonPath("$[1].id")
+                        .value(gerenteUser.getId().toString()))
+                .andExpect(jsonPath("$[1].email")
+                        .value("gerente@meraki.com"));
+    }
+
+    @Test
+    void gerenteDeveBuscarUsuarioPorId() throws Exception {
+        Cookie accessToken = login("gerente@meraki.com", "senha-gerente");
+
+        mockMvc.perform(get("/usuario/{id}", atendenteUser.getId())
+                        .cookie(accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id")
+                        .value(atendenteUser.getId().toString()))
+                .andExpect(jsonPath("$.email").value("atendente@meraki.com"))
+                .andExpect(jsonPath("$.profileName").value("Atendente"));
+    }
+
+    @Test
+    void atendenteNaoDeveListarNemConsultarUsuariosPelaRotaAdministrativa()
+            throws Exception {
         Cookie accessToken = login("atendente@meraki.com", "senha-atendente");
+
+        mockMvc.perform(get("/usuario").cookie(accessToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Acesso negado"));
+
+        mockMvc.perform(get("/usuario/{id}", atendenteUser.getId())
+                        .cookie(accessToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Acesso negado"));
+    }
+
+    @Test
+    void gerenteDeveReceberNotFoundAoConsultarUsuarioInexistente()
+            throws Exception {
+        Cookie accessToken = login("gerente@meraki.com", "senha-gerente");
+
+        mockMvc.perform(get("/usuario/{id}", UUID.randomUUID())
+                        .cookie(accessToken))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Usuário não encontrado"));
+    }
+
+    @Test
+    void deveRetornarUsuarioAtualPeloToken() throws Exception {
+        Cookie accessToken = login("atendente@meraki.com", "senha-atendente");
+
+        mockMvc.perform(get("/usuario/me").cookie(accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(atendenteUser.getId().toString()))
+                .andExpect(jsonPath("$.email").value("atendente@meraki.com"))
+                .andExpect(jsonPath("$.profileName").value("Atendente"));
+    }
+
+    @Test
+    void atendenteDeveAtualizarAPropriaConta() throws Exception {
+        MvcResult loginResult = performLogin(
+                "atendente@meraki.com",
+                "senha-atendente"
+        );
+        Cookie accessToken = requireCookie(loginResult, "accessToken");
+        Cookie refreshToken = requireCookie(loginResult, "refreshToken");
         String request = """
                 {
                   "name": "Atendente Atualizado",
                   "email": "atendente.novo@meraki.com",
-                  "phone": "11999999999",
-                  "password": "nova-senha-atendente"
+                  "phone": "11999999999"
                 }
                 """;
 
-        mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
+        mockMvc.perform(patch("/usuario/me")
                         .cookie(accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
@@ -282,12 +485,45 @@ class AuthenticationIntegrationTest {
                 .andExpect(jsonPath("$.updatedAt").isNotEmpty());
 
         // O token continua identificando o proprietário pelo userId mesmo após trocar o e-mail.
-        mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
+        mockMvc.perform(patch("/usuario/me")
                         .cookie(accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"phone\":\"11888888888\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.phone").value("11888888888"));
+
+        MvcResult secondLogin = performLogin(
+                "atendente.novo@meraki.com",
+                "senha-atendente"
+        );
+        Cookie secondAccessToken = requireCookie(secondLogin, "accessToken");
+        Cookie secondRefreshToken = requireCookie(secondLogin, "refreshToken");
+
+        mockMvc.perform(patch("/usuario/me")
+                        .cookie(secondAccessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"nova-senha-atendente\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(patch("/usuario/me")
+                        .cookie(accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"11777777777\"}"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/auth/refresh").cookie(refreshToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Refresh token inválido"));
+
+        mockMvc.perform(patch("/usuario/me")
+                        .cookie(secondAccessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"11666666666\"}"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/auth/refresh").cookie(secondRefreshToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Refresh token inválido"));
 
         login("atendente.novo@meraki.com", "nova-senha-atendente");
     }
@@ -307,11 +543,15 @@ class AuthenticationIntegrationTest {
     void atendenteNaoDeveAlterarOProprioPerfilOuStatus() throws Exception {
         Cookie accessToken = login("atendente@meraki.com", "senha-atendente");
 
-        mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
+        mockMvc.perform(patch("/usuario/me")
                         .cookie(accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"profileName\":\"Gerente\"}"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.message").value("Acesso negado"))
+                .andExpect(jsonPath("$.fieldErrors").isEmpty());
     }
 
     @Test
@@ -331,6 +571,68 @@ class AuthenticationIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.profileName").value("Gerente"))
                 .andExpect(jsonPath("$.active").value(false));
+    }
+
+    @Test
+    void deveInvalidarTokensQuandoUsuarioForDesativado() throws Exception {
+        MvcResult atendenteLogin = performLogin(
+                "atendente@meraki.com",
+                "senha-atendente"
+        );
+        Cookie atendenteAccess = requireCookie(atendenteLogin, "accessToken");
+        Cookie atendenteRefresh = requireCookie(atendenteLogin, "refreshToken");
+        Cookie gerenteAccess = login("gerente@meraki.com", "senha-gerente");
+
+        mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
+                        .cookie(gerenteAccess)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"active\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(false));
+
+        mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
+                        .cookie(atendenteAccess)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"11911111111\"}"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/auth/refresh").cookie(atendenteRefresh))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Refresh token inválido"));
+    }
+
+    @Test
+    void deveInvalidarTokensQuandoUsuarioPerderPermissao() throws Exception {
+        MvcResult gerenteLogin = performLogin(
+                "gerente@meraki.com",
+                "senha-gerente"
+        );
+        Cookie oldAccessToken = requireCookie(gerenteLogin, "accessToken");
+        Cookie oldRefreshToken = requireCookie(gerenteLogin, "refreshToken");
+
+        mockMvc.perform(patch("/usuario/{id}", gerenteUser.getId())
+                        .cookie(oldAccessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"profileName\":\"Atendente\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.profileName").value("Atendente"));
+
+        mockMvc.perform(post("/usuario")
+                        .cookie(oldAccessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createUserJson("permissao-antiga@meraki.com")))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/auth/refresh").cookie(oldRefreshToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Refresh token inválido"));
+
+        Cookie newAccessToken = login("gerente@meraki.com", "senha-gerente");
+        mockMvc.perform(post("/usuario")
+                        .cookie(newAccessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createUserJson("sem-permissao@meraki.com")))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -358,13 +660,25 @@ class AuthenticationIntegrationTest {
 
     @Test
     void atendenteDeveExcluirPropriaConta() throws Exception {
-        Cookie accessToken = login("atendente@meraki.com", "senha-atendente");
+        MvcResult loginResult = performLogin(
+                "atendente@meraki.com",
+                "senha-atendente"
+        );
+        Cookie accessToken = requireCookie(loginResult, "accessToken");
+        Cookie refreshToken = requireCookie(loginResult, "refreshToken");
 
-        mockMvc.perform(delete("/usuario/{id}", atendenteUser.getId())
+        mockMvc.perform(delete("/usuario/me")
                         .cookie(accessToken))
                 .andExpect(status().isNoContent());
 
         assertFalse(userRepository.existsById(atendenteUser.getId()));
+
+        mockMvc.perform(get("/usuario/me").cookie(accessToken))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/auth/refresh").cookie(refreshToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Refresh token inválido"));
     }
 
     @Test

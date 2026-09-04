@@ -2,6 +2,7 @@ package valhalla.core.stock.app.modules.auth.config;
 
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -9,7 +10,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.security.config.Customizer;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -34,11 +39,18 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import tools.jackson.databind.ObjectMapper;
+import valhalla.core.stock.app.modules.auth.security.AccessTokenStateValidator;
+import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 
 @Configuration
 @EnableMethodSecurity
@@ -61,8 +73,24 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             JwtAuthenticationConverter jwtAuthenticationConverter,
-            JwtDecoder jwtDecoder
+            JwtDecoder jwtDecoder,
+            ObjectMapper objectMapper
     ) throws Exception {
+        AuthenticationEntryPoint authenticationEntryPoint = (request, response, exception) ->
+                writeSecurityError(
+                        response,
+                        objectMapper,
+                        HttpStatus.UNAUTHORIZED,
+                        "Token inválido ou expirado"
+                );
+        AccessDeniedHandler accessDeniedHandler = (request, response, exception) ->
+                writeSecurityError(
+                        response,
+                        objectMapper,
+                        HttpStatus.FORBIDDEN,
+                        "Acesso negado"
+                );
+
         http
                 .cors(Customizer.withDefaults())
                 .csrf(csrf -> csrf.disable())
@@ -73,12 +101,19 @@ public class SecurityConfig {
                         .requestMatchers(
                                 HttpMethod.POST,
                                 "/auth/login",
-                                "/auth/refresh"
+                                "/auth/refresh",
+                                "/auth/logout"
                         ).permitAll()
                         .requestMatchers(HttpMethod.POST, "/usuario").hasRole("GERENTE")
                         .anyRequest().authenticated()
                 )
+                .exceptionHandling(exceptionHandling -> exceptionHandling
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler(accessDeniedHandler)
+                )
                 .oauth2ResourceServer(oauth2 -> oauth2
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler(accessDeniedHandler)
                         .bearerTokenResolver(accessTokenCookieResolver())
                         .jwt(jwt -> jwt
                                 .decoder(jwtDecoder)
@@ -89,6 +124,26 @@ public class SecurityConfig {
         return http.build();
     }
 
+    private void writeSecurityError(
+            HttpServletResponse response,
+            ObjectMapper objectMapper,
+            HttpStatus status,
+            String message
+    ) throws IOException {
+        response.setStatus(status.value());
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        objectMapper.writeValue(
+                response.getOutputStream(),
+                new ApiErrorResponse(
+                        LocalDateTime.now(),
+                        status.value(),
+                        message,
+                        Map.of()
+                )
+        );
+    }
+
     @Bean
     public JwtEncoder jwtEncoder(JwtProperties properties) {
         return NimbusJwtEncoder.withSecretKey(secretKey(properties)).build();
@@ -96,13 +151,16 @@ public class SecurityConfig {
 
     @Bean
     @Primary
-    public JwtDecoder jwtDecoder(JwtProperties properties) {
-        return jwtDecoder(properties, "access");
+    public JwtDecoder jwtDecoder(
+            JwtProperties properties,
+            AccessTokenStateValidator accessTokenStateValidator
+    ) {
+        return jwtDecoder(properties, "access", accessTokenStateValidator);
     }
 
     @Bean("refreshTokenDecoder")
     public JwtDecoder refreshTokenDecoder(JwtProperties properties) {
-        return jwtDecoder(properties, "refresh");
+        return jwtDecoder(properties, "refresh", null);
     }
 
     @Bean
@@ -159,19 +217,29 @@ public class SecurityConfig {
 
     private boolean isAuthenticationEndpoint(HttpServletRequest request) {
         return request.getServletPath().equals("/auth/login")
-                || request.getServletPath().equals("/auth/refresh");
+                || request.getServletPath().equals("/auth/refresh")
+                || request.getServletPath().equals("/auth/logout");
     }
 
-    private JwtDecoder jwtDecoder(JwtProperties properties, String purpose) {
+    private JwtDecoder jwtDecoder(
+            JwtProperties properties,
+            String purpose,
+            OAuth2TokenValidator<Jwt> stateValidator
+    ) {
         NimbusJwtDecoder decoder = NimbusJwtDecoder
                 .withSecretKey(secretKey(properties))
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
 
-        OAuth2TokenValidator<Jwt> validator =
-                new DelegatingOAuth2TokenValidator<>(
+        OAuth2TokenValidator<Jwt> validator = stateValidator == null
+                ? new DelegatingOAuth2TokenValidator<>(
                         JwtValidators.createDefault(),
                         purposeValidator(purpose)
+                )
+                : new DelegatingOAuth2TokenValidator<>(
+                        JwtValidators.createDefault(),
+                        purposeValidator(purpose),
+                        stateValidator
                 );
         decoder.setJwtValidator(validator);
         return decoder;
