@@ -83,6 +83,8 @@ public class SecurityConfig {
                         HttpStatus.UNAUTHORIZED,
                         "Token inválido ou expirado"
                 );
+
+        System.out.println();
         AccessDeniedHandler accessDeniedHandler = (request, response, exception) ->
                 writeSecurityError(
                         response,

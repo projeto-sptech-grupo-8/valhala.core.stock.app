@@ -27,10 +27,7 @@ import valhalla.core.stock.app.shared.error.InvalidUserUpdateException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
 
-import java.util.Locale;
-import java.util.List;
-import java.util.Objects;
-import java.util.UUID;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -113,6 +110,10 @@ public class UserService {
                     "Apenas gerente pode alterar perfil ou status"
             );
         }
+
+        List<UserEntity> lista = new ArrayList<>();
+
+            
 
         if (StringUtils.hasText(updateDto.name())) {
             user.setName(updateDto.name().trim());
