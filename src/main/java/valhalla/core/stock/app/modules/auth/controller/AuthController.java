@@ -1,5 +1,9 @@
 package valhalla.core.stock.app.modules.auth.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +25,10 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/auth")
+@Tag(
+        name = "Autenticação",
+        description = "Endpoints responsáveis pela autenticação e gerenciamento da sessão do usuário."
+)
 public class AuthController {
 
     private final AuthService authService;
@@ -38,6 +46,24 @@ public class AuthController {
     }
 
     @PostMapping("/login")
+    @Operation(
+            summary = "Realizar login",
+            description = "Autentica o usuário e cria os cookies de acesso e renovação da sessão."
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Autenticação realizada com sucesso."
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "Usuário ou senha inválidos."
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Dados de entrada inválidos."
+            )
+    })
     public ResponseEntity<Map<String, String>> login(
             @Valid @RequestBody LoginRequestDto request,
             HttpServletResponse response
@@ -53,10 +79,25 @@ public class AuthController {
     }
 
     @PostMapping("/refresh")
+    @Operation(
+            summary = "Renovar autenticação",
+            description = "Utiliza o refresh token armazenado no cookie para gerar novos tokens."
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Autenticação renovada com sucesso."
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "Refresh token ausente, inválido ou expirado."
+            )
+    })
     public ResponseEntity<Map<String, String>> refresh(
             @CookieValue(name = "refreshToken", required = false) String refreshToken,
             HttpServletResponse response
     ) {
+
         TokenResponseDto tokenResponseDto = authService.refresh(refreshToken);
         addAuthenticationCookies(response, tokenResponseDto);
 
@@ -67,6 +108,20 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
+    @Operation(
+            summary = "Realizar logout",
+            description = "Invalida os tokens atuais e remove os cookies de autenticação."
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "204",
+                    description = "Logout realizado com sucesso."
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "Token inválido ou expirado."
+            )
+    })
     public ResponseEntity<Void> logout(
             @CookieValue(name = "refreshToken", required = false) String refreshToken,
             @CookieValue(name = "accessToken", required = false) String accessToken,
@@ -74,6 +129,7 @@ public class AuthController {
     ) {
         authService.logout(refreshToken, accessToken);
         clearAuthenticationCookies(response);
+
         return ResponseEntity.noContent().build();
     }
 
