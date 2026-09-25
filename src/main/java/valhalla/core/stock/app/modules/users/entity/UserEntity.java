@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.entity.FuncionalidadeEntity;
+import valhalla.core.stock.app.modules.accesscontrol.entity.UserFunctionalityOverrideEntity;
 import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
 
 import java.time.LocalDateTime;
@@ -45,14 +46,10 @@ public class UserEntity {
     @JoinColumn(name = "perfil_id", nullable = false)
     private ProfileEntity profile;
 
-    @ManyToMany(fetch = FetchType.EAGER)
-    @JoinTable(
-            name = "usuario_funcionalidade",
-            joinColumns = @JoinColumn(name = "usuario_id"),
-            inverseJoinColumns = @JoinColumn(name = "funcionalidade_id")
-    )
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL,
+            orphanRemoval = true, fetch = FetchType.EAGER)
     @Builder.Default
-    private Set<FuncionalidadeEntity> directFunctionalities = new HashSet<>();
+    private Set<UserFunctionalityOverrideEntity> functionalityOverrides = new HashSet<>();
 
     @Column(name = "status", nullable = false, length = 20)
     @Enumerated(EnumType.STRING)

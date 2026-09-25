@@ -23,6 +23,7 @@ import valhalla.core.stock.app.modules.users.entity.UserStatus;
 import valhalla.core.stock.app.modules.users.mapper.UserMapper;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.modules.users.security.UserAuthorizationService;
+import valhalla.core.stock.app.modules.accesscontrol.service.PermissionManagementService;
 import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.InvalidUserUpdateException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
@@ -39,9 +40,10 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final UserAuthorizationService userAuthorizationService;
     private final TokenStateService tokenStateService;
+    private final PermissionManagementService permissionManagementService;
 
     @Transactional
-    @PreAuthorize("@permissionAuthorizationService.canManageUsers(authentication)")
+    @PreAuthorize("@permissionAuthorizationService.hasPermission('USUARIOS_CRIAR', authentication)")
     public UserResponseDto criarUsuario(UserCreateRequestDto dtoRequest) {
         String emailNormalizado = dtoRequest.email()
                 .trim()
@@ -75,7 +77,7 @@ public class UserService {
     }
 
     @Transactional
-    @PreAuthorize("@permissionAuthorizationService.canManageUsers(authentication)")
+    @PreAuthorize("@permissionAuthorizationService.hasPermission('USUARIOS_VISUALIZAR', authentication)")
     public List<UserResponseDto> listarUsuarios() {
         return userRepository.findAllByEstablishment_Id(
                         authenticatedEstablishmentId(), Sort.by(Sort.Direction.ASC, "name"))
@@ -85,7 +87,7 @@ public class UserService {
     }
 
     @Transactional
-    @PreAuthorize("@userAuthorizationService.canUpdate(#idUsuario, authentication)")
+    @PreAuthorize("@userAuthorizationService.canView(#idUsuario, authentication)")
     public UserResponseDto buscarUsuario(UUID idUsuario) {
         UserEntity user = userRepository.findById(idUsuario)
                 .orElseThrow(() -> new EntityNotFoundException(
@@ -105,10 +107,11 @@ public class UserService {
 
         Authentication authentication = SecurityContextHolder.getContext()
                 .getAuthentication();
-        boolean manager = userAuthorizationService.isManager(authentication);
+        boolean canEditUsers = userAuthorizationService
+                .hasPermission(authentication, "USUARIOS_EDITAR");
         boolean authenticationChanged = false;
 
-        if (!manager && (updateDto.profileName() != null || updateDto.active() != null)) {
+        if (!canEditUsers && (updateDto.profileName() != null || updateDto.active() != null)) {
             throw new AccessDeniedException(
                     "Apenas gerente pode alterar perfil ou status"
             );
@@ -164,6 +167,10 @@ public class UserService {
             authenticationChanged = true;
         }
 
+        if (authenticationChanged) {
+            permissionManagementService.ensureUserChangeKeepsAdministrator(user);
+        }
+
         UserEntity savedUser;
         try {
             savedUser = userRepository.saveAndFlush(user);
@@ -181,7 +188,7 @@ public class UserService {
     }
 
     @Transactional
-    @PreAuthorize("@userAuthorizationService.canUpdate(#idUsuario, authentication)")
+    @PreAuthorize("@userAuthorizationService.canDelete(#idUsuario, authentication)")
     public void deletarUsuario(UUID idUsuario) {
         UserEntity user = userRepository.findById(idUsuario)
                 .orElseThrow(() -> new EntityNotFoundException(
@@ -189,6 +196,7 @@ public class UserService {
                 ));
 
         try {
+            permissionManagementService.ensureUserCanBeDeactivatedOrDeleted(user);
             tokenStateService.revokeAll(idUsuario);
             userRepository.delete(user);
             userRepository.flush();

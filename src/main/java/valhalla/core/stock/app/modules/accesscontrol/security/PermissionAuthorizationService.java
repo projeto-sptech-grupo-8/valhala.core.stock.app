@@ -14,6 +14,6 @@ public class PermissionAuthorizationService {
     }
 
     public boolean canManageUsers(Authentication authentication) {
-        return hasPermission("GERENCIAR_USUARIOS", authentication);
+        return hasPermission("USUARIOS_CRIAR", authentication);
     }
 }

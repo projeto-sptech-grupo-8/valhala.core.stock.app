@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.Set;
 
 public record UserResponseDto(
 
@@ -62,6 +63,8 @@ public record UserResponseDto(
                 example = "2026-09-20T14:15:00"
         )
         LocalDateTime createdAt
+
+        , Set<String> permissions
 
 ) {
 }

@@ -9,6 +9,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.stereotype.Service;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
+import valhalla.core.stock.app.modules.accesscontrol.security.PermissionResolver;
 
 import java.text.Normalizer;
 import java.time.LocalDateTime;
@@ -41,10 +42,7 @@ public class CustomUserDetailsService implements UserDetailsService {
     public static Collection<SimpleGrantedAuthority> authoritiesFor(UserEntity user) {
         LinkedHashSet<String> authorities = new LinkedHashSet<>();
         authorities.add("ROLE_" + normalizeRole(user.getProfile().getName()));
-        user.getProfile().getFunctionalities().forEach(functionality ->
-                authorities.add(functionality.getCode()));
-        user.getDirectFunctionalities().forEach(functionality ->
-                authorities.add(functionality.getCode()));
+        authorities.addAll(PermissionResolver.effectiveCodes(user));
         return authorities.stream().map(SimpleGrantedAuthority::new).toList();
     }
 

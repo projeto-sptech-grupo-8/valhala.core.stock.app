@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -25,6 +26,7 @@ import java.util.UUID;
         name = "Usuários",
         description = "Operações de gerenciamento de usuários."
 )
+@SecurityRequirement(name = "accessTokenCookie")
 public class UserController {
 
     private final UserService userService;
@@ -36,7 +38,7 @@ public class UserController {
     @PostMapping
     @Operation(
             summary = "Criar usuário",
-            description = "Cria um novo usuário. Operação permitida para usuários com perfil GERENTE."
+            description = "Cria usuário no estabelecimento da sessão. Requer USUARIOS_CRIAR."
     )
     @ApiResponses({
             @ApiResponse(
@@ -62,10 +64,10 @@ public class UserController {
     }
 
     @GetMapping
-    @PreAuthorize("hasRole('GERENTE')")
+    @PreAuthorize("@permissionAuthorizationService.hasPermission('USUARIOS_VISUALIZAR', authentication)")
     @Operation(
             summary = "Listar usuários",
-            description = "Retorna todos os usuários cadastrados. Requer perfil GERENTE."
+            description = "Retorna usuários do estabelecimento da sessão. Requer USUARIOS_VISUALIZAR."
     )
     @ApiResponses({
             @ApiResponse(
@@ -82,10 +84,10 @@ public class UserController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasRole('GERENTE')")
+    @PreAuthorize("@userAuthorizationService.canView(#idUsuario, authentication)")
     @Operation(
             summary = "Buscar usuário por ID",
-            description = "Busca um usuário específico pelo seu UUID. Requer perfil GERENTE."
+            description = "Busca o próprio usuário ou outro usuário quando houver USUARIOS_VISUALIZAR."
     )
     @ApiResponses({
             @ApiResponse(
@@ -108,10 +110,10 @@ public class UserController {
     }
 
     @PatchMapping("/{id}")
-    @PreAuthorize("hasRole('GERENTE')")
+    @PreAuthorize("@userAuthorizationService.canUpdate(#idUsuario, authentication)")
     @Operation(
             summary = "Atualizar usuário por ID",
-            description = "Atualiza os dados de um usuário específico. Requer perfil GERENTE."
+            description = "Atualiza o próprio usuário ou outro usuário com USUARIOS_EDITAR."
     )
     @ApiResponses({
             @ApiResponse(
@@ -221,10 +223,10 @@ public class UserController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('GERENTE')")
+    @PreAuthorize("@userAuthorizationService.canDelete(#idUsuario, authentication)")
     @Operation(
             summary = "Excluir usuário por ID",
-            description = "Exclui um usuário específico. Requer perfil GERENTE."
+            description = "Exclui o próprio usuário ou outro usuário com USUARIOS_EXCLUIR."
     )
     @ApiResponses({
             @ApiResponse(

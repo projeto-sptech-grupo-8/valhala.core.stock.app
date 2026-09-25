@@ -13,6 +13,8 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.entity.FuncionalidadeEntity;
+import valhalla.core.stock.app.modules.accesscontrol.entity.PermissionEffect;
+import valhalla.core.stock.app.modules.accesscontrol.entity.UserFunctionalityOverrideEntity;
 import valhalla.core.stock.app.modules.accesscontrol.repository.ProfileRepository;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.entity.UserStatus;
@@ -346,8 +348,8 @@ class AuthenticationIntegrationTest {
     @Test
     void permissaoDoPerfilDeveAutorizarCadastroDeUsuario() throws Exception {
         FuncionalidadeEntity functionality = entityManager.merge(
-                FuncionalidadeEntity.builder().code("GERENCIAR_USUARIOS")
-                        .name("Gerenciar usuários").build());
+                FuncionalidadeEntity.builder().code("USUARIOS_CRIAR")
+                        .name("Criar usuários").build());
         atendenteProfile.getFunctionalities().add(functionality);
         profileRepository.saveAndFlush(atendenteProfile);
         Cookie accessToken = login("atendente@meraki.com", "senha-atendente");
@@ -361,9 +363,11 @@ class AuthenticationIntegrationTest {
     @Test
     void permissaoDiretaDoUsuarioDeveAutorizarCadastroDeUsuario() throws Exception {
         FuncionalidadeEntity functionality = entityManager.merge(
-                FuncionalidadeEntity.builder().code("GERENCIAR_USUARIOS")
-                        .name("Gerenciar usuários").build());
-        atendenteUser.getDirectFunctionalities().add(functionality);
+                FuncionalidadeEntity.builder().code("USUARIOS_CRIAR")
+                        .name("Criar usuários").build());
+        atendenteUser.getFunctionalityOverrides().add(
+                UserFunctionalityOverrideEntity.builder().user(atendenteUser)
+                        .functionality(functionality).effect(PermissionEffect.GRANT).build());
         userRepository.saveAndFlush(atendenteUser);
         Cookie accessToken = login("atendente@meraki.com", "senha-atendente");
 
@@ -491,7 +495,7 @@ class AuthenticationIntegrationTest {
     }
 
     @Test
-    void atendenteNaoDeveListarNemConsultarUsuariosPelaRotaAdministrativa()
+    void atendenteNaoDeveListarUsuariosMasPodeConsultarPropriaConta()
             throws Exception {
         Cookie accessToken = login("atendente@meraki.com", "senha-atendente");
 
@@ -501,8 +505,8 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(get("/usuario/{id}", atendenteUser.getId())
                         .cookie(accessToken))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.message").value("Acesso negado"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(atendenteUser.getId().toString()));
     }
 
     @Test
@@ -671,7 +675,7 @@ class AuthenticationIntegrationTest {
     }
 
     @Test
-    void deveInvalidarTokensQuandoUsuarioPerderPermissao() throws Exception {
+    void naoDevePermitirQueUltimoAdministradorPercaPermissaoDeCriarUsuarios() throws Exception {
         MvcResult gerenteLogin = performLogin(
                 "gerente@meraki.com",
                 "senha-gerente"
@@ -681,27 +685,11 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(patch("/usuario/{id}", gerenteUser.getId())
                         .cookie(oldAccessToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"profileName\":\"Atendente\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.profileName").value("Atendente"));
-
-        mockMvc.perform(post("/usuario")
-                        .cookie(oldAccessToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(createUserJson("permissao-antiga@meraki.com")))
-                .andExpect(status().isUnauthorized());
-
-        mockMvc.perform(post("/auth/refresh").cookie(oldRefreshToken))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.message").value("Refresh token inválido"));
-
-        Cookie newAccessToken = login("gerente@meraki.com", "senha-gerente");
-        mockMvc.perform(post("/usuario")
-                        .cookie(newAccessToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(createUserJson("sem-permissao@meraki.com")))
-                .andExpect(status().isForbidden());
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"profileName\":\"Atendente\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers
+                        .containsString("USUARIOS_CRIAR")));
     }
 
     @Test

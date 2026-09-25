@@ -7,6 +7,7 @@ import valhalla.core.stock.app.modules.users.entity.UserEntity;
 
 import java.util.Locale;
 import valhalla.core.stock.app.modules.users.entity.UserStatus;
+import valhalla.core.stock.app.modules.accesscontrol.security.PermissionResolver;
 
 public final class UserMapper {
 
@@ -40,7 +41,8 @@ public final class UserMapper {
                 user.getProfile().getName(),
                 user.isActive(),
                 user.getUpdatedAt(),
-                user.getCreatedAt()
+                user.getCreatedAt(),
+                PermissionResolver.effectiveCodes(user)
         );
     }
 

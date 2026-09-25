@@ -16,12 +16,12 @@ public class UserAuthorizationService {
 
     private final UserRepository userRepository;
 
-    public boolean canUpdate(UUID userId, Authentication authentication) {
+    public boolean canView(UUID userId, Authentication authentication) {
         if (authentication == null || !authentication.isAuthenticated()) {
             return false;
         }
 
-        if (isManager(authentication)) {
+        if (hasPermission(authentication, "USUARIOS_VISUALIZAR")) {
             UUID establishmentId = extractEstablishmentId(authentication);
             if (establishmentId == null) {
                 return false;
@@ -37,10 +37,17 @@ public class UserAuthorizationService {
             return userId.equals(authenticatedUserId);
         }
 
-        return userRepository.existsByIdAndEmailIgnoreCase(
-                userId,
-                authentication.getName()
-        );
+        return false;
+    }
+
+    public boolean canUpdate(UUID userId, Authentication authentication) {
+        return isCurrentUser(userId, authentication)
+                || canManageInSameEstablishment(userId, authentication, "USUARIOS_EDITAR");
+    }
+
+    public boolean canDelete(UUID userId, Authentication authentication) {
+        return isCurrentUser(userId, authentication)
+                || canManageInSameEstablishment(userId, authentication, "USUARIOS_EXCLUIR");
     }
 
     public boolean isManager(Authentication authentication) {
@@ -77,6 +84,25 @@ public class UserAuthorizationService {
         } catch (IllegalArgumentException ignored) {
             return null;
         }
+    }
+
+    public boolean hasPermission(Authentication authentication, String permissionCode) {
+        return isManagerRole(authentication) || authentication != null
+                && authentication.getAuthorities().stream().anyMatch(authority ->
+                permissionCode.equals(authority.getAuthority()));
+    }
+
+    private boolean isCurrentUser(UUID userId, Authentication authentication) {
+        return authentication != null && authentication.isAuthenticated()
+                && userId.equals(extractUserId(authentication));
+    }
+
+    private boolean canManageInSameEstablishment(UUID userId, Authentication authentication,
+                                                  String permissionCode) {
+        if (!hasPermission(authentication, permissionCode)) return false;
+        UUID establishmentId = extractEstablishmentId(authentication);
+        return establishmentId != null && ( !userRepository.existsById(userId)
+                || userRepository.existsByIdAndEstablishment_Id(userId, establishmentId));
     }
 
     public static boolean isManagerRole(Authentication authentication) {

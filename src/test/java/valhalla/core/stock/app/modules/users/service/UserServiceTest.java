@@ -18,6 +18,7 @@ import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.modules.users.security.UserAuthorizationService;
 import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
+import valhalla.core.stock.app.modules.accesscontrol.service.PermissionManagementService;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -49,6 +50,9 @@ class UserServiceTest {
     @Mock
     private TokenStateService tokenStateService;
 
+    @Mock
+    private PermissionManagementService permissionManagementService;
+
     private UserService userService;
 
     @BeforeEach
@@ -58,7 +62,8 @@ class UserServiceTest {
                 profileRepository,
                 passwordEncoder,
                 userAuthorizationService,
-                tokenStateService
+                tokenStateService,
+                permissionManagementService
         );
         UUID establishmentId = UUID.randomUUID();
         Jwt jwt = Jwt.withTokenValue("test").header("alg", "none")

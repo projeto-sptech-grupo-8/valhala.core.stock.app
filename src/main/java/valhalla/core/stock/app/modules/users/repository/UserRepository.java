@@ -16,6 +16,8 @@ public interface UserRepository extends JpaRepository<UserEntity, UUID> {
 
     List<UserEntity> findAllByEstablishment_Id(UUID establishmentId, Sort sort);
 
+    List<UserEntity> findAllByEstablishment_Id(UUID establishmentId);
+
     List<UserEntity> findAllByProfile_Id(Integer profileId);
 
     boolean existsByIdAndEmailIgnoreCase(UUID id, String email);

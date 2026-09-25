@@ -22,7 +22,12 @@ SET descricao = EXCLUDED.descricao, atualizado_em = CURRENT_TIMESTAMP;
 
 INSERT INTO funcionalidade (codigo, nome, descricao)
 VALUES
-    ('GERENCIAR_USUARIOS', 'Gerenciar usuários', 'Cadastrar e administrar usuários'),
+    ('USUARIOS_CRIAR', 'Criar usuários', 'Permite cadastrar usuários'),
+    ('USUARIOS_VISUALIZAR', 'Visualizar usuários', 'Permite consultar usuários'),
+    ('USUARIOS_EDITAR', 'Editar usuários', 'Permite editar usuários'),
+    ('USUARIOS_EXCLUIR', 'Excluir usuários', 'Permite excluir usuários'),
+    ('PERFIS_GERENCIAR', 'Gerenciar perfis', 'Permite criar e configurar perfis'),
+    ('PERMISSOES_GERENCIAR', 'Gerenciar permissões', 'Permite definir exceções por usuário'),
     ('GERENCIAR_ESTOQUE', 'Gerenciar estoque', 'Administrar catálogo e estoque'),
     ('MOVIMENTAR_ESTOQUE', 'Movimentar estoque', 'Registrar entradas, saídas e ajustes'),
     ('VISUALIZAR_ESTOQUE', 'Visualizar estoque', 'Consultar produtos e quantidades')

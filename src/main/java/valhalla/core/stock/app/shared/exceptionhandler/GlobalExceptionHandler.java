@@ -12,6 +12,7 @@ import valhalla.core.stock.app.shared.error.InvalidRefreshTokenException;
 import valhalla.core.stock.app.shared.error.InvalidUserUpdateException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
+import valhalla.core.stock.app.shared.error.AccessConfigurationConflictException;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -75,6 +76,12 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
     }
 
+    @ExceptionHandler(AccessConfigurationConflictException.class)
+    public ResponseEntity<ApiErrorResponse> handleAccessConfigurationConflict(
+            AccessConfigurationConflictException exception) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidation(
             MethodArgumentNotValidException exception
@@ -89,6 +96,11 @@ public class GlobalExceptionHandler {
                 "Dados de entrada inválidos",
                 fieldErrors
         );
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiErrorResponse> handleIllegalArgument(IllegalArgumentException exception) {
+        return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), Map.of());
     }
 
     private ResponseEntity<ApiErrorResponse> buildResponse(
