@@ -32,6 +32,10 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.authorization.AuthorizationDecision;
+import valhalla.core.stock.app.modules.accesscontrol.security.PermissionAuthorizationService;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -51,6 +55,7 @@ import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
 
 @Configuration
 @EnableMethodSecurity
@@ -74,6 +79,7 @@ public class SecurityConfig {
             HttpSecurity http,
             JwtAuthenticationConverter jwtAuthenticationConverter,
             JwtDecoder jwtDecoder,
+            PermissionAuthorizationService permissionAuthorizationService,
             ObjectMapper objectMapper
     ) throws Exception {
         AuthenticationEntryPoint authenticationEntryPoint = (request, response, exception) ->
@@ -111,7 +117,10 @@ public class SecurityConfig {
                                 "/swagger-ui.html",
                                 "/v3/api-docs/**"
                         ).permitAll()
-                        .requestMatchers(HttpMethod.POST, "/usuario").hasRole("GERENTE")
+                        .requestMatchers(HttpMethod.POST, "/usuario")
+                        .access((authentication, context) -> new AuthorizationDecision(
+                                permissionAuthorizationService.canManageUsers(
+                                        authentication.get())))
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(exceptionHandling -> exceptionHandling
@@ -197,7 +206,16 @@ public class SecurityConfig {
 
         JwtAuthenticationConverter authenticationConverter =
                 new JwtAuthenticationConverter();
-        authenticationConverter.setJwtGrantedAuthoritiesConverter(authoritiesConverter);
+        authenticationConverter.setJwtGrantedAuthoritiesConverter(jwt -> {
+            List<GrantedAuthority> authorities = new ArrayList<>(
+                    authoritiesConverter.convert(jwt));
+            List<String> permissions = jwt.getClaimAsStringList("permissions");
+            if (permissions != null) {
+                permissions.forEach(permission -> authorities.add(
+                        new SimpleGrantedAuthority(permission)));
+            }
+            return authorities;
+        });
         return authenticationConverter;
     }
 

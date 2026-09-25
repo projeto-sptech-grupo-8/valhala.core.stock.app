@@ -19,6 +19,7 @@ import valhalla.core.stock.app.modules.users.dto.UserCreateRequestDto;
 import valhalla.core.stock.app.modules.users.dto.UserResponseDto;
 import valhalla.core.stock.app.modules.users.dto.UserUpdateDto;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
+import valhalla.core.stock.app.modules.users.entity.UserStatus;
 import valhalla.core.stock.app.modules.users.mapper.UserMapper;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.modules.users.security.UserAuthorizationService;
@@ -40,7 +41,7 @@ public class UserService {
     private final TokenStateService tokenStateService;
 
     @Transactional
-    @PreAuthorize("hasRole('GERENTE')")
+    @PreAuthorize("@permissionAuthorizationService.canManageUsers(authentication)")
     public UserResponseDto criarUsuario(UserCreateRequestDto dtoRequest) {
         String emailNormalizado = dtoRequest.email()
                 .trim()
@@ -50,9 +51,10 @@ public class UserService {
             throw new EmailAlreadyExistsException("Email informado já cadastrado");
         }
 
+        UUID establishmentId = authenticatedEstablishmentId();
         String profileName = dtoRequest.profileName().trim();
         ProfileEntity profile = profileRepository
-                .findByNameIgnoreCase(profileName)
+                .findByEstablishment_IdAndNameIgnoreCase(establishmentId, profileName)
                 .orElseThrow(() ->
                         new ProfileNotFoundException(
                                 "Perfil não encontrado: " + profileName
@@ -73,9 +75,10 @@ public class UserService {
     }
 
     @Transactional
-    @PreAuthorize("hasRole('GERENTE')")
+    @PreAuthorize("@permissionAuthorizationService.canManageUsers(authentication)")
     public List<UserResponseDto> listarUsuarios() {
-        return userRepository.findAll(Sort.by(Sort.Direction.ASC, "name"))
+        return userRepository.findAllByEstablishment_Id(
+                        authenticatedEstablishmentId(), Sort.by(Sort.Direction.ASC, "name"))
                 .stream()
                 .map(UserMapper::toResponse)
                 .toList();
@@ -145,7 +148,8 @@ public class UserService {
         if (StringUtils.hasText(updateDto.profileName())) {
             String profileName = updateDto.profileName().trim();
             ProfileEntity profile = profileRepository
-                    .findByNameIgnoreCase(profileName)
+                    .findByEstablishment_IdAndNameIgnoreCase(
+                            user.getEstablishment().getId(), profileName)
                     .orElseThrow(() -> new ProfileNotFoundException(
                             "Perfil não encontrado: " + profileName
                     ));
@@ -155,9 +159,8 @@ public class UserService {
             }
         }
 
-        if (updateDto.active() != null
-                && !Objects.equals(user.getActive(), updateDto.active())) {
-            user.setActive(updateDto.active());
+        if (updateDto.active() != null && user.isActive() != updateDto.active()) {
+            user.setStatus(updateDto.active() ? UserStatus.ATIVO : UserStatus.INATIVO);
             authenticationChanged = true;
         }
 
@@ -186,9 +189,9 @@ public class UserService {
                 ));
 
         try {
+            tokenStateService.revokeAll(idUsuario);
             userRepository.delete(user);
             userRepository.flush();
-            tokenStateService.revokeAll(idUsuario);
         } catch (DataIntegrityViolationException exception) {
             throw new UserDeletionConflictException(
                     "Usuário não pode ser excluído porque possui registros vinculados",
@@ -221,5 +224,13 @@ public class UserService {
                 && !StringUtils.hasText(updateDto.profileName())) {
             throw new InvalidUserUpdateException("O perfil não pode ficar vazio");
         }
+    }
+
+    private UUID authenticatedEstablishmentId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication instanceof org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken jwt) {
+            return UUID.fromString(jwt.getToken().getClaimAsString("establishmentId"));
+        }
+        throw new AccessDeniedException("Estabelecimento da sessão não encontrado");
     }
 }

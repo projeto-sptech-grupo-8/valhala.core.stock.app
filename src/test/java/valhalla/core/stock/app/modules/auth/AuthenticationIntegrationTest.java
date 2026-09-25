@@ -12,15 +12,21 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
+import valhalla.core.stock.app.modules.accesscontrol.entity.FuncionalidadeEntity;
 import valhalla.core.stock.app.modules.accesscontrol.repository.ProfileRepository;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
+import valhalla.core.stock.app.modules.users.entity.UserStatus;
+import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
+import jakarta.persistence.EntityManager;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
+import valhalla.core.stock.app.modules.auth.repository.UserSessionRepository;
 
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -45,6 +51,13 @@ class AuthenticationIntegrationTest {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private UserSessionRepository userSessionRepository;
+
+    @Autowired
+    private EntityManager entityManager;
+
+    private EstablishmentEntity establishment;
     private ProfileEntity gerenteProfile;
     private ProfileEntity atendenteProfile;
     private UserEntity gerenteUser;
@@ -52,13 +65,18 @@ class AuthenticationIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        establishment = entityManager.merge(EstablishmentEntity.builder()
+                .corporateName("Meraki LTDA").tradeName("Meraki")
+                .cnpj("12345678000199").build());
         gerenteProfile = profileRepository.save(ProfileEntity.builder()
                 .name("Gerente")
                 .description("Pode gerenciar usuários")
+                .establishment(establishment)
                 .build());
         atendenteProfile = profileRepository.save(ProfileEntity.builder()
                 .name("Atendente")
                 .description("Operação da adega")
+                .establishment(establishment)
                 .build());
 
         gerenteUser = saveUser("gerente@meraki.com", "senha-gerente", gerenteProfile);
@@ -82,6 +100,8 @@ class AuthenticationIntegrationTest {
                 .andExpect(jsonPath("$.user").value(gerenteUser.getName()))
                 .andExpect(jsonPath("$.accessToken").doesNotExist())
                 .andExpect(jsonPath("$.refreshToken").doesNotExist());
+
+        assertTrue(userSessionRepository.existsById(gerenteUser.getId()));
     }
 
     @Test
@@ -267,7 +287,8 @@ class AuthenticationIntegrationTest {
                 .email("inativo@meraki.com")
                 .passwordHash(passwordEncoder.encode("senha-inativo"))
                 .profile(atendenteProfile)
-                .active(false)
+                .establishment(establishment)
+                .status(UserStatus.INATIVO)
                 .build());
         userRepository.flush();
 
@@ -320,6 +341,36 @@ class AuthenticationIntegrationTest {
                 .andExpect(jsonPath("$.status").value(403))
                 .andExpect(jsonPath("$.message").value("Acesso negado"))
                 .andExpect(jsonPath("$.fieldErrors").isEmpty());
+    }
+
+    @Test
+    void permissaoDoPerfilDeveAutorizarCadastroDeUsuario() throws Exception {
+        FuncionalidadeEntity functionality = entityManager.merge(
+                FuncionalidadeEntity.builder().code("GERENCIAR_USUARIOS")
+                        .name("Gerenciar usuários").build());
+        atendenteProfile.getFunctionalities().add(functionality);
+        profileRepository.saveAndFlush(atendenteProfile);
+        Cookie accessToken = login("atendente@meraki.com", "senha-atendente");
+
+        mockMvc.perform(post("/usuario").cookie(accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createUserJson("permissao-perfil@meraki.com")))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void permissaoDiretaDoUsuarioDeveAutorizarCadastroDeUsuario() throws Exception {
+        FuncionalidadeEntity functionality = entityManager.merge(
+                FuncionalidadeEntity.builder().code("GERENCIAR_USUARIOS")
+                        .name("Gerenciar usuários").build());
+        atendenteUser.getDirectFunctionalities().add(functionality);
+        userRepository.saveAndFlush(atendenteUser);
+        Cookie accessToken = login("atendente@meraki.com", "senha-atendente");
+
+        mockMvc.perform(post("/usuario").cookie(accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createUserJson("permissao-direta@meraki.com")))
+                .andExpect(status().isCreated());
     }
 
     @Test
@@ -419,6 +470,24 @@ class AuthenticationIntegrationTest {
                         .value(atendenteUser.getId().toString()))
                 .andExpect(jsonPath("$.email").value("atendente@meraki.com"))
                 .andExpect(jsonPath("$.profileName").value("Atendente"));
+    }
+
+    @Test
+    void gerenteNaoDeveConsultarUsuarioDeOutroEstabelecimento() throws Exception {
+        EstablishmentEntity otherEstablishment = entityManager.merge(
+                EstablishmentEntity.builder().corporateName("Outra LTDA")
+                        .tradeName("Outra").cnpj("98765432000199").build());
+        ProfileEntity otherProfile = profileRepository.save(ProfileEntity.builder()
+                .name("Gerente").establishment(otherEstablishment).build());
+        UserEntity otherUser = userRepository.save(UserEntity.builder()
+                .name("Gerente Externo").email("externo@meraki.com")
+                .passwordHash(passwordEncoder.encode("senha-externo"))
+                .establishment(otherEstablishment).profile(otherProfile)
+                .status(UserStatus.ATIVO).build());
+        Cookie accessToken = login("gerente@meraki.com", "senha-gerente");
+
+        mockMvc.perform(get("/usuario/{id}", otherUser.getId()).cookie(accessToken))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -706,7 +775,8 @@ class AuthenticationIntegrationTest {
                 .email(email)
                 .passwordHash(passwordEncoder.encode(password))
                 .profile(profile)
-                .active(true)
+                .establishment(establishment)
+                .status(UserStatus.ATIVO)
                 .build());
     }
 

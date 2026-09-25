@@ -5,12 +5,16 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.stereotype.Service;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 
 import java.text.Normalizer;
+import java.time.LocalDateTime;
 import java.util.Locale;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 
 @Service
 @RequiredArgsConstructor
@@ -25,13 +29,23 @@ public class CustomUserDetailsService implements UserDetailsService {
                 .findByEmailIgnoreCase(normalizedEmail)
                 .orElseThrow(() -> new UsernameNotFoundException("Credenciais inválidas"));
 
-        String role = "ROLE_" + normalizeRole(user.getProfile().getName());
-
         return User.withUsername(user.getEmail())
                 .password(user.getPasswordHash())
-                .authorities(role)
-                .disabled(!Boolean.TRUE.equals(user.getActive()))
+                .authorities(authoritiesFor(user))
+                .disabled(!user.isActive())
+                .accountLocked(user.getLockedUntil() != null
+                        && user.getLockedUntil().isAfter(LocalDateTime.now()))
                 .build();
+    }
+
+    public static Collection<SimpleGrantedAuthority> authoritiesFor(UserEntity user) {
+        LinkedHashSet<String> authorities = new LinkedHashSet<>();
+        authorities.add("ROLE_" + normalizeRole(user.getProfile().getName()));
+        user.getProfile().getFunctionalities().forEach(functionality ->
+                authorities.add(functionality.getCode()));
+        user.getDirectFunctionalities().forEach(functionality ->
+                authorities.add(functionality.getCode()));
+        return authorities.stream().map(SimpleGrantedAuthority::new).toList();
     }
 
     public static String normalizeRole(String profileName) {

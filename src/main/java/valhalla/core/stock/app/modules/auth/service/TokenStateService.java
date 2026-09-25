@@ -1,45 +1,49 @@
 package valhalla.core.stock.app.modules.auth.service;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import valhalla.core.stock.app.modules.auth.entity.UserSessionEntity;
+import valhalla.core.stock.app.modules.auth.repository.UserSessionRepository;
+import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.shared.error.InvalidRefreshTokenException;
 
-import java.util.Objects;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
+@RequiredArgsConstructor
 public class TokenStateService {
 
-    private final ConcurrentMap<UUID, TokenState> activeTokens =
-            new ConcurrentHashMap<>();
+    private final UserSessionRepository userSessionRepository;
 
     public void replace(
             UUID userId,
             UUID accessJti,
-            UUID refreshJti
+            UUID refreshJti,
+            Instant expiresAt,
+            UserEntity user
     ) {
-        activeTokens.put(userId, new TokenState(accessJti, refreshJti));
+        LocalDateTime expiration = LocalDateTime.ofInstant(expiresAt, ZoneOffset.UTC);
+        userSessionRepository.findById(userId).ifPresentOrElse(session -> {
+            session.setAccessJti(accessJti);
+            session.setRefreshJti(refreshJti);
+            session.setExpiresAt(expiration);
+        }, () -> userSessionRepository.save(UserSessionEntity.builder()
+                .user(user).accessJti(accessJti).refreshJti(refreshJti)
+                .expiresAt(expiration).build()));
     }
 
     public void rotate(
             UUID userId,
             UUID expectedRefreshJti,
             UUID newAccessJti,
-            UUID newRefreshJti
+            UUID newRefreshJti,
+            Instant expiresAt
     ) {
-        AtomicBoolean rotated = new AtomicBoolean(false);
-        activeTokens.computeIfPresent(userId, (id, current) -> {
-            if (!Objects.equals(current.refreshJti(), expectedRefreshJti)) {
-                return current;
-            }
-
-            rotated.set(true);
-            return new TokenState(newAccessJti, newRefreshJti);
-        });
-
-        if (!rotated.get()) {
+        if (userSessionRepository.rotate(userId, expectedRefreshJti, newAccessJti,
+                newRefreshJti, LocalDateTime.ofInstant(expiresAt, ZoneOffset.UTC)) != 1) {
             throw new InvalidRefreshTokenException("Refresh token inválido");
         }
     }
@@ -49,10 +53,8 @@ public class TokenStateService {
             UUID accessJti,
             UUID refreshJti
     ) {
-        TokenState current = activeTokens.get(userId);
-        return current != null
-                && Objects.equals(current.accessJti(), accessJti)
-                && Objects.equals(current.refreshJti(), refreshJti);
+        return userSessionRepository.existsByUserIdAndAccessJtiAndRefreshJtiAndExpiresAtAfter(
+                userId, accessJti, refreshJti, LocalDateTime.now(ZoneOffset.UTC));
     }
 
     public void revoke(
@@ -60,22 +62,10 @@ public class TokenStateService {
             UUID accessJti,
             UUID refreshJti
     ) {
-        activeTokens.computeIfPresent(userId, (id, current) -> {
-            boolean refreshMatches = Objects.equals(
-                    current.refreshJti(),
-                    refreshJti
-            );
-            boolean accessMatches = accessJti == null
-                    || Objects.equals(current.accessJti(), accessJti);
-
-            return refreshMatches && accessMatches ? null : current;
-        });
+        userSessionRepository.revoke(userId, accessJti, refreshJti);
     }
 
     public void revokeAll(UUID userId) {
-        activeTokens.remove(userId);
-    }
-
-    private record TokenState(UUID accessJti, UUID refreshJti) {
+        userSessionRepository.deleteById(userId);
     }
 }

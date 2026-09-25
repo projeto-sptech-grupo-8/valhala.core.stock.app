@@ -17,6 +17,10 @@ import valhalla.core.stock.app.modules.users.dto.UserResponseDto;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.modules.users.security.UserAuthorizationService;
+import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
@@ -56,15 +60,23 @@ class UserServiceTest {
                 userAuthorizationService,
                 tokenStateService
         );
+        UUID establishmentId = UUID.randomUUID();
+        Jwt jwt = Jwt.withTokenValue("test").header("alg", "none")
+                .claim("establishmentId", establishmentId.toString()).build();
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
     }
 
     @Test
     void deveCriarUsuarioComEmailNormalizadoESenhaCodificada() {
-        UUID profileId = UUID.randomUUID();
+        Integer profileId = 1;
         UUID userId = UUID.randomUUID();
         ProfileEntity profile = ProfileEntity.builder()
                 .id(profileId)
                 .name("Administrador")
+                .establishment(EstablishmentEntity.builder().id(
+                        UUID.fromString(SecurityContextHolder.getContext().getAuthentication()
+                                instanceof JwtAuthenticationToken token
+                                ? token.getToken().getClaimAsString("establishmentId") : "00000000-0000-0000-0000-000000000000")) .build())
                 .build();
         UserCreateRequestDto request = new UserCreateRequestDto(
                 "  Lucas Peres  ",
@@ -75,7 +87,7 @@ class UserServiceTest {
         );
 
         when(userRepository.existsByEmailIgnoreCase("lucas@exemplo.com")).thenReturn(false);
-        when(profileRepository.findByNameIgnoreCase("Administrador"))
+        when(profileRepository.findByEstablishment_IdAndNameIgnoreCase(any(), eq("Administrador")))
                 .thenReturn(Optional.of(profile));
         when(passwordEncoder.encode("senha-segura")).thenReturn("senha-codificada");
         when(userRepository.saveAndFlush(any(UserEntity.class))).thenAnswer(invocation -> {
@@ -119,7 +131,7 @@ class UserServiceTest {
     void naoDeveCriarUsuarioQuandoPerfilNaoExistir() {
         UserCreateRequestDto request = requestValido();
         when(userRepository.existsByEmailIgnoreCase("lucas@exemplo.com")).thenReturn(false);
-        when(profileRepository.findByNameIgnoreCase(request.profileName()))
+        when(profileRepository.findByEstablishment_IdAndNameIgnoreCase(any(), eq(request.profileName())))
                 .thenReturn(Optional.empty());
 
         assertThrows(
@@ -135,13 +147,14 @@ class UserServiceTest {
     void deveTratarConflitoDeEmailOcorridoDurantePersistencia() {
         UserCreateRequestDto request = requestValido();
         ProfileEntity profile = ProfileEntity.builder()
-                .id(UUID.randomUUID())
+                .id(2)
                 .name("Atendente")
+                .establishment(EstablishmentEntity.builder().id(UUID.randomUUID()).build())
                 .build();
 
         when(userRepository.existsByEmailIgnoreCase("lucas@exemplo.com"))
                 .thenReturn(false);
-        when(profileRepository.findByNameIgnoreCase("Atendente"))
+        when(profileRepository.findByEstablishment_IdAndNameIgnoreCase(any(), eq("Atendente")))
                 .thenReturn(Optional.of(profile));
         when(passwordEncoder.encode("senha-segura")).thenReturn("senha-codificada");
         when(userRepository.saveAndFlush(any(UserEntity.class)))
@@ -204,7 +217,7 @@ class UserServiceTest {
                 "Usuário não pode ser excluído porque possui registros vinculados",
                 exception.getMessage()
         );
-        verifyNoInteractions(tokenStateService);
+        verify(tokenStateService).revokeAll(user.getId());
     }
 
     private UserCreateRequestDto requestValido() {

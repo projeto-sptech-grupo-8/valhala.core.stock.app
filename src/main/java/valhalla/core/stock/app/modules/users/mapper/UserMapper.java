@@ -6,6 +6,7 @@ import valhalla.core.stock.app.modules.users.dto.UserResponseDto;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 
 import java.util.Locale;
+import valhalla.core.stock.app.modules.users.entity.UserStatus;
 
 public final class UserMapper {
 
@@ -23,7 +24,8 @@ public final class UserMapper {
                 .phone(normalizePhone(dto.phone()))
                 .passwordHash(passwordHash)
                 .profile(profile)
-                .active(true)
+                .establishment(profile.getEstablishment())
+                .status(UserStatus.ATIVO)
                 .build();
     }
 
@@ -33,9 +35,10 @@ public final class UserMapper {
                 user.getName(),
                 user.getEmail(),
                 user.getPhone(),
+                user.getEstablishment().getId(),
                 user.getProfile().getId(),
                 user.getProfile().getName(),
-                user.getActive(),
+                user.isActive(),
                 user.getUpdatedAt(),
                 user.getCreatedAt()
         );

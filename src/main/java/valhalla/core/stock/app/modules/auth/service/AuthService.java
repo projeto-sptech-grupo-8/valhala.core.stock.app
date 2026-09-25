@@ -5,7 +5,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtException;
@@ -19,7 +18,6 @@ import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.shared.error.InvalidRefreshTokenException;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -78,7 +76,7 @@ public class AuthService {
                         "Refresh token inválido"
                 ));
 
-        if (!Boolean.TRUE.equals(user.getActive())) {
+        if (!user.isActive()) {
             throw new InvalidRefreshTokenException("Refresh token inválido");
         }
 
@@ -146,23 +144,27 @@ public class AuthService {
                 authentication,
                 user.getId(),
                 accessJti,
-                refreshJti
+                refreshJti,
+                user
         );
         String refreshToken = jwtService.generateRefreshToken(
                 authentication,
                 user.getId(),
                 refreshJti,
-                refreshExpiresAt
+                refreshExpiresAt,
+                user
         );
 
         if (expectedRefreshJti == null) {
-            tokenStateService.replace(user.getId(), accessJti, refreshJti);
+            tokenStateService.replace(user.getId(), accessJti, refreshJti,
+                    refreshExpiresAt, user);
         } else {
             tokenStateService.rotate(
                     user.getId(),
                     expectedRefreshJti,
                     accessJti,
-                    refreshJti
+                    refreshJti,
+                    refreshExpiresAt
             );
         }
 
@@ -170,13 +172,10 @@ public class AuthService {
     }
 
     private Authentication authenticationFor(UserEntity user) {
-        String role = "ROLE_" + CustomUserDetailsService.normalizeRole(
-                user.getProfile().getName()
-        );
         return UsernamePasswordAuthenticationToken.authenticated(
                 user.getEmail(),
                 null,
-                List.of(new SimpleGrantedAuthority(role))
+                CustomUserDetailsService.authoritiesFor(user)
         );
     }
 

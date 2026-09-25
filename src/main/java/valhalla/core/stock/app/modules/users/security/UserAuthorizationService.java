@@ -22,7 +22,14 @@ public class UserAuthorizationService {
         }
 
         if (isManager(authentication)) {
-            return true;
+            UUID establishmentId = extractEstablishmentId(authentication);
+            if (establishmentId == null) {
+                return false;
+            }
+            // Permite que o serviço devolva 404 para um UUID inexistente, mas
+            // bloqueia explicitamente usuários existentes de outro estabelecimento.
+            return !userRepository.existsById(userId) || userRepository
+                    .existsByIdAndEstablishment_Id(userId, establishmentId);
         }
 
         UUID authenticatedUserId = extractUserId(authentication);
@@ -37,8 +44,7 @@ public class UserAuthorizationService {
     }
 
     public boolean isManager(Authentication authentication) {
-        if (authentication == null || authentication.getAuthorities().stream()
-                .noneMatch(authority -> MANAGER_AUTHORITY.equals(authority.getAuthority()))) {
+        if (!isManagerRole(authentication)) {
             return false;
         }
 
@@ -69,6 +75,21 @@ public class UserAuthorizationService {
         try {
             return UUID.fromString(userId);
         } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
+    public static boolean isManagerRole(Authentication authentication) {
+        return authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(authority -> MANAGER_AUTHORITY.equals(authority.getAuthority()));
+    }
+
+    private UUID extractEstablishmentId(Authentication authentication) {
+        if (!(authentication instanceof JwtAuthenticationToken jwtAuthentication)) return null;
+        try {
+            return UUID.fromString(jwtAuthentication.getToken()
+                    .getClaimAsString("establishmentId"));
+        } catch (IllegalArgumentException | NullPointerException ignored) {
             return null;
         }
     }

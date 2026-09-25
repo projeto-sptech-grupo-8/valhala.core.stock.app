@@ -7,6 +7,7 @@ import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.stereotype.Service;
 import valhalla.core.stock.app.modules.auth.config.JwtProperties;
+import valhalla.core.stock.app.modules.users.entity.UserEntity;
 
 import java.time.Instant;
 import java.util.List;
@@ -23,7 +24,8 @@ public class JwtService {
             Authentication authentication,
             UUID userId,
             UUID accessJti,
-            UUID sessionJti
+            UUID sessionJti,
+            UserEntity user
     ) {
         Instant issuedAt = Instant.now();
         Instant expiresAt = issuedAt.plus(properties.expiration());
@@ -33,6 +35,10 @@ public class JwtService {
                 .filter(authority -> authority.startsWith("ROLE_"))
                 .map(authority -> authority.substring("ROLE_".length()))
                 .toList();
+        List<String> permissions = authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .filter(authority -> !authority.startsWith("ROLE_"))
+                .toList();
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuedAt(issuedAt)
@@ -40,8 +46,10 @@ public class JwtService {
                 .subject(authentication.getName())
                 .id(accessJti.toString())
                 .claim("userId", userId.toString())
+                .claim("establishmentId", user.getEstablishment().getId().toString())
                 .claim("sessionJti", sessionJti.toString())
                 .claim("roles", roles)
+                .claim("permissions", permissions)
                 .claim("purpose", "access")
                 .build();
 
@@ -52,7 +60,8 @@ public class JwtService {
             Authentication authentication,
             UUID userId,
             UUID refreshJti,
-            Instant expiresAt
+            Instant expiresAt,
+            UserEntity user
     ) {
         Instant issuedAt = Instant.now();
 
@@ -62,6 +71,7 @@ public class JwtService {
                 .subject(authentication.getName())
                 .id(refreshJti.toString())
                 .claim("userId", userId.toString())
+                .claim("establishmentId", user.getEstablishment().getId().toString())
                 .claim("purpose", "refresh")
                 .build();
 

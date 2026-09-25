@@ -31,11 +31,13 @@ public record UserResponseDto(
         )
         String phone,
 
+        UUID establishmentId,
+
         @Schema(
                 description = "Identificador do perfil associado ao usuário",
-                example = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                example = "1"
         )
-        UUID profileId,
+        Integer profileId,
 
         @Schema(
                 description = "Nome do perfil de acesso do usuário",

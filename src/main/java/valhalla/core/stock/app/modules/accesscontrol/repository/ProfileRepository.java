@@ -6,7 +6,9 @@ import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import java.util.Optional;
 import java.util.UUID;
 
-public interface ProfileRepository extends JpaRepository<ProfileEntity, UUID> {
+public interface ProfileRepository extends JpaRepository<ProfileEntity, Integer> {
 
-    Optional<ProfileEntity> findByNameIgnoreCase(String name);
+    Optional<ProfileEntity> findByEstablishment_IdAndNameIgnoreCase(
+            UUID establishmentId, String name
+    );
 }

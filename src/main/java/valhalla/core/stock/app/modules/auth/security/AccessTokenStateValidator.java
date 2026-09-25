@@ -11,6 +11,7 @@ import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Component
@@ -37,8 +38,10 @@ public class AccessTokenStateValidator implements OAuth2TokenValidator<Jwt> {
 
             UserEntity user = userRepository.findById(userId).orElse(null);
             if (user == null
-                    || !Boolean.TRUE.equals(user.getActive())
-                    || !hasCurrentRole(token, user)
+                    || !user.isActive()
+                    || !token.getClaimAsString("establishmentId").equals(
+                            user.getEstablishment().getId().toString())
+                    || !hasCurrentAuthorizations(token, user)
                     || !tokenStateService.isActive(
                             userId,
                             accessJti,
@@ -53,11 +56,14 @@ public class AccessTokenStateValidator implements OAuth2TokenValidator<Jwt> {
         }
     }
 
-    private boolean hasCurrentRole(Jwt token, UserEntity user) {
+    private boolean hasCurrentAuthorizations(Jwt token, UserEntity user) {
         List<String> roles = token.getClaimAsStringList("roles");
-        String currentRole = CustomUserDetailsService.normalizeRole(
-                user.getProfile().getName()
-        );
-        return roles != null && roles.contains(currentRole);
+        Set<String> expectedRoles = CustomUserDetailsService.authoritiesFor(user).stream()
+                .map(authority -> authority.getAuthority())
+                .filter(authority -> authority.startsWith("ROLE_"))
+                .map(authority -> authority.substring("ROLE_".length()))
+                .collect(java.util.stream.Collectors.toSet());
+        return roles != null
+                && expectedRoles.equals(Set.copyOf(roles));
     }
 }

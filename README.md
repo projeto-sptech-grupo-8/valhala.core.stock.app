@@ -13,7 +13,7 @@ estoque da Adega Meraki.
 
 1. Crie um banco chamado `valhalla` no PostgreSQL.
 2. Conecte-se ao banco `valhalla` no DBeaver ou em outro cliente SQL.
-3. Execute o arquivo `script.sql` completo.
+3. Execute o arquivo `script.sql` localizado na `resources` completo.
 4. Confira as mensagens da execução: na primeira instalação, o script informa o
    e-mail e a senha temporária do gerente inicial.
 
