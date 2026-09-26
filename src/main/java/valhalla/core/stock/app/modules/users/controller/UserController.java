@@ -1,6 +1,8 @@
 package valhalla.core.stock.app.modules.users.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -11,10 +13,11 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
-import valhalla.core.stock.app.modules.users.dto.UserCreateRequestDto;
-import valhalla.core.stock.app.modules.users.dto.UserResponseDto;
-import valhalla.core.stock.app.modules.users.dto.UserUpdateDto;
+import valhalla.core.stock.app.modules.users.dto.RequisicaoAtualizacaoUsuarioDto;
+import valhalla.core.stock.app.modules.users.dto.RequisicaoCriacaoUsuarioDto;
+import valhalla.core.stock.app.modules.users.dto.RespostaUsuarioDto;
 import valhalla.core.stock.app.modules.users.service.UserService;
+import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 
 import java.net.URI;
 import java.util.List;
@@ -47,17 +50,23 @@ public class UserController {
             ),
             @ApiResponse(
                     responseCode = "400",
-                    description = "Dados de entrada inválidos."
+                    description = "Dados de entrada inválidos.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
             ),
             @ApiResponse(
                     responseCode = "403",
-                    description = "Usuário sem permissão."
-            )
+                    description = "Usuário sem permissão.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "E-mail já cadastrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
-    public ResponseEntity<UserResponseDto> criarUsuario(
-            @Valid @RequestBody UserCreateRequestDto dtoRequest
+    public ResponseEntity<RespostaUsuarioDto> criarUsuario(
+            @Valid @RequestBody RequisicaoCriacaoUsuarioDto dtoRequest
     ) {
-        UserResponseDto usuarioCriado = userService.criarUsuario(dtoRequest);
+        RespostaUsuarioDto usuarioCriado = userService.criarUsuario(dtoRequest);
         URI location = URI.create("/usuario/" + usuarioCriado.id());
 
         return ResponseEntity.created(location).body(usuarioCriado);
@@ -76,10 +85,13 @@ public class UserController {
             ),
             @ApiResponse(
                     responseCode = "403",
-                    description = "Usuário sem permissão."
-            )
+                    description = "Usuário sem permissão.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
-    public ResponseEntity<List<UserResponseDto>> listarUsuarios() {
+    public ResponseEntity<List<RespostaUsuarioDto>> listarUsuarios() {
         return ResponseEntity.ok(userService.listarUsuarios());
     }
 
@@ -96,14 +108,18 @@ public class UserController {
             ),
             @ApiResponse(
                     responseCode = "403",
-                    description = "Usuário sem permissão."
+                    description = "Usuário sem permissão.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
             ),
             @ApiResponse(
                     responseCode = "404",
-                    description = "Usuário não encontrado."
-            )
+                    description = "Usuário não encontrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
-    public ResponseEntity<UserResponseDto> buscarUsuarioPorId(
+    public ResponseEntity<RespostaUsuarioDto> buscarUsuarioPorId(
             @PathVariable("id") UUID idUsuario
     ) {
         return ResponseEntity.ok(userService.buscarUsuario(idUsuario));
@@ -122,22 +138,29 @@ public class UserController {
             ),
             @ApiResponse(
                     responseCode = "400",
-                    description = "Dados de entrada inválidos."
+                    description = "Dados de entrada inválidos.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
             ),
             @ApiResponse(
                     responseCode = "403",
-                    description = "Usuário sem permissão."
+                    description = "Usuário sem permissão.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
             ),
             @ApiResponse(
                     responseCode = "404",
-                    description = "Usuário não encontrado."
-            )
+                    description = "Usuário não encontrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "E-mail duplicado ou último administrador removido.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
-    public ResponseEntity<UserResponseDto> atualizarUsuario(
+    public ResponseEntity<RespostaUsuarioDto> atualizarUsuario(
             @PathVariable("id") UUID idUsuario,
-            @Valid @RequestBody UserUpdateDto dtoUpdate
+            @Valid @RequestBody RequisicaoAtualizacaoUsuarioDto dtoUpdate
     ) {
-        UserResponseDto usuarioAtualizado =
+        RespostaUsuarioDto usuarioAtualizado =
                 userService.atualizarUsuario(idUsuario, dtoUpdate);
 
         return ResponseEntity.ok(usuarioAtualizado);
@@ -155,13 +178,14 @@ public class UserController {
             ),
             @ApiResponse(
                     responseCode = "401",
-                    description = "Usuário não autenticado."
+                    description = "Usuário não autenticado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
             )
     })
-    public ResponseEntity<UserResponseDto> buscarUsuarioAtual(
+    public ResponseEntity<RespostaUsuarioDto> buscarUsuarioAtual(
             @AuthenticationPrincipal Jwt jwt
     ) {
-        UserResponseDto usuario =
+        RespostaUsuarioDto usuario =
                 userService.buscarUsuario(userIdFrom(jwt));
 
         return ResponseEntity.ok(usuario);
@@ -179,18 +203,24 @@ public class UserController {
             ),
             @ApiResponse(
                     responseCode = "400",
-                    description = "Dados de entrada inválidos."
+                    description = "Dados de entrada inválidos.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
             ),
             @ApiResponse(
                     responseCode = "401",
-                    description = "Usuário não autenticado."
-            )
+                    description = "Usuário não autenticado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(responseCode = "403", description = "Não é permitido alterar perfil ou status.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "E-mail duplicado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
-    public ResponseEntity<UserResponseDto> atualizarUsuarioAtual(
+    public ResponseEntity<RespostaUsuarioDto> atualizarUsuarioAtual(
             @AuthenticationPrincipal Jwt jwt,
-            @Valid @RequestBody UserUpdateDto dtoUpdate
+            @Valid @RequestBody RequisicaoAtualizacaoUsuarioDto dtoUpdate
     ) {
-        UserResponseDto usuarioAtualizado =
+        RespostaUsuarioDto usuarioAtualizado =
                 userService.atualizarUsuario(
                         userIdFrom(jwt),
                         dtoUpdate
@@ -211,8 +241,11 @@ public class UserController {
             ),
             @ApiResponse(
                     responseCode = "401",
-                    description = "Usuário não autenticado."
-            )
+                    description = "Usuário não autenticado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(responseCode = "409", description = "Usuário possui vínculos ou é o último administrador.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     public ResponseEntity<Void> deletarUsuarioAtual(
             @AuthenticationPrincipal Jwt jwt
@@ -235,12 +268,18 @@ public class UserController {
             ),
             @ApiResponse(
                     responseCode = "403",
-                    description = "Usuário sem permissão."
+                    description = "Usuário sem permissão.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
             ),
             @ApiResponse(
                     responseCode = "404",
-                    description = "Usuário não encontrado."
-            )
+                    description = "Usuário não encontrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "Usuário possui vínculos ou é o último administrador.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     public ResponseEntity<Void> deletarUsuarioPorId(
             @PathVariable("id") UUID idUsuario

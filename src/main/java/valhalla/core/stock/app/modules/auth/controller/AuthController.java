@@ -1,6 +1,11 @@
 package valhalla.core.stock.app.modules.auth.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.headers.Header;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -16,9 +21,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import valhalla.core.stock.app.modules.auth.config.JwtProperties;
-import valhalla.core.stock.app.modules.auth.dto.LoginRequestDto;
-import valhalla.core.stock.app.modules.auth.dto.TokenResponseDto;
+import valhalla.core.stock.app.modules.auth.dto.RequisicaoLoginDto;
+import valhalla.core.stock.app.modules.auth.dto.RespostaAutenticacaoDto;
+import valhalla.core.stock.app.modules.auth.dto.RespostaTokenDto;
 import valhalla.core.stock.app.modules.auth.service.AuthService;
+import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 
 import java.time.Duration;
 import java.util.Map;
@@ -51,30 +58,32 @@ public class AuthController {
             description = "Autentica o usuário e cria os cookies de acesso e renovação da sessão."
     )
     @ApiResponses({
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Autenticação realizada com sucesso."
-            ),
+            @ApiResponse(responseCode = "200", description = "Autenticação realizada com sucesso.",
+                    headers = @Header(name = HttpHeaders.SET_COOKIE,
+                            description = "Cookies accessToken e refreshToken são criados."),
+                    content = @Content(schema = @Schema(implementation = RespostaAutenticacaoDto.class))),
             @ApiResponse(
                     responseCode = "401",
-                    description = "Usuário ou senha inválidos."
+                    description = "Usuário ou senha inválidos.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
             ),
             @ApiResponse(
                     responseCode = "400",
-                    description = "Dados de entrada inválidos."
+                    description = "Dados de entrada inválidos.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
             )
     })
-    public ResponseEntity<Map<String, String>> login(
-            @Valid @RequestBody LoginRequestDto request,
+    public ResponseEntity<RespostaAutenticacaoDto> login(
+            @Valid @RequestBody RequisicaoLoginDto request,
             HttpServletResponse response
     ) {
 
-        TokenResponseDto tokenResponseDto = authService.login(request);
+        RespostaTokenDto tokenResponseDto = authService.login(request);
         addAuthenticationCookies(response, tokenResponseDto);
 
         return authenticationResponse(
                 "Autenticação realizada com sucesso",
-                tokenResponseDto.username()
+                tokenResponseDto.nomeUsuario()
         );
     }
 
@@ -84,26 +93,29 @@ public class AuthController {
             description = "Utiliza o refresh token armazenado no cookie para gerar novos tokens."
     )
     @ApiResponses({
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Autenticação renovada com sucesso."
-            ),
+            @ApiResponse(responseCode = "200", description = "Autenticação renovada com sucesso.",
+                    headers = @Header(name = HttpHeaders.SET_COOKIE,
+                            description = "Cookies accessToken e refreshToken são substituídos."),
+                    content = @Content(schema = @Schema(implementation = RespostaAutenticacaoDto.class))),
             @ApiResponse(
                     responseCode = "401",
-                    description = "Refresh token ausente, inválido ou expirado."
+                    description = "Refresh token ausente, inválido ou expirado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
             )
     })
-    public ResponseEntity<Map<String, String>> refresh(
+    public ResponseEntity<RespostaAutenticacaoDto> refresh(
+            @Parameter(name = "refreshToken", in = ParameterIn.COOKIE,
+                    description = "Cookie HttpOnly com o refresh token.")
             @CookieValue(name = "refreshToken", required = false) String refreshToken,
             HttpServletResponse response
     ) {
 
-        TokenResponseDto tokenResponseDto = authService.refresh(refreshToken);
+        RespostaTokenDto tokenResponseDto = authService.refresh(refreshToken);
         addAuthenticationCookies(response, tokenResponseDto);
 
         return authenticationResponse(
                 "Autenticação renovada com sucesso",
-                tokenResponseDto.username()
+                tokenResponseDto.nomeUsuario()
         );
     }
 
@@ -113,17 +125,16 @@ public class AuthController {
             description = "Invalida os tokens atuais e remove os cookies de autenticação."
     )
     @ApiResponses({
-            @ApiResponse(
-                    responseCode = "204",
-                    description = "Logout realizado com sucesso."
-            ),
-            @ApiResponse(
-                    responseCode = "401",
-                    description = "Token inválido ou expirado."
-            )
+            @ApiResponse(responseCode = "204", description = "Logout realizado e cookies removidos.",
+                    headers = @Header(name = HttpHeaders.SET_COOKIE,
+                            description = "Cookies accessToken e refreshToken são expirados."))
     })
     public ResponseEntity<Void> logout(
+            @Parameter(name = "refreshToken", in = ParameterIn.COOKIE,
+                    description = "Cookie HttpOnly com o refresh token.")
             @CookieValue(name = "refreshToken", required = false) String refreshToken,
+            @Parameter(name = "accessToken", in = ParameterIn.COOKIE,
+                    description = "Cookie HttpOnly com o access token.")
             @CookieValue(name = "accessToken", required = false) String accessToken,
             HttpServletResponse response
     ) {
@@ -135,10 +146,10 @@ public class AuthController {
 
     private void addAuthenticationCookies(
             HttpServletResponse response,
-            TokenResponseDto tokenResponse
+            RespostaTokenDto tokenResponse
     ) {
         ResponseCookie accessCookie = ResponseCookie
-                .from("accessToken", tokenResponse.accessToken())
+                .from("accessToken", tokenResponse.tokenAcesso())
                 .httpOnly(true)
                 .secure(secureCookies)
                 .path("/")
@@ -147,7 +158,7 @@ public class AuthController {
                 .build();
 
         ResponseCookie refreshCookie = ResponseCookie
-                .from("refreshToken", tokenResponse.refreshToken())
+                .from("refreshToken", tokenResponse.tokenRenovacao())
                 .httpOnly(true)
                 .secure(secureCookies)
                 .path("/auth")
@@ -177,13 +188,10 @@ public class AuthController {
                 .build();
     }
 
-    private ResponseEntity<Map<String, String>> authenticationResponse(
-            String message,
-            String username
+    private ResponseEntity<RespostaAutenticacaoDto> authenticationResponse(
+            String mensagem,
+            String nomeUsuario
     ) {
-        return ResponseEntity.ok(Map.of(
-                "message", message,
-                "user", username
-        ));
+        return ResponseEntity.ok(new RespostaAutenticacaoDto(mensagem, nomeUsuario));
     }
 }

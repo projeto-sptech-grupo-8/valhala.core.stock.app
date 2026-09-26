@@ -6,7 +6,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 import java.util.Set;
 
-public record UserResponseDto(
+public record RespostaUsuarioDto(
 
         @Schema(
                 description = "Identificador único do usuário",
@@ -18,7 +18,7 @@ public record UserResponseDto(
                 description = "Nome completo do usuário",
                 example = "Lucas Peres"
         )
-        String name,
+        String nome,
 
         @Schema(
                 description = "E-mail do usuário",
@@ -30,41 +30,41 @@ public record UserResponseDto(
                 description = "Telefone do usuário",
                 example = "11999999999"
         )
-        String phone,
+        String telefone,
 
-        UUID establishmentId,
+        UUID idEstabelecimento,
 
         @Schema(
                 description = "Identificador do perfil associado ao usuário",
                 example = "1"
         )
-        Integer profileId,
+        Integer idPerfil,
 
         @Schema(
                 description = "Nome do perfil de acesso do usuário",
                 example = "GERENTE"
         )
-        String profileName,
+        String nomePerfil,
 
         @Schema(
                 description = "Indica se o usuário está ativo",
                 example = "true"
         )
-        Boolean active,
+        Boolean ativo,
 
         @Schema(
                 description = "Data e hora da última atualização do usuário",
                 example = "2026-09-23T19:30:00"
         )
-        LocalDateTime updatedAt,
+        LocalDateTime atualizadoEm,
 
         @Schema(
                 description = "Data e hora de criação do usuário",
                 example = "2026-09-20T14:15:00"
         )
-        LocalDateTime createdAt
+        LocalDateTime criadoEm
 
-        , Set<String> permissions
+        , Set<String> permissoes
 
 ) {
 }

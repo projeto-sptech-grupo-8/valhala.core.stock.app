@@ -13,9 +13,17 @@ estoque da Adega Meraki.
 
 1. Crie um banco chamado `valhalla` no PostgreSQL.
 2. Conecte-se ao banco `valhalla` no DBeaver ou em outro cliente SQL.
-3. Execute o arquivo `script.sql` localizado na `resources` completo.
-4. Confira as mensagens da execução: na primeira instalação, o script informa o
-   e-mail e a senha temporária do gerente inicial.
+3. Execute `src/main/resources/db/script.sql` completo.
+4. Opcionalmente, execute `src/main/resources/db/seed-inicial.sql` para inserir
+   os dados de demonstração. Ele cria `admin@valhalla.local` com a senha
+   `Senha@123`; altere esses dados antes de qualquer uso real.
+5. Inicie a aplicação uma vez para o Flyway registrar a versão do banco e aplicar
+   as migrações pendentes.
+
+Para bancos já existentes, leia [docs/MIGRACOES.md](docs/MIGRACOES.md), faça um
+backup e inicie a versão atual da API. A migration V3 cria a unicidade de nome de
+perfil sem diferenciar maiúsculas/minúsculas; resolva eventuais perfis duplicados
+antes de aplicá-la.
 
 ## Configurar e iniciar a aplicação
 
@@ -136,8 +144,8 @@ inclusive ID, perfil e status, devem ser carregados por `GET /usuario/me`:
 
 ```json
 {
-  "message": "Autenticação realizada com sucesso",
-  "user": "Nome do usuário"
+  "mensagem": "Autenticação realizada com sucesso",
+  "usuario": "Nome do usuário"
 }
 ```
 
@@ -168,14 +176,14 @@ Estas são todas as rotas de usuário atualmente implementadas:
 
 | Método | Endpoint | O que faz | Quem pode usar | Identificação | Sucesso |
 | --- | --- | --- | --- | --- | --- |
-| `POST` | `/usuario` | Cadastra um novo usuário | Gerente | Não se aplica | `201 Created` |
-| `GET` | `/usuario` | Lista todos os usuários | Gerente | Não se aplica | `200 OK` |
+| `POST` | `/usuario` | Cadastra um novo usuário | `USUARIOS_CRIAR` | Não se aplica | `201 Created` |
+| `GET` | `/usuario` | Lista todos os usuários | `USUARIOS_VISUALIZAR` | Não se aplica | `200 OK` |
 | `GET` | `/usuario/me` | Retorna o usuário autenticado | Usuário autenticado | Claim `userId` do token | `200 OK` |
-| `GET` | `/usuario/{id}` | Busca um usuário pelo ID | Gerente | UUID no path | `200 OK` |
+| `GET` | `/usuario/{id}` | Busca um usuário pelo ID | Próprio usuário ou `USUARIOS_VISUALIZAR` | UUID no path | `200 OK` |
 | `PATCH` | `/usuario/me` | Atualiza o usuário autenticado | Usuário autenticado | Claim `userId` do token | `200 OK` |
 | `DELETE` | `/usuario/me` | Exclui o usuário autenticado | Usuário autenticado | Claim `userId` do token | `204 No Content` |
-| `PATCH` | `/usuario/{id}` | Atualiza um usuário pelo ID | Gerente | UUID no path | `200 OK` |
-| `DELETE` | `/usuario/{id}` | Exclui um usuário pelo ID | Gerente | UUID no path | `204 No Content` |
+| `PATCH` | `/usuario/{id}` | Atualiza um usuário pelo ID | Próprio usuário ou `USUARIOS_EDITAR` | UUID no path | `200 OK` |
+| `DELETE` | `/usuario/{id}` | Exclui um usuário pelo ID | Próprio usuário ou `USUARIOS_EXCLUIR` | UUID no path | `204 No Content` |
 
 ### Resposta de usuário
 
@@ -184,68 +192,72 @@ Estas são todas as rotas de usuário atualmente implementadas:
 ```json
 {
   "id": "11111111-1111-4111-8111-111111111111",
-  "name": "Usuário Gerente",
+  "nome": "Usuário Gerente",
   "email": "gerente@meraki.com",
-  "phone": "11955554444",
-  "profileId": "22222222-2222-4222-8222-222222222222",
-  "profileName": "Gerente",
-  "active": true,
-  "updatedAt": "2026-09-04T20:33:32.868968",
-  "createdAt": "2026-08-25T19:49:17.005005"
+  "telefone": "11955554444",
+  "idEstabelecimento": "33333333-3333-4333-8333-333333333333",
+  "idPerfil": 1,
+  "nomePerfil": "Gerente",
+  "ativo": true,
+  "atualizadoEm": "2026-09-04T20:33:32.868968",
+  "criadoEm": "2026-08-25T19:49:17.005005",
+  "permissoes": ["USUARIOS_CRIAR", "USUARIOS_VISUALIZAR"]
 }
 ```
 
 ### Criar usuário
 
-`POST /usuario` exige uma sessão com perfil `Gerente`.
+`POST /usuario` exige a permissão `USUARIOS_CRIAR`.
 
 ```javascript
 const createdUser = await apiRequest("/usuario", {
   method: "POST",
   body: JSON.stringify({
-    name: "Atendente Teste",
+    nome: "Atendente Teste",
     email: "atendente.teste@meraki.com",
-    phone: "11999999999",
-    password: "senha-segura",
-    profileName: "Atendente"
+    telefone: "11999999999",
+    senha: "senha-segura",
+    nomePerfil: "Atendente"
   })
 });
 ```
 
 Regras do body:
 
-- `name`: obrigatório, máximo de 100 caracteres;
+- `nome`: obrigatório, máximo de 100 caracteres;
 - `email`: obrigatório, formato válido e único;
-- `phone`: opcional, máximo de 13 caracteres;
-- `password`: obrigatório, entre 8 e 72 caracteres;
-- `profileName`: obrigatório e deve corresponder a um perfil existente, sem
+- `telefone`: opcional, máximo de 13 caracteres;
+- `senha`: obrigatório, entre 8 e 72 caracteres;
+- `nomePerfil`: obrigatório e deve corresponder a um perfil existente, sem
   diferenciar maiúsculas de minúsculas.
 
 A resposta é `201 Created`, contém o usuário criado e expõe
 `Location: /usuario/{id}`. O ID também está disponível em `createdUser.id`.
 
-### Listar usuários como gerente
+### Listar usuários
 
 ```javascript
 const users = await apiRequest("/usuario");
 ```
 
-`GET /usuario` exige perfil `Gerente` e retorna `200 OK` com um array contendo
-todos os usuários, ordenados por `name` em ordem crescente. A senha e o hash da
+`GET /usuario` exige `USUARIOS_VISUALIZAR` e retorna `200 OK` com um array contendo
+todos os usuários, ordenados por `nome` em ordem crescente. A senha e o hash da
 senha nunca são retornados.
 
 ```json
 [
   {
     "id": "11111111-1111-4111-8111-111111111111",
-    "name": "Atendente Teste",
+    "nome": "Atendente Teste",
     "email": "atendente.teste@meraki.com",
-    "phone": "11999999999",
-    "profileId": "22222222-2222-4222-8222-222222222222",
-    "profileName": "Atendente",
-    "active": true,
-    "updatedAt": "2026-09-04T20:33:32.868968",
-    "createdAt": "2026-09-04T20:30:00.000000"
+    "telefone": "11999999999",
+    "idEstabelecimento": "33333333-3333-4333-8333-333333333333",
+    "idPerfil": 2,
+    "nomePerfil": "Atendente",
+    "ativo": true,
+    "atualizadoEm": "2026-09-04T20:33:32.868968",
+    "criadoEm": "2026-09-04T20:30:00.000000",
+    "permissoes": ["VISUALIZAR_ESTOQUE"]
   }
 ]
 ```
@@ -254,14 +266,15 @@ O frontend deve guardar o `id` de cada item apenas como identificador da linha
 selecionada na tela administrativa. Esse ID será usado nas rotas administrativas
 de consulta, atualização e exclusão.
 
-### Obter um usuário por ID como gerente
+### Obter um usuário por ID
 
 ```javascript
 const selectedUser = await apiRequest(`/usuario/${userId}`);
 ```
 
-`GET /usuario/{id}` exige perfil `Gerente` e retorna `200 OK` com o mesmo
-formato de resposta de usuário. Se o UUID não existir, retorna `404 Not Found`
+`GET /usuario/{id}` permite consultar o próprio usuário ou exige
+`USUARIOS_VISUALIZAR`. Retorna `200 OK` com o mesmo formato de resposta de
+usuário. Se o UUID não existir, retorna `404 Not Found`
 com a mensagem `Usuário não encontrado`.
 
 O frontend pode usar essa rota ao abrir uma tela de detalhes ou antes de editar
@@ -284,21 +297,21 @@ aplicação para preencher o estado global do usuário.
 const updatedUser = await apiRequest("/usuario/me", {
   method: "PATCH",
   body: JSON.stringify({
-    name: "Nome atualizado",
+    nome: "Nome atualizado",
     email: "novo.email@meraki.com",
-    phone: "11999999999"
+    telefone: "11999999999"
   })
 });
 ```
 
-`PATCH /usuario/me` não recebe ID. Usuários autenticados podem alterar `name`,
-`email`, `phone` e `password`. Apenas o perfil `Gerente` pode enviar também
-`profileName` ou `active`.
+`PATCH /usuario/me` não recebe ID. Usuários autenticados podem alterar `nome`,
+`email`, `telefone` e `senha`. Somente quem possui `USUARIOS_EDITAR` pode enviar
+também `nomePerfil` ou `ativo`.
 
 Todos os campos são opcionais, mas pelo menos um deve ser enviado. Uma string
-vazia em `phone` remove o telefone. Os aliases `nome`, `telefone`, `senha`,
-`perfil`, `perfilNome` e `status` também são aceitos, embora o frontend deva
-preferir os nomes em inglês documentados acima.
+vazia em `telefone` remove o telefone. Durante a transição, os aliases em
+inglês (`name`, `phone`, `password`, `profileName` e `active`) ainda são aceitos
+nos corpos de requisição; as respostas usam somente os nomes em português.
 
 Ao alterar a senha, o perfil ou o status, as sessões desse usuário são
 revogadas. Quando a alteração for feita na própria conta, o frontend deve
@@ -316,7 +329,7 @@ await apiRequest("/usuario/me", { method: "DELETE" });
 `204 No Content` e revoga a sessão. Se o usuário possuir registros que impedem
 a exclusão, a API retorna `409 Conflict`.
 
-### Atualizar outro usuário como gerente
+### Atualizar outro usuário
 
 ```javascript
 const updatedUser = await apiRequest(`/usuario/${selectedUser.id}`, {
@@ -328,17 +341,19 @@ const updatedUser = await apiRequest(`/usuario/${selectedUser.id}`, {
 });
 ```
 
-`PATCH /usuario/{id}` exige perfil `Gerente`. O `{id}` é o UUID do usuário que o
-gerente selecionou em `GET /usuario`, não o ID extraído do token do gerente.
+`PATCH /usuario/{id}` permite atualizar o próprio usuário ou exige
+`USUARIOS_EDITAR` para outro usuário do mesmo estabelecimento. O `{id}` é o UUID
+do usuário selecionado em `GET /usuario`, não o ID extraído do token.
 
-### Excluir outro usuário como gerente
+### Excluir outro usuário
 
 ```javascript
 await apiRequest(`/usuario/${selectedUser.id}`, { method: "DELETE" });
 ```
 
-`DELETE /usuario/{id}` exige perfil `Gerente`, não recebe body e retorna
-`204 No Content`. Usuário inexistente retorna `404 Not Found`; usuário com
+`DELETE /usuario/{id}` permite excluir a própria conta ou exige
+`USUARIOS_EXCLUIR` para outro usuário do mesmo estabelecimento. Não recebe body
+e retorna `204 No Content`. Usuário inexistente retorna `404 Not Found`; usuário com
 registros vinculados retorna `409 Conflict`.
 
 ### Tratamento de erros no frontend
@@ -366,10 +381,83 @@ Tratamento recomendado:
 | `404` | Usuário ou perfil não encontrado | Atualizar a tela e informar que o recurso não existe |
 | `409` | E-mail duplicado ou exclusão bloqueada | Exibir a mensagem de conflito sem repetir automaticamente |
 
-Os tokens atuais são controlados em memória pelos JTIs, sem alterar as tabelas
-do banco de dados. Como esse estado não é persistido, reiniciar a aplicação
-encerra todas as sessões, e instâncias diferentes não compartilham sessões
-entre si.
+As sessões ativas são registradas em `sessao_usuario`. Login, renovação, logout,
+alteração de senha, perfil, status ou permissões revogam os tokens anteriores.
+
+## Autorizações
+
+As permissões são isoladas por estabelecimento. O perfil `Gerente` possui todas
+as permissões do sistema para o estabelecimento ao qual está vinculado. Os demais
+perfis recebem as funcionalidades atribuídas ao perfil, complementadas por
+sobrescritas individuais `GRANT` ou `REVOKE`.
+
+| Código | Descrição |
+| --- | --- |
+| `USUARIOS_CRIAR` | Cadastrar usuários |
+| `USUARIOS_VISUALIZAR` | Consultar usuários |
+| `USUARIOS_EDITAR` | Alterar usuários |
+| `USUARIOS_EXCLUIR` | Excluir usuários |
+| `PERFIS_GERENCIAR` | Criar, editar e excluir perfis |
+| `PERMISSOES_GERENCIAR` | Configurar permissões de perfil e de usuário |
+
+O estabelecimento precisa manter ao menos um usuário ativo capaz de criar
+usuários. A API rejeita operações que removeriam essa última capacidade.
+
+### Endpoints de perfis e permissões
+
+As rotas abaixo exigem uma sessão que possua a permissão indicada. Um gerente do
+estabelecimento sempre a possui.
+
+| Método | Endpoint | Permissão necessária | Descrição |
+| --- | --- | --- | --- |
+| `GET` | `/autorizacoes/funcionalidades` | `PERMISSOES_GERENCIAR` | Lista as funcionalidades disponíveis. |
+| `GET` | `/autorizacoes/perfis` | `PERFIS_GERENCIAR` | Lista os perfis do estabelecimento. |
+| `GET` | `/autorizacoes/perfis/{profileId}` | `PERFIS_GERENCIAR` | Consulta um perfil. |
+| `POST` | `/autorizacoes/perfis` | `PERFIS_GERENCIAR` | Cria um perfil. |
+| `PATCH` | `/autorizacoes/perfis/{profileId}` | `PERFIS_GERENCIAR` | Atualiza nome ou descrição. |
+| `DELETE` | `/autorizacoes/perfis/{profileId}` | `PERFIS_GERENCIAR` | Exclui um perfil sem usuários vinculados. |
+| `PUT` | `/autorizacoes/perfis/{profileId}/funcionalidades/codigos` | `PERFIS_GERENCIAR` | Substitui as funcionalidades de um perfil. |
+| `PUT` | `/autorizacoes/usuarios/{userId}/sobrescritas-permissao` | `PERMISSOES_GERENCIAR` | Substitui permissões individuais. |
+| `GET` | `/autorizacoes/usuarios/{userId}/permissoes` | `PERMISSOES_GERENCIAR` | Consulta permissões efetivas e suas origens. |
+
+#### Criar ou atualizar perfil
+
+```javascript
+await apiRequest("/autorizacoes/perfis", {
+  method: "POST",
+  body: JSON.stringify({
+    nome: "Caixa",
+    descricao: "Atendimento no caixa",
+    codigosFuncionalidades: ["VISUALIZAR_ESTOQUE"]
+  })
+});
+
+await apiRequest(`/autorizacoes/perfis/${profileId}/funcionalidades/codigos`, {
+  method: "PUT",
+  body: JSON.stringify(["VISUALIZAR_ESTOQUE", "MOVIMENTAR_ESTOQUE"])
+});
+```
+
+O nome do perfil é obrigatório, possui até 100 caracteres e é único por
+estabelecimento sem diferenciar maiúsculas/minúsculas. `PATCH` exige ao menos
+um dos campos `nome` ou `descricao`.
+
+#### Sobrescritas de permissão por usuário
+
+```javascript
+await apiRequest(`/autorizacoes/usuarios/${userId}/sobrescritas-permissao`, {
+  method: "PUT",
+  body: JSON.stringify({
+    sobrescritas: [
+      { codigoFuncionalidade: "MOVIMENTAR_ESTOQUE", efeito: "GRANT" },
+      { codigoFuncionalidade: "USUARIOS_EXCLUIR", efeito: "REVOKE" }
+    ]
+  })
+});
+```
+
+Cada código pode aparecer uma única vez no array. A chamada substitui todas as
+sobrescritas existentes do usuário e revoga sua sessão atual.
 
 ## Testes
 
@@ -377,4 +465,5 @@ entre si.
 .\mvnw.cmd test
 ```
 
-Os testes utilizam um banco H2 em memória e não alteram o PostgreSQL local.
+Os testes utilizam H2 em memória e não alteram o PostgreSQL local. Para executar
+uma compilação limpa, use `.\mvnw.cmd clean test`.

@@ -127,6 +127,10 @@ CREATE TABLE usuario (
 CREATE UNIQUE INDEX uq_usuario_email_lower
     ON usuario (LOWER(email));
 
+-- Evita perfis ambíguos porque a API os pesquisa sem diferenciar maiúsculas.
+CREATE UNIQUE INDEX uq_perfil_nome_estabelecimento_lower
+    ON perfil (estabelecimento_id, LOWER(nome));
+
 -- Permissões adicionais atribuídas diretamente a um usuário.
 -- As permissões do perfil continuam válidas; esta tabela apenas as complementa.
 CREATE TABLE usuario_funcionalidade (

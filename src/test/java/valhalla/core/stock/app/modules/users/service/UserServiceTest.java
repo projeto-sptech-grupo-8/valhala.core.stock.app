@@ -12,13 +12,13 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.repository.ProfileRepository;
 import valhalla.core.stock.app.modules.auth.service.TokenStateService;
-import valhalla.core.stock.app.modules.users.dto.UserCreateRequestDto;
-import valhalla.core.stock.app.modules.users.dto.UserResponseDto;
+import valhalla.core.stock.app.modules.users.dto.RequisicaoCriacaoUsuarioDto;
+import valhalla.core.stock.app.modules.users.dto.RespostaUsuarioDto;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.modules.users.security.UserAuthorizationService;
 import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
-import valhalla.core.stock.app.modules.accesscontrol.service.PermissionManagementService;
+import valhalla.core.stock.app.modules.accesscontrol.service.ServicoPermissoes;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -51,7 +51,7 @@ class UserServiceTest {
     private TokenStateService tokenStateService;
 
     @Mock
-    private PermissionManagementService permissionManagementService;
+    private ServicoPermissoes servicoPermissoes;
 
     private UserService userService;
 
@@ -63,7 +63,7 @@ class UserServiceTest {
                 passwordEncoder,
                 userAuthorizationService,
                 tokenStateService,
-                permissionManagementService
+                servicoPermissoes
         );
         UUID establishmentId = UUID.randomUUID();
         Jwt jwt = Jwt.withTokenValue("test").header("alg", "none")
@@ -83,7 +83,7 @@ class UserServiceTest {
                                 instanceof JwtAuthenticationToken token
                                 ? token.getToken().getClaimAsString("establishmentId") : "00000000-0000-0000-0000-000000000000")) .build())
                 .build();
-        UserCreateRequestDto request = new UserCreateRequestDto(
+        RequisicaoCriacaoUsuarioDto request = new RequisicaoCriacaoUsuarioDto(
                 "  Lucas Peres  ",
                 "  LUCAS@EXEMPLO.COM  ",
                 "11999999999",
@@ -101,7 +101,7 @@ class UserServiceTest {
             return user;
         });
 
-        UserResponseDto response = userService.criarUsuario(request);
+        RespostaUsuarioDto response = userService.criarUsuario(request);
 
         ArgumentCaptor<UserEntity> captor = ArgumentCaptor.forClass(UserEntity.class);
         verify(userRepository).saveAndFlush(captor.capture());
@@ -113,14 +113,14 @@ class UserServiceTest {
                 () -> assertEquals("lucas@exemplo.com", savedUser.getEmail()),
                 () -> assertEquals("11999999999", savedUser.getPhone()),
                 () -> assertEquals("senha-codificada", savedUser.getPasswordHash()),
-                () -> assertNotEquals(request.password(), savedUser.getPasswordHash()),
+                () -> assertNotEquals(request.senha(), savedUser.getPasswordHash()),
                 () -> assertTrue(savedUser.getActive())
         );
     }
 
     @Test
     void naoDeveCriarUsuarioQuandoEmailJaExistir() {
-        UserCreateRequestDto request = requestValido();
+        RequisicaoCriacaoUsuarioDto request = requestValido();
         when(userRepository.existsByEmailIgnoreCase("lucas@exemplo.com")).thenReturn(true);
 
         assertThrows(
@@ -134,9 +134,9 @@ class UserServiceTest {
 
     @Test
     void naoDeveCriarUsuarioQuandoPerfilNaoExistir() {
-        UserCreateRequestDto request = requestValido();
+        RequisicaoCriacaoUsuarioDto request = requestValido();
         when(userRepository.existsByEmailIgnoreCase("lucas@exemplo.com")).thenReturn(false);
-        when(profileRepository.findByEstablishment_IdAndNameIgnoreCase(any(), eq(request.profileName())))
+        when(profileRepository.findByEstablishment_IdAndNameIgnoreCase(any(), eq(request.nomePerfil())))
                 .thenReturn(Optional.empty());
 
         assertThrows(
@@ -150,7 +150,7 @@ class UserServiceTest {
 
     @Test
     void deveTratarConflitoDeEmailOcorridoDurantePersistencia() {
-        UserCreateRequestDto request = requestValido();
+        RequisicaoCriacaoUsuarioDto request = requestValido();
         ProfileEntity profile = ProfileEntity.builder()
                 .id(2)
                 .name("Atendente")
@@ -225,8 +225,8 @@ class UserServiceTest {
         verify(tokenStateService).revokeAll(user.getId());
     }
 
-    private UserCreateRequestDto requestValido() {
-        return new UserCreateRequestDto(
+    private RequisicaoCriacaoUsuarioDto requestValido() {
+        return new RequisicaoCriacaoUsuarioDto(
                 "Lucas Peres",
                 "lucas@exemplo.com",
                 null,

@@ -5,9 +5,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Size;
 
-public record UserUpdateDto(
+public record RequisicaoAtualizacaoUsuarioDto(
 
-        @JsonAlias("nome")
+        @JsonAlias("name")
         @Size(
                 max = 100,
                 message = "O nome deve ter no máximo 100 caracteres"
@@ -16,7 +16,7 @@ public record UserUpdateDto(
                 description = "Novo nome do usuário",
                 example = "Lucas Peres"
         )
-        String name,
+        String nome,
 
         @Email(message = "E-mail inválido")
         @Schema(
@@ -25,7 +25,7 @@ public record UserUpdateDto(
         )
         String email,
 
-        @JsonAlias("telefone")
+        @JsonAlias("phone")
         @Size(
                 max = 13,
                 message = "O telefone deve ter no máximo 13 caracteres"
@@ -34,9 +34,9 @@ public record UserUpdateDto(
                 description = "Novo telefone do usuário",
                 example = "11988888888"
         )
-        String phone,
+        String telefone,
 
-        @JsonAlias("senha")
+        @JsonAlias("password")
         @Size(
                 min = 8,
                 max = 72,
@@ -46,9 +46,9 @@ public record UserUpdateDto(
                 description = "Nova senha do usuário",
                 example = "NovaSenha@123"
         )
-        String password,
+        String senha,
 
-        @JsonAlias({"perfil", "perfilNome"})
+        @JsonAlias({"profileName", "perfil", "perfilNome"})
         @Size(
                 max = 100,
                 message = "O perfil deve ter no máximo 100 caracteres"
@@ -57,14 +57,14 @@ public record UserUpdateDto(
                 description = "Novo perfil de acesso do usuário",
                 example = "GERENTE"
         )
-        String profileName,
+        String nomePerfil,
 
-        @JsonAlias("status")
+        @JsonAlias({"active", "status"})
         @Schema(
                 description = "Define se o usuário está ativo",
                 example = "true"
         )
-        Boolean active
+        Boolean ativo
 
 ) {
 }

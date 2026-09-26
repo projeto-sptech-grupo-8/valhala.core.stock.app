@@ -97,9 +97,9 @@ class AuthenticationIntegrationTest {
                 .andExpect(cookie().exists("refreshToken"))
                 .andExpect(cookie().httpOnly("refreshToken", true))
                 .andExpect(cookie().path("refreshToken", "/auth"))
-                .andExpect(jsonPath("$.message")
+                .andExpect(jsonPath("$.mensagem")
                         .value("Autenticação realizada com sucesso"))
-                .andExpect(jsonPath("$.user").value(gerenteUser.getName()))
+                .andExpect(jsonPath("$.usuario").value(gerenteUser.getName()))
                 .andExpect(jsonPath("$.accessToken").doesNotExist())
                 .andExpect(jsonPath("$.refreshToken").doesNotExist());
 
@@ -122,9 +122,9 @@ class AuthenticationIntegrationTest {
                 .andExpect(cookie().httpOnly("accessToken", true))
                 .andExpect(cookie().exists("refreshToken"))
                 .andExpect(cookie().httpOnly("refreshToken", true))
-                .andExpect(jsonPath("$.message")
+                .andExpect(jsonPath("$.mensagem")
                         .value("Autenticação renovada com sucesso"))
-                .andExpect(jsonPath("$.user").value(gerenteUser.getName()))
+                .andExpect(jsonPath("$.usuario").value(gerenteUser.getName()))
                 .andExpect(jsonPath("$.accessToken").doesNotExist())
                 .andExpect(jsonPath("$.refreshToken").doesNotExist())
                 .andReturn();
@@ -395,7 +395,7 @@ class AuthenticationIntegrationTest {
                         .content(request))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Dados de entrada inválidos"))
-                .andExpect(jsonPath("$.fieldErrors.password")
+                .andExpect(jsonPath("$.fieldErrors.senha")
                         .value("A senha deve ter entre 8 e 72 caracteres"));
     }
 
@@ -410,7 +410,7 @@ class AuthenticationIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", org.hamcrest.Matchers.startsWith("/usuario/")))
                 .andExpect(jsonPath("$.email").value("novo@meraki.com"))
-                .andExpect(jsonPath("$.profileName").value("Atendente"));
+                .andExpect(jsonPath("$.nomePerfil").value("Atendente"));
     }
 
     @Test
@@ -473,7 +473,7 @@ class AuthenticationIntegrationTest {
                 .andExpect(jsonPath("$.id")
                         .value(atendenteUser.getId().toString()))
                 .andExpect(jsonPath("$.email").value("atendente@meraki.com"))
-                .andExpect(jsonPath("$.profileName").value("Atendente"));
+                .andExpect(jsonPath("$.nomePerfil").value("Atendente"));
     }
 
     @Test
@@ -528,7 +528,7 @@ class AuthenticationIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(atendenteUser.getId().toString()))
                 .andExpect(jsonPath("$.email").value("atendente@meraki.com"))
-                .andExpect(jsonPath("$.profileName").value("Atendente"));
+                .andExpect(jsonPath("$.nomePerfil").value("Atendente"));
     }
 
     @Test
@@ -552,10 +552,10 @@ class AuthenticationIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.name").value("Atendente Atualizado"))
+                .andExpect(jsonPath("$.nome").value("Atendente Atualizado"))
                 .andExpect(jsonPath("$.email").value("atendente.novo@meraki.com"))
-                .andExpect(jsonPath("$.phone").value("11999999999"))
-                .andExpect(jsonPath("$.updatedAt").isNotEmpty());
+                .andExpect(jsonPath("$.telefone").value("11999999999"))
+                .andExpect(jsonPath("$.atualizadoEm").isNotEmpty());
 
         // O token continua identificando o proprietário pelo userId mesmo após trocar o e-mail.
         mockMvc.perform(patch("/usuario/me")
@@ -563,7 +563,7 @@ class AuthenticationIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"phone\":\"11888888888\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.phone").value("11888888888"));
+                .andExpect(jsonPath("$.telefone").value("11888888888"));
 
         MvcResult secondLogin = performLogin(
                 "atendente.novo@meraki.com",
@@ -642,8 +642,8 @@ class AuthenticationIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.profileName").value("Gerente"))
-                .andExpect(jsonPath("$.active").value(false));
+                .andExpect(jsonPath("$.nomePerfil").value("Gerente"))
+                .andExpect(jsonPath("$.ativo").value(false));
     }
 
     @Test
@@ -661,7 +661,7 @@ class AuthenticationIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"active\":false}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.active").value(false));
+                .andExpect(jsonPath("$.ativo").value(false));
 
         mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
                         .cookie(atendenteAccess)

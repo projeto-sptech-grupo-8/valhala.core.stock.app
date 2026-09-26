@@ -90,7 +90,6 @@ public class SecurityConfig {
                         "Token inválido ou expirado"
                 );
 
-        System.out.println();
         AccessDeniedHandler accessDeniedHandler = (request, response, exception) ->
                 writeSecurityError(
                         response,

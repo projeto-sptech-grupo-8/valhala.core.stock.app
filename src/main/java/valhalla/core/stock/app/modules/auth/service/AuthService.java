@@ -9,8 +9,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.stereotype.Service;
-import valhalla.core.stock.app.modules.auth.dto.LoginRequestDto;
-import valhalla.core.stock.app.modules.auth.dto.TokenResponseDto;
+import valhalla.core.stock.app.modules.auth.dto.RequisicaoLoginDto;
+import valhalla.core.stock.app.modules.auth.dto.RespostaTokenDto;
 import valhalla.core.stock.app.modules.auth.security.CustomUserDetailsService;
 import valhalla.core.stock.app.modules.auth.security.JwtService;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
@@ -48,12 +48,12 @@ public class AuthService {
     }
 
     @Transactional
-    public TokenResponseDto login(LoginRequestDto request) {
+    public RespostaTokenDto login(RequisicaoLoginDto request) {
         String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
         Authentication authentication = authenticationManager.authenticate(
                 UsernamePasswordAuthenticationToken.unauthenticated(
                         normalizedEmail,
-                        request.password()
+                        request.senha()
                 )
         );
 
@@ -66,7 +66,7 @@ public class AuthService {
     }
 
     @Transactional
-    public TokenResponseDto refresh(String refreshToken) {
+    public RespostaTokenDto refresh(String refreshToken) {
         Jwt jwt = decodeRefreshToken(refreshToken);
         UUID userId = extractUserId(jwt);
         UUID refreshJti = extractRefreshJti(jwt);
@@ -124,14 +124,14 @@ public class AuthService {
         }
     }
 
-    private TokenResponseDto issueTokens(
+    private RespostaTokenDto issueTokens(
             Authentication authentication,
             UserEntity user
     ) {
         return issueTokens(authentication, user, null);
     }
 
-    private TokenResponseDto issueTokens(
+    private RespostaTokenDto issueTokens(
             Authentication authentication,
             UserEntity user,
             UUID expectedRefreshJti
@@ -168,7 +168,7 @@ public class AuthService {
             );
         }
 
-        return new TokenResponseDto(accessToken, refreshToken, user.getName());
+        return new RespostaTokenDto(accessToken, refreshToken, user.getName());
     }
 
     private Authentication authenticationFor(UserEntity user) {

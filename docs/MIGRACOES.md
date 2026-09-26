@@ -11,7 +11,13 @@ O projeto utiliza Flyway para registrar e executar alterações incrementais no 
 
 O Flyway cria a tabela `flyway_schema_history`, registra a estrutura anterior como versão `0` e executa, uma única vez, as migrações em `src/main/resources/db/migration`.
 
-As migrações atuais criam ou atualizam `usuario_funcionalidade`, preservam permissões já atribuídas como `GRANT`, e inserem as funcionalidades administrativas. Perfis chamados `Gerente` recebem todas as funcionalidades existentes.
+As migrações atuais:
+
+- criam ou atualizam `usuario_funcionalidade`, preservando permissões já atribuídas como `GRANT`;
+- inserem as funcionalidades administrativas e concedem todas elas aos perfis chamados `Gerente`;
+- impedem nomes de perfil duplicados no mesmo estabelecimento sem diferenciar maiúsculas de minúsculas.
+
+Antes de aplicar a V3 em um banco existente, confira se não há nomes de perfis que diferem apenas por capitalização. A migration não escolhe nem remove dados automaticamente.
 
 ## Banco novo
 
@@ -22,7 +28,7 @@ Antes da primeira inicialização, execute `src/main/resources/db/script.sql`. P
 Não edite uma migração já executada em ambientes compartilhados. Crie um novo arquivo SQL com numeração crescente:
 
 ```text
-V3__descricao_da_mudanca.sql
+V4__descricao_da_mudanca.sql
 ```
 
-Exemplo: `V3__adicionar_auditoria_de_permissoes.sql`.
+Exemplo: `V4__adicionar_auditoria_de_permissoes.sql`.

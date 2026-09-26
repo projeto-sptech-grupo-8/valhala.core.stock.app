@@ -1,11 +1,12 @@
 package valhalla.core.stock.app.modules.users.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
-public record UserCreateRequestDto(
+public record RequisicaoCriacaoUsuarioDto(
 
         @NotBlank(message = "O nome é obrigatório")
         @Size(max = 100)
@@ -13,7 +14,7 @@ public record UserCreateRequestDto(
                 description = "Nome completo do usuário",
                 example = "Lucas Peres"
         )
-        String name,
+        @JsonAlias("name") String nome,
 
         @NotBlank(message = "O e-mail é obrigatório")
         @Email(message = "E-mail inválido")
@@ -31,7 +32,7 @@ public record UserCreateRequestDto(
                 description = "Telefone do usuário",
                 example = "11999999999"
         )
-        String phone,
+        @JsonAlias("phone") String telefone,
 
         @NotBlank(message = "A senha é obrigatória")
         @Size(
@@ -43,7 +44,7 @@ public record UserCreateRequestDto(
                 description = "Senha do usuário. Deve possuir entre 8 e 72 caracteres",
                 example = "Senha@123"
         )
-        String password,
+        @JsonAlias("password") String senha,
 
         @NotBlank(message = "O perfil é obrigatório")
         @Size(
@@ -54,7 +55,7 @@ public record UserCreateRequestDto(
                 description = "Nome do perfil de acesso do usuário",
                 example = "GERENTE"
         )
-        String profileName
+        @JsonAlias("profileName") String nomePerfil
 
 ) {
 }

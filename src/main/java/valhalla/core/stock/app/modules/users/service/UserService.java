@@ -15,15 +15,15 @@ import org.springframework.util.StringUtils;
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.repository.ProfileRepository;
 import valhalla.core.stock.app.modules.auth.service.TokenStateService;
-import valhalla.core.stock.app.modules.users.dto.UserCreateRequestDto;
-import valhalla.core.stock.app.modules.users.dto.UserResponseDto;
-import valhalla.core.stock.app.modules.users.dto.UserUpdateDto;
+import valhalla.core.stock.app.modules.users.dto.RequisicaoAtualizacaoUsuarioDto;
+import valhalla.core.stock.app.modules.users.dto.RequisicaoCriacaoUsuarioDto;
+import valhalla.core.stock.app.modules.users.dto.RespostaUsuarioDto;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.entity.UserStatus;
 import valhalla.core.stock.app.modules.users.mapper.UserMapper;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.modules.users.security.UserAuthorizationService;
-import valhalla.core.stock.app.modules.accesscontrol.service.PermissionManagementService;
+import valhalla.core.stock.app.modules.accesscontrol.service.ServicoPermissoes;
 import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.InvalidUserUpdateException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
@@ -40,11 +40,11 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final UserAuthorizationService userAuthorizationService;
     private final TokenStateService tokenStateService;
-    private final PermissionManagementService permissionManagementService;
+    private final ServicoPermissoes servicoPermissoes;
 
     @Transactional
     @PreAuthorize("@permissionAuthorizationService.hasPermission('USUARIOS_CRIAR', authentication)")
-    public UserResponseDto criarUsuario(UserCreateRequestDto dtoRequest) {
+    public RespostaUsuarioDto criarUsuario(RequisicaoCriacaoUsuarioDto dtoRequest) {
         String emailNormalizado = dtoRequest.email()
                 .trim()
                 .toLowerCase(Locale.ROOT);
@@ -54,7 +54,7 @@ public class UserService {
         }
 
         UUID establishmentId = authenticatedEstablishmentId();
-        String profileName = dtoRequest.profileName().trim();
+        String profileName = dtoRequest.nomePerfil().trim();
         ProfileEntity profile = profileRepository
                 .findByEstablishment_IdAndNameIgnoreCase(establishmentId, profileName)
                 .orElseThrow(() ->
@@ -63,7 +63,7 @@ public class UserService {
                         )
                 );
 
-        String passwordHash = passwordEncoder.encode(dtoRequest.password());
+        String passwordHash = passwordEncoder.encode(dtoRequest.senha());
         UserEntity user = UserMapper.toEntity(dtoRequest, passwordHash, profile);
 
         UserEntity savedUser;
@@ -78,7 +78,7 @@ public class UserService {
 
     @Transactional
     @PreAuthorize("@permissionAuthorizationService.hasPermission('USUARIOS_VISUALIZAR', authentication)")
-    public List<UserResponseDto> listarUsuarios() {
+    public List<RespostaUsuarioDto> listarUsuarios() {
         return userRepository.findAllByEstablishment_Id(
                         authenticatedEstablishmentId(), Sort.by(Sort.Direction.ASC, "name"))
                 .stream()
@@ -88,7 +88,7 @@ public class UserService {
 
     @Transactional
     @PreAuthorize("@userAuthorizationService.canView(#idUsuario, authentication)")
-    public UserResponseDto buscarUsuario(UUID idUsuario) {
+    public RespostaUsuarioDto buscarUsuario(UUID idUsuario) {
         UserEntity user = userRepository.findById(idUsuario)
                 .orElseThrow(() -> new EntityNotFoundException(
                         "Usuário não encontrado"
@@ -99,7 +99,7 @@ public class UserService {
 
     @Transactional
     @PreAuthorize("@userAuthorizationService.canUpdate(#idUsuario, authentication)")
-    public UserResponseDto atualizarUsuario(UUID idUsuario, UserUpdateDto updateDto) {
+    public RespostaUsuarioDto atualizarUsuario(UUID idUsuario, RequisicaoAtualizacaoUsuarioDto updateDto) {
         UserEntity user = userRepository.findById(idUsuario)
                 .orElseThrow(() -> new EntityNotFoundException("Usuário não encontrado"));
 
@@ -111,7 +111,7 @@ public class UserService {
                 .hasPermission(authentication, "USUARIOS_EDITAR");
         boolean authenticationChanged = false;
 
-        if (!canEditUsers && (updateDto.profileName() != null || updateDto.active() != null)) {
+        if (!canEditUsers && (updateDto.nomePerfil() != null || updateDto.ativo() != null)) {
             throw new AccessDeniedException(
                     "Apenas gerente pode alterar perfil ou status"
             );
@@ -121,8 +121,8 @@ public class UserService {
 
             
 
-        if (StringUtils.hasText(updateDto.name())) {
-            user.setName(updateDto.name().trim());
+        if (StringUtils.hasText(updateDto.nome())) {
+            user.setName(updateDto.nome().trim());
         }
 
         if (StringUtils.hasText(updateDto.email())) {
@@ -136,20 +136,20 @@ public class UserService {
             }
         }
 
-        if (updateDto.phone() != null) {
-            String phone = updateDto.phone().trim();
+        if (updateDto.telefone() != null) {
+            String phone = updateDto.telefone().trim();
             user.setPhone(phone.isEmpty() ? null : phone);
         }
 
-        if (StringUtils.hasText(updateDto.password())) {
-            String senhaCriptografada = passwordEncoder.encode(updateDto.password());
+        if (StringUtils.hasText(updateDto.senha())) {
+            String senhaCriptografada = passwordEncoder.encode(updateDto.senha());
 
             user.setPasswordHash(senhaCriptografada);
             authenticationChanged = true;
         }
 
-        if (StringUtils.hasText(updateDto.profileName())) {
-            String profileName = updateDto.profileName().trim();
+        if (StringUtils.hasText(updateDto.nomePerfil())) {
+            String profileName = updateDto.nomePerfil().trim();
             ProfileEntity profile = profileRepository
                     .findByEstablishment_IdAndNameIgnoreCase(
                             user.getEstablishment().getId(), profileName)
@@ -162,13 +162,13 @@ public class UserService {
             }
         }
 
-        if (updateDto.active() != null && user.isActive() != updateDto.active()) {
-            user.setStatus(updateDto.active() ? UserStatus.ATIVO : UserStatus.INATIVO);
+        if (updateDto.ativo() != null && user.isActive() != updateDto.ativo()) {
+            user.setStatus(updateDto.ativo() ? UserStatus.ATIVO : UserStatus.INATIVO);
             authenticationChanged = true;
         }
 
         if (authenticationChanged) {
-            permissionManagementService.ensureUserChangeKeepsAdministrator(user);
+            servicoPermissoes.garantirAlteracaoUsuarioMantemAdministrador(user);
         }
 
         UserEntity savedUser;
@@ -196,7 +196,7 @@ public class UserService {
                 ));
 
         try {
-            permissionManagementService.ensureUserCanBeDeactivatedOrDeleted(user);
+            servicoPermissoes.garantirUsuarioPodeSerDesativadoOuExcluido(user);
             tokenStateService.revokeAll(idUsuario);
             userRepository.delete(user);
             userRepository.flush();
@@ -208,19 +208,19 @@ public class UserService {
         }
     }
 
-    private void validateUpdateRequest(UserUpdateDto updateDto) {
-        if (updateDto.name() == null
+    private void validateUpdateRequest(RequisicaoAtualizacaoUsuarioDto updateDto) {
+        if (updateDto.nome() == null
                 && updateDto.email() == null
-                && updateDto.phone() == null
-                && updateDto.password() == null
-                && updateDto.profileName() == null
-                && updateDto.active() == null) {
+                && updateDto.telefone() == null
+                && updateDto.senha() == null
+                && updateDto.nomePerfil() == null
+                && updateDto.ativo() == null) {
             throw new InvalidUserUpdateException(
                     "Informe ao menos um campo para atualização"
             );
         }
 
-        if (updateDto.name() != null && !StringUtils.hasText(updateDto.name())) {
+        if (updateDto.nome() != null && !StringUtils.hasText(updateDto.nome())) {
             throw new InvalidUserUpdateException("O nome não pode ficar vazio");
         }
 
@@ -228,8 +228,8 @@ public class UserService {
             throw new InvalidUserUpdateException("O e-mail não pode ficar vazio");
         }
 
-        if (updateDto.profileName() != null
-                && !StringUtils.hasText(updateDto.profileName())) {
+        if (updateDto.nomePerfil() != null
+                && !StringUtils.hasText(updateDto.nomePerfil())) {
             throw new InvalidUserUpdateException("O perfil não pode ficar vazio");
         }
     }

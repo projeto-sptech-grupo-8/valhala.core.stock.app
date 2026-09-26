@@ -1,8 +1,8 @@
 package valhalla.core.stock.app.modules.users.mapper;
 
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
-import valhalla.core.stock.app.modules.users.dto.UserCreateRequestDto;
-import valhalla.core.stock.app.modules.users.dto.UserResponseDto;
+import valhalla.core.stock.app.modules.users.dto.RequisicaoCriacaoUsuarioDto;
+import valhalla.core.stock.app.modules.users.dto.RespostaUsuarioDto;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 
 import java.util.Locale;
@@ -15,14 +15,14 @@ public final class UserMapper {
     }
 
     public static UserEntity toEntity(
-            UserCreateRequestDto dto,
+            RequisicaoCriacaoUsuarioDto dto,
             String passwordHash,
             ProfileEntity profile
     ) {
         return UserEntity.builder()
-                .name(dto.name().trim())
+                .name(dto.nome().trim())
                 .email(dto.email().trim().toLowerCase(Locale.ROOT))
-                .phone(normalizePhone(dto.phone()))
+                .phone(normalizePhone(dto.telefone()))
                 .passwordHash(passwordHash)
                 .profile(profile)
                 .establishment(profile.getEstablishment())
@@ -30,8 +30,8 @@ public final class UserMapper {
                 .build();
     }
 
-    public static UserResponseDto toResponse(UserEntity user) {
-        return new UserResponseDto(
+    public static RespostaUsuarioDto toResponse(UserEntity user) {
+        return new RespostaUsuarioDto(
                 user.getId(),
                 user.getName(),
                 user.getEmail(),
