@@ -13,6 +13,8 @@ import valhalla.core.stock.app.shared.error.InvalidUserUpdateException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
 import valhalla.core.stock.app.shared.error.AccessConfigurationConflictException;
+import valhalla.core.stock.app.modules.estoque.exception.CategoriaJaExisteException;
+import valhalla.core.stock.app.modules.estoque.exception.CategoriaPossuiProdutosException;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -79,6 +81,20 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AccessConfigurationConflictException.class)
     public ResponseEntity<ApiErrorResponse> handleAccessConfigurationConflict(
             AccessConfigurationConflictException exception) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(CategoriaJaExisteException.class)
+    public ResponseEntity<ApiErrorResponse> handleCategoriaJaExiste(
+            CategoriaJaExisteException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(CategoriaPossuiProdutosException.class)
+    public ResponseEntity<ApiErrorResponse> handleCategoriaPossuiProdutos(
+            CategoriaPossuiProdutosException exception
+    ) {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
     }
 

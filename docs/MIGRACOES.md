@@ -16,8 +16,12 @@ As migrações atuais:
 - criam ou atualizam `usuario_funcionalidade`, preservando permissões já atribuídas como `GRANT`;
 - inserem as funcionalidades administrativas e concedem todas elas aos perfis chamados `Gerente`;
 - impedem nomes de perfil duplicados no mesmo estabelecimento sem diferenciar maiúsculas de minúsculas.
+- inserem as permissões do módulo de estoque e as concedem aos perfis chamados `Gerente`;
+- impedem nomes de categoria duplicados no mesmo estabelecimento sem diferenciar maiúsculas de minúsculas.
 
 Antes de aplicar a V3 em um banco existente, confira se não há nomes de perfis que diferem apenas por capitalização. A migration não escolhe nem remove dados automaticamente.
+
+Antes de aplicar a V4 em um banco existente, confira se não há categorias do mesmo estabelecimento que diferem apenas por capitalização. A migration também não escolhe nem remove dados automaticamente.
 
 ## Banco novo
 
@@ -28,7 +32,7 @@ Antes da primeira inicialização, execute `src/main/resources/db/script.sql`. P
 Não edite uma migração já executada em ambientes compartilhados. Crie um novo arquivo SQL com numeração crescente:
 
 ```text
-V4__descricao_da_mudanca.sql
+V5__descricao_da_mudanca.sql
 ```
 
-Exemplo: `V4__adicionar_auditoria_de_permissoes.sql`.
+Exemplo: `V5__adicionar_auditoria_de_permissoes.sql`.

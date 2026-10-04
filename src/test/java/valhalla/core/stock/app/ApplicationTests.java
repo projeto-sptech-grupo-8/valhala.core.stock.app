@@ -50,6 +50,11 @@ class ApplicationTests {
 				.andExpect(jsonPath("$.paths['/autorizacoes/perfis/{profileId}/funcionalidades/codigos'].put").exists())
 				.andExpect(jsonPath("$.paths['/autorizacoes/usuarios/{userId}/sobrescritas-permissao'].put").exists())
 				.andExpect(jsonPath("$.paths['/autorizacoes/usuarios/{userId}/permissoes'].get").exists())
+				.andExpect(jsonPath("$.paths['/categorias'].get").exists())
+				.andExpect(jsonPath("$.paths['/categorias'].post").exists())
+				.andExpect(jsonPath("$.paths['/categorias/{id}'].get").exists())
+				.andExpect(jsonPath("$.paths['/categorias/{id}'].patch").exists())
+				.andExpect(jsonPath("$.paths['/categorias/{id}'].delete").exists())
 				.andExpect(jsonPath("$.components.schemas.RespostaUsuarioDto.properties.nome").exists())
 				.andExpect(jsonPath("$.components.schemas.RequisicaoCriacaoUsuarioDto.properties.senha").exists())
 				.andExpect(jsonPath("$.components.schemas.RespostaPermissoesUsuarioDto.properties.permissoesEfetivas").exists());
