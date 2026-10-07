@@ -1,6 +1,7 @@
 package valhalla.core.stock.app.modules.auth;
 
 import jakarta.servlet.http.Cookie;
+import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,6 +11,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.entity.FuncionalidadeEntity;
@@ -24,6 +26,8 @@ import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.modules.auth.repository.UserSessionRepository;
 
 import java.util.UUID;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -64,6 +68,7 @@ class AuthenticationIntegrationTest {
     private ProfileEntity atendenteProfile;
     private UserEntity gerenteUser;
     private UserEntity atendenteUser;
+    private final Map<String, String> tokensCsrfPorAccessToken = new HashMap<>();
 
     @BeforeEach
     void setUp() {
@@ -116,7 +121,8 @@ class AuthenticationIntegrationTest {
         Cookie refreshToken = requireCookie(loginResult, "refreshToken");
 
         MvcResult refreshResult = mockMvc.perform(post("/auth/refresh")
-                        .cookie(refreshToken))
+                        .cookie(refreshToken)
+                        .with(csrf(oldAccessToken)))
                 .andExpect(status().isOk())
                 .andExpect(cookie().exists("accessToken"))
                 .andExpect(cookie().httpOnly("accessToken", true))
@@ -131,20 +137,27 @@ class AuthenticationIntegrationTest {
 
         Cookie newRefreshToken = requireCookie(refreshResult, "refreshToken");
         Cookie newAccessToken = requireCookie(refreshResult, "accessToken");
+        MvcResult csrfResult = mockMvc.perform(get("/auth/csrf").cookie(newAccessToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        tokensCsrfPorAccessToken.put(newAccessToken.getValue(),
+                JsonPath.read(csrfResult.getResponse().getContentAsString(), "$.token"));
         assertNotEquals(refreshToken.getValue(), newRefreshToken.getValue());
 
         mockMvc.perform(post("/usuario")
                         .cookie(oldAccessToken)
+                        .with(csrf(oldAccessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createUserJson("access-antigo@meraki.com")))
                 .andExpect(status().isUnauthorized());
 
-        mockMvc.perform(post("/auth/refresh").cookie(refreshToken))
+        mockMvc.perform(post("/auth/refresh").cookie(refreshToken).with(csrf(oldAccessToken)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message").value("Refresh token inválido"));
 
         mockMvc.perform(post("/usuario")
                         .cookie(newAccessToken)
+                        .with(csrf(newAccessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createUserJson("access-novo@meraki.com")))
                 .andExpect(status().isCreated());
@@ -168,7 +181,8 @@ class AuthenticationIntegrationTest {
         Cookie refreshToken = requireCookie(loginResult, "refreshToken");
 
         mockMvc.perform(post("/auth/logout")
-                        .cookie(accessToken, refreshToken))
+                        .cookie(accessToken, refreshToken)
+                        .with(csrf(accessToken)))
                 .andExpect(status().isNoContent())
                 .andExpect(cookie().value("accessToken", ""))
                 .andExpect(cookie().maxAge("accessToken", 0))
@@ -177,11 +191,13 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(post("/usuario")
                         .cookie(accessToken)
+                        .with(csrf(accessToken))
+                        .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createUserJson("apos-logout@meraki.com")))
                 .andExpect(status().isUnauthorized());
 
-        mockMvc.perform(post("/auth/refresh").cookie(refreshToken))
+        mockMvc.perform(post("/auth/refresh").cookie(refreshToken).with(csrf(accessToken)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message").value("Refresh token inválido"));
     }
@@ -203,10 +219,10 @@ class AuthenticationIntegrationTest {
         Cookie accessToken = requireCookie(loginResult, "accessToken");
         Cookie refreshToken = requireCookie(loginResult, "refreshToken");
 
-        mockMvc.perform(post("/auth/logout").cookie(accessToken))
+        mockMvc.perform(post("/auth/logout").cookie(accessToken).with(csrf(accessToken)))
                 .andExpect(status().isNoContent());
 
-        mockMvc.perform(post("/auth/refresh").cookie(refreshToken))
+        mockMvc.perform(post("/auth/refresh").cookie(refreshToken).with(csrf(accessToken)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message").value("Refresh token inválido"));
     }
@@ -226,12 +242,14 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(post("/usuario")
                         .cookie(firstAccess)
+                        .with(csrf(firstAccess))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createUserJson("primeira-sessao@meraki.com")))
                 .andExpect(status().isUnauthorized());
 
         mockMvc.perform(post("/usuario")
                         .cookie(secondAccess)
+                        .with(csrf(secondAccess))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createUserJson("segunda-sessao@meraki.com")))
                 .andExpect(status().isCreated());
@@ -245,7 +263,8 @@ class AuthenticationIntegrationTest {
                 accessToken.getValue()
         );
 
-        mockMvc.perform(post("/auth/refresh").cookie(invalidRefreshCookie))
+        mockMvc.perform(post("/auth/refresh").cookie(invalidRefreshCookie)
+                        .with(csrf(accessToken)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message").value("Refresh token inválido"));
     }
@@ -336,6 +355,7 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(post("/usuario")
                         .cookie(accessToken)
+                        .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createUserJson("novo@meraki.com")))
                 .andExpect(status().isForbidden())
@@ -354,7 +374,7 @@ class AuthenticationIntegrationTest {
         profileRepository.saveAndFlush(atendenteProfile);
         Cookie accessToken = login("atendente@meraki.com", "senha-atendente");
 
-        mockMvc.perform(post("/usuario").cookie(accessToken)
+        mockMvc.perform(post("/usuario").cookie(accessToken).with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createUserJson("permissao-perfil@meraki.com")))
                 .andExpect(status().isCreated());
@@ -371,7 +391,7 @@ class AuthenticationIntegrationTest {
         userRepository.saveAndFlush(atendenteUser);
         Cookie accessToken = login("atendente@meraki.com", "senha-atendente");
 
-        mockMvc.perform(post("/usuario").cookie(accessToken)
+        mockMvc.perform(post("/usuario").cookie(accessToken).with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createUserJson("permissao-direta@meraki.com")))
                 .andExpect(status().isCreated());
@@ -391,6 +411,7 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(post("/usuario")
                         .cookie(accessToken)
+                        .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
                 .andExpect(status().isBadRequest())
@@ -405,6 +426,7 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(post("/usuario")
                         .cookie(accessToken)
+                        .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createUserJson("novo@meraki.com")))
                 .andExpect(status().isCreated())
@@ -419,6 +441,7 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(post("/usuario")
                         .cookie(accessToken)
+                        .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createUserJson("atendente@meraki.com")))
                 .andExpect(status().isConflict())
@@ -439,6 +462,7 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(post("/usuario")
                         .cookie(accessToken)
+                        .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
                 .andExpect(status().isNotFound())
@@ -549,6 +573,7 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(patch("/usuario/me")
                         .cookie(accessToken)
+                        .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
                 .andExpect(status().isOk())
@@ -560,6 +585,7 @@ class AuthenticationIntegrationTest {
         // O token continua identificando o proprietário pelo userId mesmo após trocar o e-mail.
         mockMvc.perform(patch("/usuario/me")
                         .cookie(accessToken)
+                        .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"phone\":\"11888888888\"}"))
                 .andExpect(status().isOk())
@@ -574,27 +600,30 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(patch("/usuario/me")
                         .cookie(secondAccessToken)
+                        .with(csrf(secondAccessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"password\":\"nova-senha-atendente\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(patch("/usuario/me")
                         .cookie(accessToken)
+                        .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"phone\":\"11777777777\"}"))
                 .andExpect(status().isUnauthorized());
 
-        mockMvc.perform(post("/auth/refresh").cookie(refreshToken))
+        mockMvc.perform(post("/auth/refresh").cookie(refreshToken).with(csrf(accessToken)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message").value("Refresh token inválido"));
 
         mockMvc.perform(patch("/usuario/me")
                         .cookie(secondAccessToken)
+                        .with(csrf(secondAccessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"phone\":\"11666666666\"}"))
                 .andExpect(status().isUnauthorized());
 
-        mockMvc.perform(post("/auth/refresh").cookie(secondRefreshToken))
+        mockMvc.perform(post("/auth/refresh").cookie(secondRefreshToken).with(csrf(secondAccessToken)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message").value("Refresh token inválido"));
 
@@ -607,6 +636,7 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(patch("/usuario/{id}", gerenteUser.getId())
                         .cookie(accessToken)
+                        .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Alteração indevida\"}"))
                 .andExpect(status().isForbidden());
@@ -618,6 +648,7 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(patch("/usuario/me")
                         .cookie(accessToken)
+                        .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"profileName\":\"Gerente\"}"))
                 .andExpect(status().isForbidden())
@@ -639,6 +670,7 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
                         .cookie(accessToken)
+                        .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
                 .andExpect(status().isOk())
@@ -658,6 +690,7 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
                         .cookie(gerenteAccess)
+                        .with(csrf(gerenteAccess))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"active\":false}"))
                 .andExpect(status().isOk())
@@ -665,11 +698,12 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
                         .cookie(atendenteAccess)
+                        .with(csrf(atendenteAccess))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"phone\":\"11911111111\"}"))
                 .andExpect(status().isUnauthorized());
 
-        mockMvc.perform(post("/auth/refresh").cookie(atendenteRefresh))
+        mockMvc.perform(post("/auth/refresh").cookie(atendenteRefresh).with(csrf(atendenteAccess)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message").value("Refresh token inválido"));
     }
@@ -685,6 +719,7 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(patch("/usuario/{id}", gerenteUser.getId())
                         .cookie(oldAccessToken)
+                        .with(csrf(oldAccessToken))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"profileName\":\"Atendente\"}"))
                 .andExpect(status().isConflict())
@@ -698,6 +733,7 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(patch("/usuario/{id}", UUID.randomUUID())
                         .cookie(accessToken)
+                        .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Usuário inexistente\"}"))
                 .andExpect(status().isNotFound())
@@ -709,7 +745,7 @@ class AuthenticationIntegrationTest {
         Cookie accessToken = login("gerente@meraki.com", "senha-gerente");
 
         mockMvc.perform(delete("/usuario/{id}", atendenteUser.getId())
-                        .cookie(accessToken))
+                        .cookie(accessToken).with(csrf(accessToken)))
                 .andExpect(status().isNoContent());
 
         assertFalse(userRepository.existsById(atendenteUser.getId()));
@@ -725,7 +761,7 @@ class AuthenticationIntegrationTest {
         Cookie refreshToken = requireCookie(loginResult, "refreshToken");
 
         mockMvc.perform(delete("/usuario/me")
-                        .cookie(accessToken))
+                        .cookie(accessToken).with(csrf(accessToken)))
                 .andExpect(status().isNoContent());
 
         assertFalse(userRepository.existsById(atendenteUser.getId()));
@@ -733,7 +769,7 @@ class AuthenticationIntegrationTest {
         mockMvc.perform(get("/usuario/me").cookie(accessToken))
                 .andExpect(status().isUnauthorized());
 
-        mockMvc.perform(post("/auth/refresh").cookie(refreshToken))
+        mockMvc.perform(post("/auth/refresh").cookie(refreshToken).with(csrf(accessToken)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message").value("Refresh token inválido"));
     }
@@ -743,7 +779,7 @@ class AuthenticationIntegrationTest {
         Cookie accessToken = login("atendente@meraki.com", "senha-atendente");
 
         mockMvc.perform(delete("/usuario/{id}", gerenteUser.getId())
-                        .cookie(accessToken))
+                        .cookie(accessToken).with(csrf(accessToken)))
                 .andExpect(status().isForbidden());
     }
 
@@ -752,7 +788,7 @@ class AuthenticationIntegrationTest {
         Cookie accessToken = login("gerente@meraki.com", "senha-gerente");
 
         mockMvc.perform(delete("/usuario/{id}", UUID.randomUUID())
-                        .cookie(accessToken))
+                        .cookie(accessToken).with(csrf(accessToken)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Usuário não encontrado"));
     }
@@ -773,17 +809,31 @@ class AuthenticationIntegrationTest {
     }
 
     private MvcResult performLogin(String email, String password) throws Exception {
-        return mockMvc.perform(post("/auth/login")
+        MvcResult resultado = mockMvc.perform(post("/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(loginJson(email, password)))
                 .andExpect(status().isOk())
                 .andReturn();
+        Cookie accessToken = requireCookie(resultado, "accessToken");
+        MvcResult csrfResult = mockMvc.perform(get("/auth/csrf").cookie(accessToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        tokensCsrfPorAccessToken.put(accessToken.getValue(),
+                JsonPath.read(csrfResult.getResponse().getContentAsString(), "$.token"));
+        return resultado;
     }
 
     private Cookie requireCookie(MvcResult result, String name) {
         Cookie cookie = result.getResponse().getCookie(name);
         assertNotNull(cookie, "Cookie " + name + " não encontrado na resposta");
         return cookie;
+    }
+
+    private RequestPostProcessor csrf(Cookie accessToken) {
+        return request -> {
+            request.addHeader("X-XSRF-TOKEN", tokensCsrfPorAccessToken.get(accessToken.getValue()));
+            return request;
+        };
     }
 
     private String loginJson(String email, String password) {
