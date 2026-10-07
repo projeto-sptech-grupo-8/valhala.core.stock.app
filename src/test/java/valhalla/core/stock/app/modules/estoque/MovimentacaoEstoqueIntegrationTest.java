@@ -53,6 +53,8 @@ class MovimentacaoEstoqueIntegrationTest extends EstoqueIntegrationTestSupport {
         mockMvc.perform(post("/movimentacoes-estoque").cookie(operador).with(csrf(operador))
                         .contentType(MediaType.APPLICATION_JSON).content(movimentacao(produto, "SAIDA", "2")))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.tipo").value("SAIDA"))
+                .andExpect(jsonPath("$.usuarioNome").value("Operador Meraki"))
+                .andExpect(jsonPath("$.usuarioId").doesNotExist())
                 .andExpect(jsonPath("$.saldoAnterior").value(10)).andExpect(jsonPath("$.saldoPosterior").value(8));
         mockMvc.perform(get("/movimentacoes-estoque").param("produtoId", produto.getId().toString())
                         .param("tipo", "SAIDA").param("tamanho", "1").cookie(operador))

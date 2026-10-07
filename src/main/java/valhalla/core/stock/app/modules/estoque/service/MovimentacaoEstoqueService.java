@@ -30,6 +30,8 @@ import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRep
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
 import valhalla.core.stock.app.modules.estoque.strategy.EstrategiaMovimentacaoEstoque;
 import valhalla.core.stock.app.modules.estoque.strategy.MovimentacaoCommand;
+import valhalla.core.stock.app.modules.users.entity.UserEntity;
+import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.Paginacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
@@ -63,6 +65,7 @@ public class MovimentacaoEstoqueService {
     private final EstoqueRepository estoqueRepository;
     private final ComposicaoDrinkRepository composicaoDrinkRepository;
     private final MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
+    private final UserRepository userRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<TipoMovimentacaoEstoque, EstrategiaMovimentacaoEstoque> estrategias;
 
@@ -71,12 +74,14 @@ public class MovimentacaoEstoqueService {
             EstoqueRepository estoqueRepository,
             ComposicaoDrinkRepository composicaoDrinkRepository,
             MovimentacaoEstoqueRepository movimentacaoEstoqueRepository,
+            UserRepository userRepository,
             List<EstrategiaMovimentacaoEstoque> estrategias
     ) {
         this.produtoRepository = produtoRepository;
         this.estoqueRepository = estoqueRepository;
         this.composicaoDrinkRepository = composicaoDrinkRepository;
         this.movimentacaoEstoqueRepository = movimentacaoEstoqueRepository;
+        this.userRepository = userRepository;
         this.estrategias = estrategias.stream().collect(Collectors.toMap(
                 EstrategiaMovimentacaoEstoque::tipoSuportado,
                 Function.identity(),
@@ -133,7 +138,10 @@ public class MovimentacaoEstoqueService {
                 Paginacao.criar(pagina, tamanho, ordenarPor, direcao,
                         Set.of("ocorridoEm", "tipo", "quantidade", "saldoPosterior"))
         );
-        return RespostaPaginadaDto.de(resultado, this::paraResposta);
+        Map<UUID, String> nomesUsuarios = nomesUsuariosPorId(resultado.getContent());
+        return RespostaPaginadaDto.de(resultado,
+                movimentacao -> paraResposta(movimentacao,
+                        nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado")));
     }
 
     @Transactional
@@ -154,7 +162,8 @@ public class MovimentacaoEstoqueService {
                 dto.tipo(), dto.quantidade(), normalizar(dto.motivo()), normalizar(dto.lote()),
                 normalizar(dto.numeroNotaFiscal()), null, null
         );
-        return aplicarMovimentacao(estoque, command, obterIdUsuarioAutenticado());
+        UUID usuarioId = obterIdUsuarioAutenticado();
+        return aplicarMovimentacao(estoque, command, usuarioId, nomeUsuario(usuarioId));
     }
 
     @Transactional
@@ -202,12 +211,13 @@ public class MovimentacaoEstoqueService {
         ));
 
         UUID usuarioId = obterIdUsuarioAutenticado();
+        String usuarioNome = nomeUsuario(usuarioId);
         return itens.stream()
                 .map(item -> aplicarMovimentacao(item.estoque(), new MovimentacaoCommand(
                         TipoMovimentacaoEstoque.SAIDA_DRINK,
                         item.quantidade(),
                         commandBase.motivo(), null, null, drink.getId(), receitaAplicada.deepCopy()
-                ), usuarioId))
+                ), usuarioId, usuarioNome))
                 .toList();
     }
 
@@ -232,7 +242,8 @@ public class MovimentacaoEstoqueService {
     private MovimentacaoResponseDto aplicarMovimentacao(
             EstoqueEntity estoque,
             MovimentacaoCommand command,
-            UUID usuarioId
+            UUID usuarioId,
+            String usuarioNome
     ) {
         EstrategiaMovimentacaoEstoque estrategia = estrategiaPara(command.tipo());
         estrategia.validar(command);
@@ -240,7 +251,7 @@ public class MovimentacaoEstoqueService {
         BigDecimal saldoPosterior = estrategia.calcularSaldoPosterior(saldoAnterior, command.quantidade());
         estoque.setQuantidadeAtual(saldoPosterior);
         estoqueRepository.save(estoque);
-        return paraResposta(salvarHistorico(estoque, command, saldoAnterior, saldoPosterior, usuarioId));
+        return paraResposta(salvarHistorico(estoque, command, saldoAnterior, saldoPosterior, usuarioId), usuarioNome);
     }
 
     private MovimentacaoEstoqueEntity salvarHistorico(
@@ -315,16 +326,33 @@ public class MovimentacaoEstoqueService {
         }
     }
 
-    private MovimentacaoResponseDto paraResposta(MovimentacaoEstoqueEntity movimentacao) {
+    private MovimentacaoResponseDto paraResposta(MovimentacaoEstoqueEntity movimentacao, String usuarioNome) {
         ProdutoEntity produto = movimentacao.getEstoque().getProduto();
         return new MovimentacaoResponseDto(
-                movimentacao.getId(), movimentacao.getUsuarioId(), produto.getId(), produto.getNome(),
+                movimentacao.getId(), usuarioNome, produto.getId(), produto.getNome(),
                 produto.isFracionado() ? "ML" : produto.getUnidadeMedida(),
                 movimentacao.getTipo(), movimentacao.getQuantidade(),
                 movimentacao.getSaldoAnterior(), movimentacao.getSaldoPosterior(),
                 movimentacao.getMotivo(), movimentacao.getLote(), movimentacao.getNumeroNotaFiscal(),
                 movimentacao.getOrigemDrinkId(), receitaAplicadaParaResposta(movimentacao.getReceitaAplicada()), movimentacao.getOcorridoEm()
         );
+    }
+
+    private Map<UUID, String> nomesUsuariosPorId(List<MovimentacaoEstoqueEntity> movimentacoes) {
+        Set<UUID> idsUsuarios = movimentacoes.stream()
+                .map(MovimentacaoEstoqueEntity::getUsuarioId)
+                .collect(Collectors.toSet());
+        if (idsUsuarios.isEmpty()) {
+            return Map.of();
+        }
+        return userRepository.findAllById(idsUsuarios).stream()
+                .collect(Collectors.toMap(UserEntity::getId, UserEntity::getName));
+    }
+
+    private String nomeUsuario(UUID usuarioId) {
+        return userRepository.findById(usuarioId)
+                .map(UserEntity::getName)
+                .orElse("Usuário não encontrado");
     }
 
     private RawValue receitaAplicadaParaResposta(JsonNode receitaAplicada) {
