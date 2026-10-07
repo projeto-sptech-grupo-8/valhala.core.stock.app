@@ -9,7 +9,7 @@ import java.util.UUID;
 
 public record MovimentacaoResponseDto(
         Long id,
-        UUID usuarioId,
+        String usuarioNome,
         UUID produtoId,
         String produtoNome,
         String unidadeEstoque,

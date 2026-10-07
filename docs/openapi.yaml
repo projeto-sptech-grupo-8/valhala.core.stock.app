@@ -2016,9 +2016,8 @@ components:
         id:
           type: integer
           format: int64
-        usuarioId:
+        usuarioNome:
           type: string
-          format: uuid
         produtoId:
           type: string
           format: uuid

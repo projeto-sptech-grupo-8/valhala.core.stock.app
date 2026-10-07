@@ -28,6 +28,8 @@ import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkReposit
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
+import valhalla.core.stock.app.modules.users.entity.UserEntity;
+import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.modules.estoque.strategy.EstrategiaAjusteNegativo;
 import valhalla.core.stock.app.modules.estoque.strategy.EstrategiaAjustePositivo;
 import valhalla.core.stock.app.modules.estoque.strategy.EstrategiaEntrada;
@@ -59,6 +61,7 @@ class MovimentacaoEstoqueServiceTest {
     @Mock private EstoqueRepository estoqueRepository;
     @Mock private ComposicaoDrinkRepository composicaoDrinkRepository;
     @Mock private MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
+    @Mock private UserRepository userRepository;
 
     private MovimentacaoEstoqueService movimentacaoEstoqueService;
 
@@ -69,6 +72,7 @@ class MovimentacaoEstoqueServiceTest {
                 estoqueRepository,
                 composicaoDrinkRepository,
                 movimentacaoEstoqueRepository,
+                userRepository,
                 List.of(
                         new EstrategiaEntradaInicial(), new EstrategiaEntrada(), new EstrategiaSaida(),
                         new EstrategiaAjustePositivo(), new EstrategiaAjusteNegativo(),
@@ -81,6 +85,9 @@ class MovimentacaoEstoqueServiceTest {
                     movimentacao.setId(1L);
                     return movimentacao;
                 });
+        UserEntity usuario = new UserEntity();
+        usuario.setName("Operador de teste");
+        lenient().when(userRepository.findById(any())).thenReturn(Optional.of(usuario));
     }
 
     @AfterEach
