@@ -3,6 +3,8 @@ package valhalla.core.stock.app.modules.estoque.service;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -17,8 +19,12 @@ import valhalla.core.stock.app.modules.estoque.exception.CategoriaJaExisteExcept
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaPossuiProdutosException;
 import valhalla.core.stock.app.modules.estoque.mapper.CategoriaMapper;
 import valhalla.core.stock.app.modules.estoque.repository.CategoriaRepository;
+import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
+import valhalla.core.stock.app.shared.pagination.Paginacao;
+import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
 
-import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -37,14 +43,34 @@ public class CategoriaService {
                 authentication
             )
             """)
-    public List<CategoriaResponseDto> listarCategorias() {
+    public RespostaPaginadaDto<CategoriaResponseDto> listarCategorias(
+            String busca,
+            Boolean ativo,
+            int pagina,
+            int tamanho,
+            String ordenarPor,
+            DirecaoOrdenacao direcao
+    ) {
         UUID idEstabelecimento = obterIdEstabelecimentoAutenticado();
+        String buscaNormalizada = busca == null || busca.isBlank() ? null : busca.trim().toLowerCase(Locale.ROOT);
+        Specification<CategoriaEntity> especificacao = (root, query, builder) ->
+                builder.equal(root.get("estabelecimentoId"), idEstabelecimento);
 
-        return categoriaRepository
-                .findAllByEstabelecimentoIdAndAtivoTrueOrderByNomeAsc(idEstabelecimento)
-                .stream()
-                .map(CategoriaMapper::paraResposta)
-                .toList();
+        if (buscaNormalizada != null) {
+            especificacao = especificacao.and((root, query, builder) -> builder.like(
+                    builder.lower(root.get("nome")), "%" + buscaNormalizada + "%"
+            ));
+        }
+        if (ativo != null) {
+            especificacao = especificacao.and((root, query, builder) -> builder.equal(root.get("ativo"), ativo));
+        }
+
+        Page<CategoriaEntity> resultado = categoriaRepository.findAll(
+                especificacao,
+                Paginacao.criar(pagina, tamanho, ordenarPor, direcao,
+                        Set.of("nome", "criadoEm", "atualizadoEm"))
+        );
+        return RespostaPaginadaDto.de(resultado, CategoriaMapper::paraResposta);
     }
 
     @Transactional

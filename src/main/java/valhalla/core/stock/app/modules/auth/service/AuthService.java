@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import valhalla.core.stock.app.modules.auth.dto.RequisicaoLoginDto;
 import valhalla.core.stock.app.modules.auth.dto.RespostaTokenDto;
 import valhalla.core.stock.app.modules.auth.security.CustomUserDetailsService;
+import valhalla.core.stock.app.modules.auth.security.CsrfTokenStore;
 import valhalla.core.stock.app.modules.auth.security.JwtService;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
@@ -30,6 +31,7 @@ public class AuthService {
     private final TokenStateService tokenStateService;
     private final JwtDecoder accessTokenDecoder;
     private final JwtDecoder refreshTokenDecoder;
+    private final CsrfTokenStore csrfTokenStore;
 
     public AuthService(
             AuthenticationManager authenticationManager,
@@ -37,7 +39,8 @@ public class AuthService {
             UserRepository userRepository,
             TokenStateService tokenStateService,
             @Qualifier("jwtDecoder") JwtDecoder accessTokenDecoder,
-            @Qualifier("refreshTokenDecoder") JwtDecoder refreshTokenDecoder
+            @Qualifier("refreshTokenDecoder") JwtDecoder refreshTokenDecoder,
+            CsrfTokenStore csrfTokenStore
     ) {
         this.authenticationManager = authenticationManager;
         this.jwtService = jwtService;
@@ -45,6 +48,7 @@ public class AuthService {
         this.tokenStateService = tokenStateService;
         this.accessTokenDecoder = accessTokenDecoder;
         this.refreshTokenDecoder = refreshTokenDecoder;
+        this.csrfTokenStore = csrfTokenStore;
     }
 
     @Transactional
@@ -97,11 +101,13 @@ public class AuthService {
 
         try {
             Jwt jwt = refreshTokenDecoder.decode(refreshToken);
+            UUID refreshJti = extractRefreshJti(jwt);
             tokenStateService.revoke(
                     extractUserId(jwt),
                     null,
-                    extractRefreshJti(jwt)
+                    refreshJti
             );
+            csrfTokenStore.remover(refreshJti);
         } catch (JwtException | InvalidRefreshTokenException ignored) {
             // Logout é idempotente: cookies inválidos também são descartados.
         }
@@ -114,11 +120,13 @@ public class AuthService {
 
         try {
             Jwt jwt = accessTokenDecoder.decode(accessToken);
+            UUID sessionJti = parseUuid(jwt.getClaimAsString("sessionJti"));
             tokenStateService.revoke(
                     extractUserId(jwt),
                     parseUuid(jwt.getId()),
-                    parseUuid(jwt.getClaimAsString("sessionJti"))
+                    sessionJti
             );
+            csrfTokenStore.remover(sessionJti);
         } catch (JwtException | InvalidRefreshTokenException ignored) {
             // Logout é idempotente: cookies inválidos também são descartados.
         }
@@ -166,9 +174,11 @@ public class AuthService {
                     refreshJti,
                     refreshExpiresAt
             );
+            csrfTokenStore.remover(expectedRefreshJti);
         }
 
-        return new RespostaTokenDto(accessToken, refreshToken, user.getName());
+        String tokenCsrf = csrfTokenStore.criar(refreshJti, refreshExpiresAt);
+        return new RespostaTokenDto(accessToken, refreshToken, tokenCsrf, user.getName());
     }
 
     private Authentication authenticationFor(UserEntity user) {

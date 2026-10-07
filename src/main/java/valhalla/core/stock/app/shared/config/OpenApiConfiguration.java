@@ -16,12 +16,25 @@ public class OpenApiConfiguration {
                 .info(new Info()
                         .title("Valhalla Core Stock API")
                         .version("v1")
-                        .description("API de autenticação, usuários, perfis e permissões."))
+                        .description("""
+                                API de autenticação, usuários, perfis, permissões e estoque.
+
+                                Operações autenticadas que alteram estado exigem o header X-XSRF-TOKEN.
+                                Após login ou refresh, o frontend deve chamar GET /auth/csrf usando o cookie
+                                HttpOnly accessToken e enviar o campo token retornado nesse header. O token CSRF
+                                é controlado pelo backend e não é armazenado em cookie.
+                                """))
                 .components(new Components().addSecuritySchemes("accessTokenCookie",
                         new SecurityScheme()
                                 .type(SecurityScheme.Type.APIKEY)
                                 .in(SecurityScheme.In.COOKIE)
                                 .name("accessToken")
-                                .description("Cookie HttpOnly criado por POST /auth/login.")));
+                                .description("Cookie HttpOnly criado por POST /auth/login."))
+                        .addSecuritySchemes("csrfTokenHeader",
+                                new SecurityScheme()
+                                        .type(SecurityScheme.Type.APIKEY)
+                                        .in(SecurityScheme.In.HEADER)
+                                        .name("X-XSRF-TOKEN")
+                                        .description("Obrigatório em POST, PUT, PATCH e DELETE autenticados.")));
     }
 }

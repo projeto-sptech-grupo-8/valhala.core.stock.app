@@ -13,35 +13,44 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-import valhalla.core.stock.app.modules.estoque.dto.CategoriaRequestDto;
-import valhalla.core.stock.app.modules.estoque.dto.CategoriaAtualizacaoRequestDto;
-import valhalla.core.stock.app.modules.estoque.dto.CategoriaResponseDto;
-import valhalla.core.stock.app.modules.estoque.service.CategoriaService;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import valhalla.core.stock.app.modules.estoque.dto.ProdutoAtualizacaoRequestDto;
+import valhalla.core.stock.app.modules.estoque.dto.ProdutoRequestDto;
+import valhalla.core.stock.app.modules.estoque.dto.ProdutoResponseDto;
+import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
+import valhalla.core.stock.app.modules.estoque.service.ProdutoService;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
-import valhalla.core.stock.app.shared.pagination.Paginacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
 
 import java.net.URI;
+import java.util.UUID;
 
 @RestController
 @Validated
-@RequestMapping("/categorias")
-@Tag(name = "Categorias", description = "Categorias de produtos do estabelecimento autenticado.")
+@RequestMapping("/produtos")
+@Tag(name = "Produtos", description = "Produtos do estabelecimento autenticado.")
 @SecurityRequirement(name = "accessTokenCookie")
-public class CategoriaController {
+public class ProdutoController {
 
-    private final CategoriaService categoriaService;
+    private final ProdutoService produtoService;
 
-    public CategoriaController(CategoriaService categoriaService) {
-        this.categoriaService = categoriaService;
+    public ProdutoController(ProdutoService produtoService) {
+        this.produtoService = produtoService;
     }
 
     @GetMapping
-    @Operation(summary = "Listar categorias do estabelecimento com filtros e paginação")
+    @Operation(summary = "Listar produtos com filtros, ordenação e paginação aplicados no banco")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Categorias retornadas."),
+            @ApiResponse(responseCode = "200", description = "Produtos retornados."),
             @ApiResponse(responseCode = "400", description = "Parâmetros de consulta inválidos.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
             @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
@@ -49,48 +58,36 @@ public class CategoriaController {
             @ApiResponse(responseCode = "403", description = "Usuário sem permissão para visualizar estoque.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
-    public ResponseEntity<RespostaPaginadaDto<CategoriaResponseDto>> listarCategorias(
-            @Parameter(description = "Trecho do nome da categoria. Omitido: sem filtro.", example = "beb")
+    public ResponseEntity<RespostaPaginadaDto<ProdutoResponseDto>> listarProdutos(
+            @Parameter(description = "Busca por nome, SKU ou código de barras", example = "absolut")
             @RequestParam(required = false) String busca,
-            @Parameter(description = "Situação da categoria. Omitido: retorna ativas e inativas.", example = "true")
+            @Parameter(description = "ID da categoria", example = "1")
+            @RequestParam(required = false) Integer categoriaId,
+            @Parameter(description = "Tipo do produto: PADRAO ou DRINK. Omitido: ambos.", example = "PADRAO")
+            @RequestParam(required = false) ProdutoTipo tipo,
+            @Parameter(description = "Situação do produto. Omitido: ativos e inativos.", example = "true")
             @RequestParam(required = false) Boolean ativo,
             @Parameter(description = "Número da página, iniciado em 0. Padrão: 0.", schema = @Schema(defaultValue = "0", minimum = "0"))
             @RequestParam(defaultValue = "0") @Min(0) int pagina,
             @Parameter(description = "Itens por página. Padrão: 20; máximo: 100.", schema = @Schema(defaultValue = "20", minimum = "1", maximum = "100"))
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int tamanho,
-            @Parameter(description = "Campo de ordenação: nome, criadoEm ou atualizadoEm. Padrão: nome.", schema = @Schema(defaultValue = "nome"))
+            @Parameter(description = "Campo de ordenação: nome, sku, precoVenda, precoCusto, criadoEm ou atualizadoEm. Padrão: nome.", schema = @Schema(defaultValue = "nome"))
             @RequestParam(defaultValue = "nome") String ordenarPor,
             @Parameter(description = "Direção da ordenação: ASC ou DESC. Padrão: ASC.", schema = @Schema(defaultValue = "ASC"))
             @RequestParam(defaultValue = "ASC") DirecaoOrdenacao direcao
     ) {
-        return ResponseEntity.ok(categoriaService.listarCategorias(
-                busca, ativo, pagina, tamanho, ordenarPor, direcao
+        return ResponseEntity.ok(produtoService.listarProdutos(
+                busca, categoriaId, tipo, ativo, pagina, tamanho, ordenarPor, direcao
         ));
     }
 
     @PostMapping
     @SecurityRequirement(name = "csrfTokenHeader")
-    @Operation(summary = "Criar nova categoria no estabelecimento")
+    @Operation(summary = "Criar produto e gerar SKU no backend")
     @ApiResponses({
-            @ApiResponse(responseCode = "201", description = "Categoria criada."),
+            @ApiResponse(responseCode = "201", description = "Produto criado."),
             @ApiResponse(responseCode = "400", description = "Dados de entrada inválidos.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
-            @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
-                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
-            @ApiResponse(responseCode = "403", description = "Usuário sem permissão para gerenciar estoque.",
-                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
-            @ApiResponse(responseCode = "409", description = "Nome de categoria duplicado.",
-                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
-    })
-    public ResponseEntity<CategoriaResponseDto> criarCategoria(@Valid @RequestBody CategoriaRequestDto requestDto) {
-        CategoriaResponseDto categoriaCriada = categoriaService.criarCategoria(requestDto);
-        return ResponseEntity.created(URI.create("/categorias/" + categoriaCriada.id())).body(categoriaCriada);
-    }
-
-    @GetMapping("/{id}")
-    @Operation(summary = "Buscar categoria por ID")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Categoria encontrada."),
             @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
             @ApiResponse(responseCode = "403", description = "Usuário sem permissão ou categoria de outro estabelecimento.",
@@ -98,49 +95,65 @@ public class CategoriaController {
             @ApiResponse(responseCode = "404", description = "Categoria não encontrada.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
-    public ResponseEntity<CategoriaResponseDto> buscarCategoria(@PathVariable("id") Integer idCategoria) {
-        return ResponseEntity.ok(categoriaService.buscarCategoria(idCategoria));
+    public ResponseEntity<ProdutoResponseDto> criarProduto(
+            @Valid @RequestBody ProdutoRequestDto requestDto
+    ) {
+        ProdutoResponseDto produtoCriado = produtoService.criarProduto(requestDto);
+        return ResponseEntity.created(URI.create("/produtos/" + produtoCriado.id())).body(produtoCriado);
+    }
+
+    @GetMapping("/{id}")
+    @Operation(summary = "Buscar produto por ID")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Produto encontrado."),
+            @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Produto de outro estabelecimento.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Produto não encontrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    public ResponseEntity<ProdutoResponseDto> buscarProduto(@PathVariable UUID id) {
+        return ResponseEntity.ok(produtoService.buscarProduto(id));
     }
 
     @PatchMapping("/{id}")
     @SecurityRequirement(name = "csrfTokenHeader")
-    @Operation(summary = "Atualizar categoria")
+    @Operation(summary = "Atualizar dados do produto")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Categoria atualizada."),
+            @ApiResponse(responseCode = "200", description = "Produto atualizado."),
             @ApiResponse(responseCode = "400", description = "Dados de entrada inválidos.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
             @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
-            @ApiResponse(responseCode = "403", description = "Usuário sem permissão ou categoria de outro estabelecimento.",
+            @ApiResponse(responseCode = "403", description = "Usuário sem permissão ou produto de outro estabelecimento.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
-            @ApiResponse(responseCode = "404", description = "Categoria não encontrada.",
-                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
-            @ApiResponse(responseCode = "409", description = "Nome de categoria duplicado.",
+            @ApiResponse(responseCode = "404", description = "Produto ou categoria não encontrado.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
-    public ResponseEntity<CategoriaResponseDto> atualizarCategoria(
-            @PathVariable("id") Integer idCategoria,
-            @Valid @RequestBody CategoriaAtualizacaoRequestDto requestDto
+    public ResponseEntity<ProdutoResponseDto> atualizarProduto(
+            @PathVariable UUID id,
+            @Valid @RequestBody ProdutoAtualizacaoRequestDto requestDto
     ) {
-        return ResponseEntity.ok(categoriaService.atualizarCategoria(idCategoria, requestDto));
+        return ResponseEntity.ok(produtoService.atualizarProduto(id, requestDto));
     }
 
     @DeleteMapping("/{id}")
     @SecurityRequirement(name = "csrfTokenHeader")
-    @Operation(summary = "Excluir categoria")
+    @Operation(summary = "Excluir produto sem movimentações ou vínculos")
     @ApiResponses({
-            @ApiResponse(responseCode = "204", description = "Categoria excluída."),
+            @ApiResponse(responseCode = "204", description = "Produto excluído."),
             @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
-            @ApiResponse(responseCode = "403", description = "Usuário sem permissão ou categoria de outro estabelecimento.",
+            @ApiResponse(responseCode = "403", description = "Usuário sem permissão ou produto de outro estabelecimento.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
-            @ApiResponse(responseCode = "404", description = "Categoria não encontrada.",
+            @ApiResponse(responseCode = "404", description = "Produto não encontrado.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
-            @ApiResponse(responseCode = "409", description = "Categoria possui produtos vinculados.",
+            @ApiResponse(responseCode = "409", description = "Produto possui movimentações ou vínculos.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
-    public ResponseEntity<Void> excluirCategoria(@PathVariable("id") Integer idCategoria) {
-        categoriaService.excluirCategoria(idCategoria);
+    public ResponseEntity<Void> excluirProduto(@PathVariable UUID id) {
+        produtoService.excluirProduto(id);
         return ResponseEntity.noContent().build();
     }
 }

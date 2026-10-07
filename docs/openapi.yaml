@@ -1,0 +1,2373 @@
+openapi: 3.1.0
+info:
+  title: Valhalla Core Stock API
+  description: |
+    API de autenticação, usuários, perfis, permissões e estoque.
+
+    Operações autenticadas que alteram estado exigem o header X-XSRF-TOKEN.
+    Após login ou refresh, o frontend deve chamar GET /auth/csrf usando o cookie
+    HttpOnly accessToken e enviar o campo token retornado nesse header. O token CSRF
+    é controlado pelo backend e não é armazenado em cookie.
+  version: v1
+servers:
+- url: http://localhost
+  description: Generated server url
+tags:
+- name: Autenticação
+  description: Endpoints responsáveis pela autenticação e gerenciamento da sessão
+    do usuário.
+- name: Produtos
+  description: Produtos do estabelecimento autenticado.
+- name: Movimentações de estoque
+  description: Histórico e alterações auditáveis do saldo dos produtos.
+- name: Receitas de drinks
+  description: Ingredientes rastreáveis dos drinks do estabelecimento autenticado.
+- name: Categorias
+  description: Categorias de produtos do estabelecimento autenticado.
+- name: Autorizações
+  description: "Perfis, funcionalidades e permissões individuais."
+- name: Usuários
+  description: Operações de gerenciamento de usuários.
+paths:
+  /drinks/{idDrink}/receita:
+    get:
+      tags:
+      - Receitas de drinks
+      summary: Consultar a receita de um drink
+      operationId: buscarReceita
+      parameters:
+      - name: idDrink
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: Receita retornada.
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IngredienteDrinkResponseDto"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou drink de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Drink não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    put:
+      tags:
+      - Receitas de drinks
+      summary: Substituir integralmente a receita de um drink
+      operationId: substituirReceita
+      parameters:
+      - name: idDrink
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReceitaDrinkRequestDto"
+        required: true
+      responses:
+        "200":
+          description: Receita atualizada.
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IngredienteDrinkResponseDto"
+        "400":
+          description: Dados ou regras da receita inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou produto de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Drink ou ingrediente não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /autorizacoes/usuarios/{userId}/sobrescritas-permissao:
+    put:
+      tags:
+      - Autorizações
+      summary: Substituir GRANTs e REVOKEs individuais do usuário
+      operationId: substituirSobrescritasPermissaoUsuario
+      parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoSobrescritasPermissaoUsuarioDto"
+        required: true
+      responses:
+        "204":
+          description: Sobrescritas substituídas.
+        "400":
+          description: Body inválido ou código repetido.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Usuário ou funcionalidade não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: A alteração removeria o último usuário apto a criar usuários.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /autorizacoes/perfis/{profileId}/funcionalidades/codigos:
+    put:
+      tags:
+      - Autorizações
+      summary: Substituir funcionalidades de um perfil por códigos
+      operationId: substituirFuncionalidadesPerfil
+      parameters:
+      - name: profileId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+              uniqueItems: true
+        required: true
+      responses:
+        "200":
+          description: Funcionalidades substituídas.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPerfilDto"
+        "400":
+          description: Body inválido.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Perfil ou funcionalidade não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: A alteração removeria o último usuário apto a criar usuários.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /usuario:
+    get:
+      tags:
+      - Usuários
+      summary: Listar usuários
+      description: Retorna usuários do estabelecimento da sessão. Requer USUARIOS_VISUALIZAR.
+      operationId: listarUsuarios
+      responses:
+        "200":
+          description: Lista de usuários retornada com sucesso.
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RespostaUsuarioDto"
+        "403":
+          description: Usuário sem permissão.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    post:
+      tags:
+      - Usuários
+      summary: Criar usuário
+      description: Cria usuário no estabelecimento da sessão. Requer USUARIOS_CRIAR.
+      operationId: criarUsuario
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoCriacaoUsuarioDto"
+        required: true
+      responses:
+        "201":
+          description: Usuário criado com sucesso.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaUsuarioDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: E-mail já cadastrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /produtos:
+    get:
+      tags:
+      - Produtos
+      summary: "Listar produtos com filtros, ordenação e paginação aplicados no banco"
+      operationId: listarProdutos
+      parameters:
+      - name: busca
+        in: query
+        description: "Busca por nome, SKU ou código de barras"
+        required: false
+        schema:
+          type: string
+        example: absolut
+      - name: categoriaId
+        in: query
+        description: ID da categoria
+        required: false
+        schema:
+          type: integer
+          format: int32
+        example: 1
+      - name: tipo
+        in: query
+        description: "Tipo do produto: PADRAO ou DRINK. Omitido: ambos."
+        required: false
+        schema:
+          type: string
+          enum:
+          - PADRAO
+          - DRINK
+        example: PADRAO
+      - name: ativo
+        in: query
+        description: "Situação do produto. Omitido: ativos e inativos."
+        required: false
+        schema:
+          type: boolean
+        example: true
+      - name: pagina
+        in: query
+        description: "Número da página, iniciado em 0. Padrão: 0."
+        required: false
+        schema:
+          type: string
+          minimum: 0
+      - name: tamanho
+        in: query
+        description: "Itens por página. Padrão: 20; máximo: 100."
+        required: false
+        schema:
+          type: string
+          maximum: 100
+          minimum: 1
+      - name: ordenarPor
+        in: query
+        description: "Campo de ordenação: nome, sku, precoVenda, precoCusto, criadoEm\
+          \ ou atualizadoEm. Padrão: nome."
+        required: false
+        schema:
+          type: string
+      - name: direcao
+        in: query
+        description: "Direção da ordenação: ASC ou DESC. Padrão: ASC."
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: Produtos retornados.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPaginadaDtoProdutoResponseDto"
+        "400":
+          description: Parâmetros de consulta inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para visualizar estoque.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    post:
+      tags:
+      - Produtos
+      summary: Criar produto e gerar SKU no backend
+      operationId: criarProduto
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProdutoRequestDto"
+        required: true
+      responses:
+        "201":
+          description: Produto criado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ProdutoResponseDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou categoria de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Categoria não encontrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /movimentacoes-estoque:
+    get:
+      tags:
+      - Movimentações de estoque
+      summary: "Listar movimentações com filtros, ordenação e paginação aplicados\
+        \ no banco"
+      operationId: listarMovimentacoes
+      parameters:
+      - name: produtoId
+        in: query
+        description: "ID do produto movimentado. Omitido: todos os produtos."
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: tipo
+        in: query
+        description: "Tipo da movimentação. Omitido: todos os tipos."
+        required: false
+        schema:
+          type: string
+          enum:
+          - ENTRADA_INICIAL
+          - ENTRADA
+          - SAIDA
+          - AJUSTE_POSITIVO
+          - AJUSTE_NEGATIVO
+          - PERDA
+          - SAIDA_DRINK
+        example: SAIDA
+      - name: usuarioId
+        in: query
+        description: "ID do usuário que registrou a movimentação. Omitido: todos os\
+          \ usuários."
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: dataInicial
+        in: query
+        description: "Data inicial inclusiva, em yyyy-MM-dd. Omitido: sem limite inferior."
+        required: false
+        schema:
+          type: string
+          format: date
+        example: 2026-10-01
+      - name: dataFinal
+        in: query
+        description: "Data final inclusiva, em yyyy-MM-dd. Omitido: sem limite superior."
+        required: false
+        schema:
+          type: string
+          format: date
+        example: 2026-10-31
+      - name: pagina
+        in: query
+        description: "Número da página, iniciado em 0. Padrão: 0."
+        required: false
+        schema:
+          type: string
+          minimum: 0
+      - name: tamanho
+        in: query
+        description: "Itens por página. Padrão: 20; máximo: 100."
+        required: false
+        schema:
+          type: string
+          maximum: 100
+          minimum: 1
+      - name: ordenarPor
+        in: query
+        description: "Campo de ordenação: ocorridoEm, tipo, quantidade ou saldoPosterior.\
+          \ Padrão: ocorridoEm."
+        required: false
+        schema:
+          type: string
+      - name: direcao
+        in: query
+        description: "Direção da ordenação: ASC ou DESC. Padrão: DESC."
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: Movimentações retornadas.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPaginadaDtoMovimentacaoResponseDto"
+        "400":
+          description: Parâmetros de consulta inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para visualizar estoque.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    post:
+      tags:
+      - Movimentações de estoque
+      summary: "Registrar entrada, saída, ajuste ou perda de produto padrão"
+      operationId: registrarMovimentacao
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MovimentacaoRequestDto"
+        required: true
+      responses:
+        "201":
+          description: Movimentação registrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/MovimentacaoResponseDto"
+        "400":
+          description: "Dados inválidos, estoque insuficiente ou regra violada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou produto de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Produto ou estoque não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /movimentacoes-estoque/saida-drink:
+    post:
+      tags:
+      - Movimentações de estoque
+      summary: Baixar todos os ingredientes de um drink
+      operationId: registrarSaidaDrink
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaidaDrinkRequestDto"
+        required: true
+      responses:
+        "201":
+          description: Ingredientes baixados.
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MovimentacaoResponseDto"
+        "400":
+          description: Receita inválida ou saldo insuficiente.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou drink de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: "Drink, ingrediente ou estoque não encontrado."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /categorias:
+    get:
+      tags:
+      - Categorias
+      summary: Listar categorias do estabelecimento com filtros e paginação
+      operationId: listarCategorias
+      parameters:
+      - name: busca
+        in: query
+        description: "Trecho do nome da categoria. Omitido: sem filtro."
+        required: false
+        schema:
+          type: string
+        example: beb
+      - name: ativo
+        in: query
+        description: "Situação da categoria. Omitido: retorna ativas e inativas."
+        required: false
+        schema:
+          type: boolean
+        example: true
+      - name: pagina
+        in: query
+        description: "Número da página, iniciado em 0. Padrão: 0."
+        required: false
+        schema:
+          type: string
+          minimum: 0
+      - name: tamanho
+        in: query
+        description: "Itens por página. Padrão: 20; máximo: 100."
+        required: false
+        schema:
+          type: string
+          maximum: 100
+          minimum: 1
+      - name: ordenarPor
+        in: query
+        description: "Campo de ordenação: nome, criadoEm ou atualizadoEm. Padrão:\
+          \ nome."
+        required: false
+        schema:
+          type: string
+      - name: direcao
+        in: query
+        description: "Direção da ordenação: ASC ou DESC. Padrão: ASC."
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: Categorias retornadas.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPaginadaDtoCategoriaResponseDto"
+        "400":
+          description: Parâmetros de consulta inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para visualizar estoque.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    post:
+      tags:
+      - Categorias
+      summary: Criar nova categoria no estabelecimento
+      operationId: criarCategoria
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoriaRequestDto"
+        required: true
+      responses:
+        "201":
+          description: Categoria criada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CategoriaResponseDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para gerenciar estoque.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Nome de categoria duplicado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /autorizacoes/perfis:
+    get:
+      tags:
+      - Autorizações
+      summary: Listar perfis do estabelecimento
+      operationId: listarPerfis
+      responses:
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "200":
+          description: Perfis retornados.
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RespostaPerfilDto"
+      security:
+      - accessTokenCookie: []
+    post:
+      tags:
+      - Autorizações
+      summary: Criar perfil
+      operationId: criarPerfil
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoPerfilDto"
+        required: true
+      responses:
+        "201":
+          description: Perfil criado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPerfilDto"
+        "400":
+          description: Body inválido.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Já existe perfil com esse nome.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /auth/refresh:
+    post:
+      tags:
+      - Autenticação
+      summary: Renovar autenticação
+      description: Utiliza o refresh token armazenado no cookie para gerar novos tokens.
+      operationId: refresh
+      parameters:
+      - name: refreshToken
+        in: cookie
+        description: Cookie HttpOnly com o refresh token.
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: Autenticação renovada com sucesso.
+          headers:
+            Set-Cookie:
+              description: Cookies HttpOnly accessToken e refreshToken são substituídos.
+              style: simple
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaAutenticacaoDto"
+        "401":
+          description: "Refresh token ausente, inválido ou expirado."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - csrfTokenHeader: []
+  /auth/logout:
+    post:
+      tags:
+      - Autenticação
+      summary: Realizar logout
+      description: Invalida os tokens atuais e remove os cookies de autenticação.
+      operationId: logout
+      parameters:
+      - name: refreshToken
+        in: cookie
+        description: Cookie HttpOnly com o refresh token.
+        required: false
+        schema:
+          type: string
+      - name: accessToken
+        in: cookie
+        description: Cookie HttpOnly com o access token.
+        required: false
+        schema:
+          type: string
+      responses:
+        "204":
+          description: Logout realizado e cookies removidos.
+          headers:
+            Set-Cookie:
+              description: Cookies accessToken e refreshToken são expirados.
+              style: simple
+      security:
+      - csrfTokenHeader: []
+  /auth/login:
+    post:
+      tags:
+      - Autenticação
+      summary: Realizar login
+      description: Autentica o usuário e cria os cookies de acesso e renovação da
+        sessão.
+      operationId: login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoLoginDto"
+        required: true
+      responses:
+        "200":
+          description: Autenticação realizada com sucesso.
+          headers:
+            Set-Cookie:
+              description: Cookies HttpOnly accessToken e refreshToken são criados.
+              style: simple
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaAutenticacaoDto"
+        "401":
+          description: Usuário ou senha inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+  /usuario/{id}:
+    get:
+      tags:
+      - Usuários
+      summary: Buscar usuário por ID
+      description: Busca o próprio usuário ou outro usuário quando houver USUARIOS_VISUALIZAR.
+      operationId: buscarUsuarioPorId
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: Usuário encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaUsuarioDto"
+        "403":
+          description: Usuário sem permissão.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Usuário não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    delete:
+      tags:
+      - Usuários
+      summary: Excluir usuário por ID
+      description: Exclui o próprio usuário ou outro usuário com USUARIOS_EXCLUIR.
+      operationId: deletarUsuarioPorId
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "204":
+          description: Usuário excluído com sucesso.
+        "403":
+          description: Usuário sem permissão.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Usuário não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Usuário possui vínculos ou é o último administrador.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    patch:
+      tags:
+      - Usuários
+      summary: Atualizar usuário por ID
+      description: Atualiza o próprio usuário ou outro usuário com USUARIOS_EDITAR.
+      operationId: atualizarUsuario
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoAtualizacaoUsuarioDto"
+        required: true
+      responses:
+        "200":
+          description: Usuário atualizado com sucesso.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaUsuarioDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Usuário não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: E-mail duplicado ou último administrador removido.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /usuario/me:
+    get:
+      tags:
+      - Usuários
+      summary: Buscar usuário autenticado
+      description: Retorna os dados do usuário atualmente autenticado.
+      operationId: buscarUsuarioAtual
+      responses:
+        "200":
+          description: Dados do usuário retornados com sucesso.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaUsuarioDto"
+        "401":
+          description: Usuário não autenticado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    delete:
+      tags:
+      - Usuários
+      summary: Excluir usuário autenticado
+      description: Exclui a conta do próprio usuário autenticado.
+      operationId: deletarUsuarioAtual
+      responses:
+        "204":
+          description: Usuário excluído com sucesso.
+        "401":
+          description: Usuário não autenticado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Usuário possui vínculos ou é o último administrador.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    patch:
+      tags:
+      - Usuários
+      summary: Atualizar usuário autenticado
+      description: Atualiza os dados do próprio usuário autenticado.
+      operationId: atualizarUsuarioAtual
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoAtualizacaoUsuarioDto"
+        required: true
+      responses:
+        "200":
+          description: Usuário atualizado com sucesso.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaUsuarioDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: Usuário não autenticado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Não é permitido alterar perfil ou status.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: E-mail duplicado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /produtos/{id}:
+    get:
+      tags:
+      - Produtos
+      summary: Buscar produto por ID
+      operationId: buscarProduto
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: Produto encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ProdutoResponseDto"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Produto de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Produto não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    delete:
+      tags:
+      - Produtos
+      summary: Excluir produto sem movimentações ou vínculos
+      operationId: excluirProduto
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "204":
+          description: Produto excluído.
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou produto de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Produto não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Produto possui movimentações ou vínculos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    patch:
+      tags:
+      - Produtos
+      summary: Atualizar dados do produto
+      operationId: atualizarProduto
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProdutoAtualizacaoRequestDto"
+        required: true
+      responses:
+        "200":
+          description: Produto atualizado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ProdutoResponseDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou produto de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Produto ou categoria não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /categorias/{id}:
+    get:
+      tags:
+      - Categorias
+      summary: Buscar categoria por ID
+      operationId: buscarCategoria
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+      responses:
+        "200":
+          description: Categoria encontrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CategoriaResponseDto"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou categoria de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Categoria não encontrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    delete:
+      tags:
+      - Categorias
+      summary: Excluir categoria
+      operationId: excluirCategoria
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+      responses:
+        "204":
+          description: Categoria excluída.
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou categoria de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Categoria não encontrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Categoria possui produtos vinculados.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    patch:
+      tags:
+      - Categorias
+      summary: Atualizar categoria
+      operationId: atualizarCategoria
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoriaAtualizacaoRequestDto"
+        required: true
+      responses:
+        "200":
+          description: Categoria atualizada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CategoriaResponseDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou categoria de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Categoria não encontrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Nome de categoria duplicado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /autorizacoes/perfis/{profileId}:
+    get:
+      tags:
+      - Autorizações
+      summary: Buscar perfil e suas funcionalidades
+      operationId: buscarPerfil
+      parameters:
+      - name: profileId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+      responses:
+        "200":
+          description: Perfil retornado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPerfilDto"
+        "404":
+          description: Perfil não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    delete:
+      tags:
+      - Autorizações
+      summary: Excluir perfil sem usuários vinculados
+      operationId: excluirPerfil
+      parameters:
+      - name: profileId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+      responses:
+        "204":
+          description: Perfil excluído.
+        "404":
+          description: Perfil não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Perfil possui usuários vinculados.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    patch:
+      tags:
+      - Autorizações
+      summary: Atualizar nome ou descrição do perfil
+      operationId: atualizarPerfil
+      parameters:
+      - name: profileId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoAtualizacaoPerfilDto"
+        required: true
+      responses:
+        "200":
+          description: Perfil atualizado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPerfilDto"
+        "400":
+          description: Body inválido ou sem campos para atualizar.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Perfil não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Já existe perfil com esse nome.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /autorizacoes/usuarios/{userId}/permissoes:
+    get:
+      tags:
+      - Autorizações
+      summary: Consultar permissões efetivas e suas origens
+      operationId: buscarPermissoesUsuario
+      parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: Permissões retornadas.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPermissoesUsuarioDto"
+        "404":
+          description: Usuário não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /autorizacoes/funcionalidades:
+    get:
+      tags:
+      - Autorizações
+      summary: Listar funcionalidades disponíveis
+      operationId: listarFuncionalidades
+      responses:
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "200":
+          description: Funcionalidades retornadas.
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RespostaFuncionalidadeDto"
+      security:
+      - accessTokenCookie: []
+  /auth/csrf:
+    get:
+      tags:
+      - Autenticação
+      summary: Obter token CSRF da sessão autenticada
+      operationId: obterTokenCsrf
+      responses:
+        "200":
+          description: Token CSRF retornado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaCsrfTokenDto"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+components:
+  schemas:
+    IngredienteDrinkRequestDto:
+      type: object
+      description: Ingrediente rastreável da receita de um drink
+      properties:
+        produtoId:
+          type: string
+          format: uuid
+        quantidade:
+          type: number
+          example: 50
+        unidadeConsumo:
+          type: string
+          description: ML para ingrediente fracionado; UN para ingrediente unitário
+          enum:
+          - ML
+          - UN
+          example: ML
+      required:
+      - produtoId
+      - quantidade
+      - unidadeConsumo
+    ReceitaDrinkRequestDto:
+      type: object
+      description: Receita completa de um drink. A atualização substitui todos os
+        ingredientes atuais.
+      properties:
+        ingredientes:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngredienteDrinkRequestDto"
+          minItems: 1
+      required:
+      - ingredientes
+    ApiErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          format: int32
+        message:
+          type: string
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string
+    IngredienteDrinkResponseDto:
+      type: object
+      description: Ingrediente da receita de um drink
+      properties:
+        produtoId:
+          type: string
+          format: uuid
+        produtoNome:
+          type: string
+        quantidade:
+          type: number
+        unidadeConsumo:
+          type: string
+          enum:
+          - ML
+          - UN
+    RequisicaoSobrescritasPermissaoUsuarioDto:
+      type: object
+      properties:
+        sobrescritas:
+          type: array
+          items:
+            $ref: "#/components/schemas/SobrescritaPermissaoUsuarioDto"
+          uniqueItems: true
+      required:
+      - sobrescritas
+    SobrescritaPermissaoUsuarioDto:
+      type: object
+      properties:
+        codigoFuncionalidade:
+          type: string
+          minLength: 1
+        efeito:
+          type: string
+          enum:
+          - GRANT
+          - REVOKE
+      required:
+      - codigoFuncionalidade
+      - efeito
+    RespostaPerfilDto:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int32
+        nome:
+          type: string
+        descricao:
+          type: string
+        codigosFuncionalidades:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+    RequisicaoCriacaoUsuarioDto:
+      type: object
+      properties:
+        nome:
+          type: string
+          description: Nome completo do usuário
+          example: Lucas Peres
+          maxLength: 100
+          minLength: 0
+        email:
+          type: string
+          format: email
+          description: E-mail utilizado pelo usuário
+          example: lucas@exemplo.com
+          minLength: 1
+        telefone:
+          type: string
+          description: Telefone do usuário
+          example: "11999999999"
+          maxLength: 13
+          minLength: 0
+        senha:
+          type: string
+          description: Senha do usuário. Deve possuir entre 8 e 72 caracteres
+          example: Senha@123
+          maxLength: 72
+          minLength: 8
+        nomePerfil:
+          type: string
+          description: Nome do perfil de acesso do usuário
+          example: GERENTE
+          maxLength: 100
+          minLength: 0
+      required:
+      - email
+      - nome
+      - nomePerfil
+      - senha
+    RespostaUsuarioDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único do usuário
+          example: 550e8400-e29b-41d4-a716-446655440000
+        nome:
+          type: string
+          description: Nome completo do usuário
+          example: Lucas Peres
+        email:
+          type: string
+          description: E-mail do usuário
+          example: lucas@exemplo.com
+        telefone:
+          type: string
+          description: Telefone do usuário
+          example: "11999999999"
+        idEstabelecimento:
+          type: string
+          format: uuid
+        idPerfil:
+          type: integer
+          format: int32
+          description: Identificador do perfil associado ao usuário
+          example: 1
+        nomePerfil:
+          type: string
+          description: Nome do perfil de acesso do usuário
+          example: GERENTE
+        ativo:
+          type: boolean
+          description: Indica se o usuário está ativo
+          example: true
+        atualizadoEm:
+          type: string
+          format: date-time
+          description: Data e hora da última atualização do usuário
+          example: 2026-09-23T19:30:00
+        criadoEm:
+          type: string
+          format: date-time
+          description: Data e hora de criação do usuário
+          example: 2026-09-20T14:15:00
+        permissoes:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+    ProdutoRequestDto:
+      type: object
+      description: Dados para criar um produto. O SKU é gerado pelo servidor.
+      properties:
+        nome:
+          type: string
+          example: Vodka Absolut 1L
+          maxLength: 150
+          minLength: 0
+        categoriaId:
+          type: integer
+          format: int32
+          example: 1
+        unidadeMedida:
+          type: string
+          example: garrafa
+          maxLength: 10
+          minLength: 0
+        precoVenda:
+          type: number
+          example: "129.90"
+        precoCusto:
+          type: number
+          description: "Quando omitido, assume zero"
+          example: "89.90"
+          minimum: 0.0
+        tipo:
+          type: string
+          description: PADRAO quando omitido. DRINK terá a receita cadastrada em etapa
+            posterior.
+          enum:
+          - PADRAO
+          - DRINK
+          example: PADRAO
+        codigoBarras:
+          type: string
+          example: "7891234567890"
+          maxLength: 45
+          minLength: 0
+        descricao:
+          type: string
+          example: Vodka importada de 1 litro
+        fracionado:
+          type: boolean
+          example: false
+        volumeEmbalagemMl:
+          type: number
+          description: "Volume total de uma unidade, em mililitros"
+          example: 1000
+        estoqueMinimo:
+          type: number
+          description: Opcional. Usado no cálculo dos alertas de estoque.
+          example: 6
+        quantidadeInicial:
+          type: number
+          description: "Aplicável a produtos PADRAO. Quando omitida, inicia em zero."
+          example: 12
+      required:
+      - categoriaId
+      - nome
+      - precoVenda
+      - unidadeMedida
+    ProdutoResponseDto:
+      type: object
+      description: Produto do estabelecimento autenticado
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        nome:
+          type: string
+        descricao:
+          type: string
+        tipo:
+          type: string
+          enum:
+          - PADRAO
+          - DRINK
+        categoriaId:
+          type: integer
+          format: int32
+        categoriaNome:
+          type: string
+        unidadeMedida:
+          type: string
+        codigoBarras:
+          type: string
+        precoCusto:
+          type: number
+        precoVenda:
+          type: number
+        margemPercentual:
+          type: number
+        fracionado:
+          type: boolean
+        volumeEmbalagemMl:
+          type: number
+        ativo:
+          type: boolean
+        quantidadeEstoque:
+          type: number
+        estoqueMinimo:
+          type: number
+        criadoEm:
+          type: string
+          format: date-time
+        atualizadoEm:
+          type: string
+          format: date-time
+    MovimentacaoRequestDto:
+      type: object
+      description: Movimentação direta de um produto padrão. A quantidade usa a unidade-base
+        do estoque.
+      properties:
+        produtoId:
+          type: string
+          format: uuid
+        tipo:
+          type: string
+          enum:
+          - ENTRADA
+          - SAIDA
+          - AJUSTE_POSITIVO
+          - AJUSTE_NEGATIVO
+          - PERDA
+        quantidade:
+          type: number
+        motivo:
+          type: string
+        lote:
+          type: string
+          maxLength: 100
+          minLength: 0
+        numeroNotaFiscal:
+          type: string
+          maxLength: 50
+          minLength: 0
+      required:
+      - produtoId
+      - quantidade
+      - tipo
+    MovimentacaoResponseDto:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        usuarioId:
+          type: string
+          format: uuid
+        produtoId:
+          type: string
+          format: uuid
+        produtoNome:
+          type: string
+        unidadeEstoque:
+          type: string
+        tipo:
+          type: string
+          enum:
+          - ENTRADA_INICIAL
+          - ENTRADA
+          - SAIDA
+          - AJUSTE_POSITIVO
+          - AJUSTE_NEGATIVO
+          - PERDA
+          - SAIDA_DRINK
+        quantidade:
+          type: number
+        saldoAnterior:
+          type: number
+        saldoPosterior:
+          type: number
+        motivo:
+          type: string
+        lote:
+          type: string
+        numeroNotaFiscal:
+          type: string
+        origemDrinkId:
+          type: string
+          format: uuid
+        receitaAplicada:
+          $ref: "#/components/schemas/RawValue"
+        ocorridoEm:
+          type: string
+          format: date-time
+    RawValue: {}
+    SaidaDrinkRequestDto:
+      type: object
+      description: Baixa dos ingredientes necessária para servir drinks. O drink não
+        possui estoque próprio.
+      properties:
+        drinkId:
+          type: string
+          format: uuid
+        quantidade:
+          type: number
+        motivo:
+          type: string
+      required:
+      - drinkId
+      - quantidade
+    CategoriaRequestDto:
+      type: object
+      properties:
+        nome:
+          type: string
+          description: Nome único da categoria no estabelecimento
+          example: Bebidas
+          maxLength: 100
+          minLength: 0
+        descricao:
+          type: string
+          description: Descrição opcional da categoria
+          example: Bebidas alcoólicas e não alcoólicas
+      required:
+      - nome
+    CategoriaResponseDto:
+      type: object
+      description: DTO para listagem de categorias
+      properties:
+        id:
+          type: integer
+          format: int32
+        nome:
+          type: string
+        descricao:
+          type: string
+        ativo:
+          type: boolean
+        criadoEm:
+          type: string
+          format: date-time
+        atualizadoEm:
+          type: string
+          format: date-time
+    RequisicaoPerfilDto:
+      type: object
+      properties:
+        nome:
+          type: string
+          maxLength: 100
+          minLength: 0
+        descricao:
+          type: string
+        codigosFuncionalidades:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+      required:
+      - nome
+    RespostaAutenticacaoDto:
+      type: object
+      description: Confirmação de uma operação de autenticação
+      properties:
+        mensagem:
+          type: string
+          example: Autenticação realizada com sucesso
+        usuario:
+          type: string
+          example: Administrador Inicial
+    RequisicaoLoginDto:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          description: E-mail utilizado para realizar a autenticação
+          example: usuario@exemplo.com
+          minLength: 1
+        senha:
+          type: string
+          description: Senha utilizada para realizar a autenticação
+          example: Senha@123
+          minLength: 1
+      required:
+      - email
+      - senha
+    RequisicaoAtualizacaoUsuarioDto:
+      type: object
+      properties:
+        nome:
+          type: string
+          description: Novo nome do usuário
+          example: Lucas Peres
+          maxLength: 100
+          minLength: 0
+        email:
+          type: string
+          format: email
+          description: Novo e-mail do usuário
+          example: lucas.novo@exemplo.com
+        telefone:
+          type: string
+          description: Novo telefone do usuário
+          example: "11988888888"
+          maxLength: 13
+          minLength: 0
+        senha:
+          type: string
+          description: Nova senha do usuário
+          example: NovaSenha@123
+          maxLength: 72
+          minLength: 8
+        nomePerfil:
+          type: string
+          description: Novo perfil de acesso do usuário
+          example: GERENTE
+          maxLength: 100
+          minLength: 0
+        ativo:
+          type: boolean
+          description: Define se o usuário está ativo
+          example: true
+    ProdutoAtualizacaoRequestDto:
+      type: object
+      description: Dados parciais para atualização de um produto. SKU e saldo não
+        são alteráveis por este endpoint.
+      properties:
+        nome:
+          type: string
+          maxLength: 150
+          minLength: 0
+        categoriaId:
+          type: integer
+          format: int32
+        unidadeMedida:
+          type: string
+          maxLength: 10
+          minLength: 0
+        precoVenda:
+          type: number
+        precoCusto:
+          type: number
+          minimum: 0.0
+        codigoBarras:
+          type: string
+          maxLength: 45
+          minLength: 0
+        descricao:
+          type: string
+        fracionado:
+          type: boolean
+        volumeEmbalagemMl:
+          type: number
+        estoqueMinimo:
+          type: number
+        ativo:
+          type: boolean
+        atualizacaoValida:
+          type: boolean
+    CategoriaAtualizacaoRequestDto:
+      type: object
+      properties:
+        nome:
+          type: string
+          description: Novo nome da categoria
+          example: Bebidas geladas
+          maxLength: 100
+          minLength: 0
+        descricao:
+          type: string
+          description: Nova descrição. Envie uma string vazia para removê-la.
+          example: Produtos servidos gelados
+        ativo:
+          type: boolean
+          description: Define se a categoria está disponível para uso
+          example: true
+    RequisicaoAtualizacaoPerfilDto:
+      type: object
+      properties:
+        nome:
+          type: string
+          maxLength: 100
+          minLength: 0
+          pattern: .*\S.*
+        descricao:
+          type: string
+    RespostaPaginadaDtoProdutoResponseDto:
+      type: object
+      properties:
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProdutoResponseDto"
+        pagina:
+          type: integer
+          format: int32
+        tamanho:
+          type: integer
+          format: int32
+        totalItens:
+          type: integer
+          format: int64
+        totalPaginas:
+          type: integer
+          format: int32
+        primeira:
+          type: boolean
+        ultima:
+          type: boolean
+    RespostaPaginadaDtoMovimentacaoResponseDto:
+      type: object
+      properties:
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/MovimentacaoResponseDto"
+        pagina:
+          type: integer
+          format: int32
+        tamanho:
+          type: integer
+          format: int32
+        totalItens:
+          type: integer
+          format: int64
+        totalPaginas:
+          type: integer
+          format: int32
+        primeira:
+          type: boolean
+        ultima:
+          type: boolean
+    RespostaPaginadaDtoCategoriaResponseDto:
+      type: object
+      properties:
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategoriaResponseDto"
+        pagina:
+          type: integer
+          format: int32
+        tamanho:
+          type: integer
+          format: int32
+        totalItens:
+          type: integer
+          format: int64
+        totalPaginas:
+          type: integer
+          format: int32
+        primeira:
+          type: boolean
+        ultima:
+          type: boolean
+    RespostaPermissoesUsuarioDto:
+      type: object
+      properties:
+        idPerfil:
+          type: integer
+          format: int32
+        nomePerfil:
+          type: string
+        permissoesPerfil:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+        sobrescritas:
+          type: array
+          items:
+            $ref: "#/components/schemas/SobrescritaPermissaoUsuarioDto"
+          uniqueItems: true
+        permissoesEfetivas:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+    RespostaFuncionalidadeDto:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int32
+        codigo:
+          type: string
+        nome:
+          type: string
+        descricao:
+          type: string
+    RespostaCsrfTokenDto:
+      type: object
+      description: "Token CSRF de uma sessão autenticada, usado apenas no header X-XSRF-TOKEN"
+      properties:
+        token:
+          type: string
+          example: YxBq8vlPoA1pP2dM0R2N9Q
+  securitySchemes:
+    accessTokenCookie:
+      type: apiKey
+      description: Cookie HttpOnly criado por POST /auth/login.
+      name: accessToken
+      in: cookie
+    csrfTokenHeader:
+      type: apiKey
+      description: "Obrigatório em POST, PUT, PATCH e DELETE autenticados."
+      name: X-XSRF-TOKEN
+      in: header

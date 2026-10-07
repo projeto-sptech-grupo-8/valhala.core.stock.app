@@ -40,11 +40,13 @@ import org.springframework.security.oauth2.server.resource.web.BearerTokenResolv
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import tools.jackson.databind.ObjectMapper;
 import valhalla.core.stock.app.modules.auth.security.AccessTokenStateValidator;
+import valhalla.core.stock.app.modules.auth.security.CsrfTokenValidationFilter;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 
 import javax.crypto.SecretKey;
@@ -80,6 +82,7 @@ public class SecurityConfig {
             JwtAuthenticationConverter jwtAuthenticationConverter,
             JwtDecoder jwtDecoder,
             PermissionAuthorizationService permissionAuthorizationService,
+            CsrfTokenValidationFilter csrfTokenValidationFilter,
             ObjectMapper objectMapper
     ) throws Exception {
         AuthenticationEntryPoint authenticationEntryPoint = (request, response, exception) ->
@@ -101,6 +104,7 @@ public class SecurityConfig {
         http
                 .cors(Customizer.withDefaults())
                 .csrf(csrf -> csrf.disable())
+                .addFilterAfter(csrfTokenValidationFilter, BearerTokenAuthenticationFilter.class)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
@@ -114,7 +118,8 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
-                                "/v3/api-docs/**"
+                                "/v3/api-docs/**",
+                                "/v3/api-docs.yaml"
                         ).permitAll()
                         .requestMatchers(HttpMethod.POST, "/usuario")
                         .access((authentication, context) -> new AuthorizationDecision(

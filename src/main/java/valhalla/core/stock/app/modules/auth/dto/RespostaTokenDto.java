@@ -16,6 +16,8 @@ public record RespostaTokenDto(
         )
         String tokenRenovacao,
 
+        String tokenCsrf,
+
         @Schema(
                 description = "Nome de usuário associado à autenticação",
                 example = "Lucas Peres"

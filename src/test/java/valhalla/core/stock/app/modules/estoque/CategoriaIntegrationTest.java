@@ -1,6 +1,7 @@
 package valhalla.core.stock.app.modules.estoque;
 
 import jakarta.persistence.EntityManager;
+import com.jayway.jsonpath.JsonPath;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.entity.FuncionalidadeEntity;
@@ -31,6 +33,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.Set;
+import java.util.HashMap;
+import java.util.Map;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -46,6 +50,7 @@ class CategoriaIntegrationTest {
     @Autowired private PasswordEncoder passwordEncoder;
 
     private EstablishmentEntity estabelecimento;
+    private final Map<String, String> tokensCsrfPorAccessToken = new HashMap<>();
 
     @BeforeEach
     void prepararDados() {
@@ -57,7 +62,7 @@ class CategoriaIntegrationTest {
     }
 
     @Test
-    void gerenteListaApenasCategoriasAtivasDoProprioEstabelecimento() throws Exception {
+    void gerenteFiltraCategoriasDoProprioEstabelecimentoComPaginacaoNoBanco() throws Exception {
         criarCategoria(estabelecimento, "Bebidas", true);
         criarCategoria(estabelecimento, "Alimentos", true);
         criarCategoria(estabelecimento, "Inativa", false);
@@ -71,17 +76,46 @@ class CategoriaIntegrationTest {
 
         Cookie tokenAcesso = autenticar("Gerente", "gerente@meraki.com");
 
+        mockMvc.perform(get("/categorias")
+                        .param("busca", "i")
+                        .param("ativo", "true")
+                        .param("pagina", "0")
+                        .param("tamanho", "1")
+                        .param("ordenarPor", "nome")
+                        .param("direcao", "ASC")
+                        .cookie(tokenAcesso))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItens").value(2))
+                .andExpect(jsonPath("$.totalPaginas").value(2))
+                .andExpect(jsonPath("$.pagina").value(0))
+                .andExpect(jsonPath("$.tamanho").value(1))
+                .andExpect(jsonPath("$.itens.length()").value(1))
+                .andExpect(jsonPath("$.itens[0].nome").value("Alimentos"))
+                .andExpect(jsonPath("$.ultima").value(false));
+
         mockMvc.perform(get("/categorias").cookie(tokenAcesso))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[0].nome").value("Alimentos"))
-                .andExpect(jsonPath("$[1].nome").value("Bebidas"));
+                .andExpect(jsonPath("$.totalItens").value(3))
+                .andExpect(jsonPath("$.itens.length()").value(3));
     }
 
     @Test
     void deveExigirSessaoParaListarCategorias() throws Exception {
         mockMvc.perform(get("/categorias"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void rejeitaParametrosDePaginacaoOuOrdenacaoInvalidos() throws Exception {
+        Cookie tokenAcesso = autenticar("Gerente", "gerente@meraki.com");
+
+        mockMvc.perform(get("/categorias").param("pagina", "-1").cookie(tokenAcesso))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.pagina").exists());
+
+        mockMvc.perform(get("/categorias").param("ordenarPor", "ativo").cookie(tokenAcesso))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Campo de ordenação inválido: ativo"));
     }
 
     @Test
@@ -103,8 +137,8 @@ class CategoriaIntegrationTest {
 
         mockMvc.perform(get("/categorias").cookie(tokenAcesso))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].nome").value("Bebidas"));
+                .andExpect(jsonPath("$.itens.length()").value(1))
+                .andExpect(jsonPath("$.itens[0].nome").value("Bebidas"));
     }
 
     @Test
@@ -113,6 +147,7 @@ class CategoriaIntegrationTest {
 
         mockMvc.perform(post("/categorias")
                         .cookie(tokenAcesso)
+                        .with(csrf(tokenAcesso))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nome":"  Bebidas  ","descricao":" Produtos gelados "}
@@ -125,12 +160,25 @@ class CategoriaIntegrationTest {
     }
 
     @Test
+    void rejeitaAlteracaoDeEstadoSemTokenCsrf() throws Exception {
+        Cookie tokenAcesso = autenticar("Gerente", "gerente@meraki.com");
+
+        mockMvc.perform(post("/categorias")
+                        .cookie(tokenAcesso)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\"Bebidas\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Token CSRF ausente ou inválido"));
+    }
+
+    @Test
     void naoPermiteCriarCategoriaComNomeDuplicadoSemDiferenciarMaiusculas() throws Exception {
         criarCategoria(estabelecimento, "Bebidas", true);
         Cookie tokenAcesso = autenticar("Gerente", "gerente@meraki.com");
 
         mockMvc.perform(post("/categorias")
                         .cookie(tokenAcesso)
+                        .with(csrf(tokenAcesso))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nome":"bebidas"}
@@ -152,6 +200,7 @@ class CategoriaIntegrationTest {
 
         mockMvc.perform(patch("/categorias/{id}", categoria.getId())
                         .cookie(tokenAcesso)
+                        .with(csrf(tokenAcesso))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"nome":"Bebidas geladas","descricao":"","ativo":false}
@@ -161,9 +210,9 @@ class CategoriaIntegrationTest {
                 .andExpect(jsonPath("$.descricao").doesNotExist())
                 .andExpect(jsonPath("$.ativo").value(false));
 
-        mockMvc.perform(get("/categorias").cookie(tokenAcesso))
+        mockMvc.perform(get("/categorias").param("ativo", "true").cookie(tokenAcesso))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.itens.length()").value(0));
     }
 
     @Test
@@ -171,7 +220,7 @@ class CategoriaIntegrationTest {
         CategoriaEntity categoria = criarCategoria(estabelecimento, "Bebidas", true);
         Cookie tokenAcesso = autenticar("Gerente", "gerente@meraki.com");
 
-        mockMvc.perform(delete("/categorias/{id}", categoria.getId()).cookie(tokenAcesso))
+        mockMvc.perform(delete("/categorias/{id}", categoria.getId()).cookie(tokenAcesso).with(csrf(tokenAcesso)))
                 .andExpect(status().isNoContent());
 
         mockMvc.perform(get("/categorias/{id}", categoria.getId()).cookie(tokenAcesso))
@@ -240,6 +289,19 @@ class CategoriaIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn();
 
-        return resultado.getResponse().getCookie("accessToken");
+        Cookie accessToken = resultado.getResponse().getCookie("accessToken");
+        MvcResult csrfResult = mockMvc.perform(get("/auth/csrf").cookie(accessToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        tokensCsrfPorAccessToken.put(accessToken.getValue(),
+                JsonPath.read(csrfResult.getResponse().getContentAsString(), "$.token"));
+        return accessToken;
+    }
+
+    private RequestPostProcessor csrf(Cookie accessToken) {
+        return request -> {
+            request.addHeader("X-XSRF-TOKEN", tokensCsrfPorAccessToken.get(accessToken.getValue()));
+            return request;
+        };
     }
 }

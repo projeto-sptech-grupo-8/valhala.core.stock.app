@@ -1,12 +1,14 @@
 package valhalla.core.stock.app.shared.exceptionhandler;
 
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.InvalidRefreshTokenException;
 import valhalla.core.stock.app.shared.error.InvalidUserUpdateException;
@@ -15,6 +17,7 @@ import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
 import valhalla.core.stock.app.shared.error.AccessConfigurationConflictException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaJaExisteException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaPossuiProdutosException;
+import valhalla.core.stock.app.modules.estoque.exception.ProdutoPossuiMovimentacoesException;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -98,6 +101,13 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
     }
 
+    @ExceptionHandler(ProdutoPossuiMovimentacoesException.class)
+    public ResponseEntity<ApiErrorResponse> handleProdutoPossuiMovimentacoes(
+            ProdutoPossuiMovimentacoesException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidation(
             MethodArgumentNotValidException exception
@@ -111,6 +121,26 @@ public class GlobalExceptionHandler {
                 HttpStatus.BAD_REQUEST,
                 "Dados de entrada inválidos",
                 fieldErrors
+        );
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ApiErrorResponse> handleConstraintViolation(ConstraintViolationException exception) {
+        Map<String, String> fieldErrors = new LinkedHashMap<>();
+        exception.getConstraintViolations().forEach(violation -> {
+            String campo = violation.getPropertyPath().toString();
+            campo = campo.substring(campo.lastIndexOf('.') + 1);
+            fieldErrors.putIfAbsent(campo, violation.getMessage());
+        });
+        return buildResponse(HttpStatus.BAD_REQUEST, "Parâmetros de consulta inválidos", fieldErrors);
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiErrorResponse> handleArgumentTypeMismatch(MethodArgumentTypeMismatchException exception) {
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                "Parâmetro de consulta inválido",
+                Map.of(exception.getName(), "Valor inválido para o parâmetro informado")
         );
     }
 
