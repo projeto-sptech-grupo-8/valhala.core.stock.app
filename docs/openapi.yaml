@@ -4,10 +4,11 @@ info:
   description: |
     API de autenticação, usuários, perfis, permissões e estoque.
 
-    Operações autenticadas que alteram estado exigem o header X-XSRF-TOKEN.
-    Após login ou refresh, o frontend deve chamar GET /auth/csrf usando o cookie
-    HttpOnly accessToken e enviar o campo token retornado nesse header. O token CSRF
-    é controlado pelo backend e não é armazenado em cookie.
+    Operações autenticadas que alteram estado exigem validação CSRF.
+    Após login ou refresh, a API também emite o cookie XSRF-TOKEN. Chamadas de um
+    frontend na origem configurada podem usá-lo automaticamente; integrações que
+    enviam o header X-XSRF-TOKEN continuam suportadas. GET /auth/csrf permanece
+    disponível para clientes que precisem obter o valor explicitamente.
   version: v1
 servers:
 - url: http://localhost
@@ -2354,7 +2355,7 @@ components:
           type: string
     RespostaCsrfTokenDto:
       type: object
-      description: "Token CSRF de uma sessão autenticada, usado apenas no header X-XSRF-TOKEN"
+      description: "Token CSRF de uma sessão autenticada, disponível também no cookie XSRF-TOKEN"
       properties:
         token:
           type: string

@@ -46,6 +46,8 @@ import java.util.UUID;
 )
 public class AuthController {
 
+    private static final String COOKIE_CSRF = "XSRF-TOKEN";
+
     private final AuthService authService;
     private final JwtProperties jwtProperties;
     private final boolean secureCookies;
@@ -199,14 +201,25 @@ public class AuthController {
 
         response.addHeader(HttpHeaders.SET_COOKIE, accessCookie.toString());
         response.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+        response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie
+                .from(COOKIE_CSRF, tokenResponse.tokenCsrf())
+                .httpOnly(false)
+                .secure(secureCookies)
+                .path("/")
+                .maxAge(jwtProperties.refreshExpiration())
+                .sameSite("Strict")
+                .build()
+                .toString());
     }
 
     private void clearAuthenticationCookies(HttpServletResponse response) {
         ResponseCookie accessCookie = expiredCookie("accessToken", "/");
         ResponseCookie refreshCookie = expiredCookie("refreshToken", "/auth");
+        ResponseCookie csrfCookie = expiredCookie(COOKIE_CSRF, "/");
 
         response.addHeader(HttpHeaders.SET_COOKIE, accessCookie.toString());
         response.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+        response.addHeader(HttpHeaders.SET_COOKIE, csrfCookie.toString());
     }
 
     private ResponseCookie expiredCookie(String name, String path) {

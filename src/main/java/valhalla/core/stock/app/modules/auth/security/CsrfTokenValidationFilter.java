@@ -6,6 +6,7 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -30,6 +31,7 @@ import java.util.UUID;
 public class CsrfTokenValidationFilter extends OncePerRequestFilter {
 
     public static final String CABECALHO_CSRF = "X-XSRF-TOKEN";
+    public static final String COOKIE_CSRF = "XSRF-TOKEN";
     private static final Set<String> METODOS_PROTEGIDOS = Set.of(
             HttpMethod.POST.name(), HttpMethod.PUT.name(), HttpMethod.PATCH.name(), HttpMethod.DELETE.name()
     );
@@ -37,15 +39,18 @@ public class CsrfTokenValidationFilter extends OncePerRequestFilter {
     private final CsrfTokenStore csrfTokenStore;
     private final JwtDecoder refreshTokenDecoder;
     private final ObjectMapper objectMapper;
+    private final String allowedOrigin;
 
     public CsrfTokenValidationFilter(
             CsrfTokenStore csrfTokenStore,
             @Qualifier("refreshTokenDecoder") JwtDecoder refreshTokenDecoder,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            @Value("${app.cors.allowed-origin}") String allowedOrigin
     ) {
         this.csrfTokenStore = csrfTokenStore;
         this.refreshTokenDecoder = refreshTokenDecoder;
         this.objectMapper = objectMapper;
+        this.allowedOrigin = allowedOrigin;
     }
 
     @Override
@@ -72,7 +77,14 @@ public class CsrfTokenValidationFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        if (csrfTokenStore.ehValido(idSessao, request.getHeader(CABECALHO_CSRF))) {
+        String tokenNoCabecalho = request.getHeader(CABECALHO_CSRF);
+        String token = tokenNoCabecalho == null || tokenNoCabecalho.isBlank()
+                ? obterCookie(request, COOKIE_CSRF)
+                : tokenNoCabecalho;
+        boolean possuiTokenNoCabecalho = tokenNoCabecalho != null && !tokenNoCabecalho.isBlank();
+        boolean origemDoFrontendConfigurado = allowedOrigin.equals(request.getHeader("Origin"));
+        if (csrfTokenStore.ehValido(idSessao, token)
+                && (possuiTokenNoCabecalho || origemDoFrontendConfigurado)) {
             filterChain.doFilter(request, response);
             return;
         }

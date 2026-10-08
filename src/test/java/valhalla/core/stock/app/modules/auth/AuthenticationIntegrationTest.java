@@ -102,6 +102,9 @@ class AuthenticationIntegrationTest {
                 .andExpect(cookie().exists("refreshToken"))
                 .andExpect(cookie().httpOnly("refreshToken", true))
                 .andExpect(cookie().path("refreshToken", "/auth"))
+                .andExpect(cookie().exists("XSRF-TOKEN"))
+                .andExpect(cookie().httpOnly("XSRF-TOKEN", false))
+                .andExpect(cookie().path("XSRF-TOKEN", "/"))
                 .andExpect(jsonPath("$.mensagem")
                         .value("Autenticação realizada com sucesso"))
                 .andExpect(jsonPath("$.usuario").value(gerenteUser.getName()))
@@ -179,15 +182,18 @@ class AuthenticationIntegrationTest {
         );
         Cookie accessToken = requireCookie(loginResult, "accessToken");
         Cookie refreshToken = requireCookie(loginResult, "refreshToken");
+        Cookie csrfToken = requireCookie(loginResult, "XSRF-TOKEN");
 
         mockMvc.perform(post("/auth/logout")
-                        .cookie(accessToken, refreshToken)
+                        .cookie(accessToken, refreshToken, csrfToken)
                         .with(csrf(accessToken)))
                 .andExpect(status().isNoContent())
                 .andExpect(cookie().value("accessToken", ""))
                 .andExpect(cookie().maxAge("accessToken", 0))
                 .andExpect(cookie().value("refreshToken", ""))
-                .andExpect(cookie().maxAge("refreshToken", 0));
+                .andExpect(cookie().maxAge("refreshToken", 0))
+                .andExpect(cookie().value("XSRF-TOKEN", ""))
+                .andExpect(cookie().maxAge("XSRF-TOKEN", 0));
 
         mockMvc.perform(post("/usuario")
                         .cookie(accessToken)
@@ -347,6 +353,36 @@ class AuthenticationIntegrationTest {
                         "Access-Control-Allow-Credentials",
                         "true"
                 ));
+    }
+
+    @Test
+    void deveAceitarCookieCsrfDoFrontendConfiguradoSemHeader() throws Exception {
+        MvcResult loginResult = performLogin("gerente@meraki.com", "senha-gerente");
+        Cookie accessToken = requireCookie(loginResult, "accessToken");
+        Cookie csrfToken = requireCookie(loginResult, "XSRF-TOKEN");
+
+        mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
+                        .cookie(accessToken, csrfToken)
+                        .header("Origin", "http://localhost:5173")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"profileName\":\"Gerente\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nomePerfil").value("Gerente"));
+    }
+
+    @Test
+    void naoDeveAceitarCookieCsrfDeOrigemDiferenteSemHeader() throws Exception {
+        MvcResult loginResult = performLogin("gerente@meraki.com", "senha-gerente");
+        Cookie accessToken = requireCookie(loginResult, "accessToken");
+        Cookie csrfToken = requireCookie(loginResult, "XSRF-TOKEN");
+
+        mockMvc.perform(patch("/usuario/{id}", atendenteUser.getId())
+                        .cookie(accessToken, csrfToken)
+                        .header("Origin", "https://origem-maliciosa.example")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"profileName\":\"Gerente\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Token CSRF ausente ou inválido"));
     }
 
     @Test
