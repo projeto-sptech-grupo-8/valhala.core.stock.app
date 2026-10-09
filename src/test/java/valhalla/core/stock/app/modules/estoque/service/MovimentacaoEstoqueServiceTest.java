@@ -30,6 +30,7 @@ import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRep
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
+import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 import valhalla.core.stock.app.modules.estoque.strategy.EstrategiaAjusteNegativo;
 import valhalla.core.stock.app.modules.estoque.strategy.EstrategiaAjustePositivo;
 import valhalla.core.stock.app.modules.estoque.strategy.EstrategiaEntrada;
@@ -77,7 +78,8 @@ class MovimentacaoEstoqueServiceTest {
                         new EstrategiaEntradaInicial(), new EstrategiaEntrada(), new EstrategiaSaida(),
                         new EstrategiaAjustePositivo(), new EstrategiaAjusteNegativo(),
                         new EstrategiaPerda(), new EstrategiaSaidaDrink()
-                )
+                ),
+                new BusinessEventLogger()
         );
         lenient().when(movimentacaoEstoqueRepository.save(any(MovimentacaoEstoqueEntity.class)))
                 .thenAnswer(invocation -> {

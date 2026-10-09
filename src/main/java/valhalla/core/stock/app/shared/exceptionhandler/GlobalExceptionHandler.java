@@ -9,11 +9,14 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.InvalidRefreshTokenException;
 import valhalla.core.stock.app.shared.error.InvalidUserUpdateException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
+import valhalla.core.stock.app.shared.logging.RequestFailureContext;
 import valhalla.core.stock.app.shared.error.AccessConfigurationConflictException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaJaExisteException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaPossuiProdutosException;
@@ -26,8 +29,12 @@ import java.util.Map;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ApiErrorResponse> handleAuthentication() {
+        LOGGER.atWarn().addKeyValue("event", "security.authentication.failed")
+                .log("Authentication failed");
         return buildResponse(
                 HttpStatus.UNAUTHORIZED,
                 "E-mail ou senha inválidos",
@@ -39,6 +46,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleInvalidRefreshToken(
             InvalidRefreshTokenException exception
     ) {
+        LOGGER.atWarn().addKeyValue("event", "security.refresh-token.rejected")
+                .log("Refresh token rejected");
         return buildResponse(
                 HttpStatus.UNAUTHORIZED,
                 exception.getMessage(),
@@ -154,6 +163,7 @@ public class GlobalExceptionHandler {
             String message,
             Map<String, String> fieldErrors
     ) {
+        RequestFailureContext.markFailure("HTTP_" + status.value(), message);
         ApiErrorResponse response = new ApiErrorResponse(
                 LocalDateTime.now(),
                 status.value(),

@@ -22,6 +22,7 @@ import valhalla.core.stock.app.modules.estoque.repository.CategoriaRepository;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.Paginacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
+import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
 import java.util.Locale;
 import java.util.Set;
@@ -31,9 +32,11 @@ import java.util.UUID;
 public class CategoriaService {
 
     private final CategoriaRepository categoriaRepository;
+    private final BusinessEventLogger businessEventLogger;
 
-    public CategoriaService(CategoriaRepository categoriaRepository) {
+    public CategoriaService(CategoriaRepository categoriaRepository, BusinessEventLogger businessEventLogger) {
         this.categoriaRepository = categoriaRepository;
+        this.businessEventLogger = businessEventLogger;
     }
 
     @Transactional(readOnly = true)
@@ -99,6 +102,7 @@ public class CategoriaService {
 
         CategoriaEntity categoriaSalva = salvarCategoria(categoria);
 
+        businessEventLogger.success("stock.category.created", "category", categoriaSalva.getId());
         return CategoriaMapper.paraResposta(categoriaSalva);
     }
 
@@ -144,7 +148,9 @@ public class CategoriaService {
             categoria.setAtivo(dto.ativo());
         }
 
-        return CategoriaMapper.paraResposta(salvarCategoria(categoria));
+        CategoriaEntity categoriaSalva = salvarCategoria(categoria);
+        businessEventLogger.success("stock.category.updated", "category", categoriaSalva.getId());
+        return CategoriaMapper.paraResposta(categoriaSalva);
     }
 
     @Transactional
@@ -160,6 +166,7 @@ public class CategoriaService {
         try {
             categoriaRepository.delete(categoria);
             categoriaRepository.flush();
+            businessEventLogger.success("stock.category.deleted", "category", idCategoria);
         } catch (DataIntegrityViolationException excecao) {
             throw new CategoriaPossuiProdutosException(
                     "Categoria não pode ser excluída porque possui produtos vinculados",

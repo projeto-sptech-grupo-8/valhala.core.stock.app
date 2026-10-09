@@ -17,8 +17,11 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
+import valhalla.core.stock.app.shared.logging.RequestFailureContext;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -35,6 +38,7 @@ public class CsrfTokenValidationFilter extends OncePerRequestFilter {
     private static final Set<String> METODOS_PROTEGIDOS = Set.of(
             HttpMethod.POST.name(), HttpMethod.PUT.name(), HttpMethod.PATCH.name(), HttpMethod.DELETE.name()
     );
+    private static final Logger LOGGER = LoggerFactory.getLogger(CsrfTokenValidationFilter.class);
 
     private final CsrfTokenStore csrfTokenStore;
     private final JwtDecoder refreshTokenDecoder;
@@ -89,6 +93,11 @@ public class CsrfTokenValidationFilter extends OncePerRequestFilter {
             return;
         }
 
+        LOGGER.atWarn().addKeyValue("event", "security.csrf.rejected")
+                .addKeyValue("method", request.getMethod())
+                .addKeyValue("path", request.getRequestURI())
+                .log("CSRF validation rejected");
+        RequestFailureContext.markFailure(request, "CSRF_TOKEN_INVALID", "Token CSRF ausente ou inválido");
         escreverErroCsrf(response);
     }
 

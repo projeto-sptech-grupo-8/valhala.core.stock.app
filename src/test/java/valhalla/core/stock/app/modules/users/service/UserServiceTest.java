@@ -25,6 +25,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
+import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -63,7 +64,8 @@ class UserServiceTest {
                 passwordEncoder,
                 userAuthorizationService,
                 tokenStateService,
-                servicoPermissoes
+                servicoPermissoes,
+                new BusinessEventLogger()
         );
         UUID establishmentId = UUID.randomUUID();
         Jwt jwt = Jwt.withTokenValue("test").header("alg", "none")

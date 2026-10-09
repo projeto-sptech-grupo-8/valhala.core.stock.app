@@ -22,6 +22,7 @@ import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.entity.UserStatus;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.shared.error.AccessConfigurationConflictException;
+import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
 import java.util.List;
 import java.util.Optional;
@@ -52,7 +53,8 @@ class ServicoPermissoesTest {
     @BeforeEach
     void preparar() {
         servicoPermissoes = new ServicoPermissoes(repositorioPerfil, repositorioFuncionalidade,
-                repositorioUsuario, servicoEstadoToken, repositorioEstabelecimento);
+                repositorioUsuario, servicoEstadoToken, repositorioEstabelecimento,
+                new BusinessEventLogger());
         idEstabelecimento = UUID.randomUUID();
         Jwt token = Jwt.withTokenValue("teste").header("alg", "none")
                 .claim("establishmentId", idEstabelecimento.toString()).build();

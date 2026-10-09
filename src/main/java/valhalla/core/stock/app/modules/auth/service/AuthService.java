@@ -17,6 +17,7 @@ import valhalla.core.stock.app.modules.auth.security.JwtService;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.shared.error.InvalidRefreshTokenException;
+import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
 import java.time.Instant;
 import java.util.Locale;
@@ -32,6 +33,7 @@ public class AuthService {
     private final JwtDecoder accessTokenDecoder;
     private final JwtDecoder refreshTokenDecoder;
     private final CsrfTokenStore csrfTokenStore;
+    private final BusinessEventLogger businessEventLogger;
 
     public AuthService(
             AuthenticationManager authenticationManager,
@@ -40,7 +42,8 @@ public class AuthService {
             TokenStateService tokenStateService,
             @Qualifier("jwtDecoder") JwtDecoder accessTokenDecoder,
             @Qualifier("refreshTokenDecoder") JwtDecoder refreshTokenDecoder,
-            CsrfTokenStore csrfTokenStore
+            CsrfTokenStore csrfTokenStore,
+            BusinessEventLogger businessEventLogger
     ) {
         this.authenticationManager = authenticationManager;
         this.jwtService = jwtService;
@@ -49,6 +52,7 @@ public class AuthService {
         this.accessTokenDecoder = accessTokenDecoder;
         this.refreshTokenDecoder = refreshTokenDecoder;
         this.csrfTokenStore = csrfTokenStore;
+        this.businessEventLogger = businessEventLogger;
     }
 
     @Transactional
@@ -66,7 +70,9 @@ public class AuthService {
                         "Usuário autenticado não encontrado"
                 ));
 
-        return issueTokens(authentication, user);
+        RespostaTokenDto response = issueTokens(authentication, user);
+        businessEventLogger.authenticationSuccess("auth.login.succeeded", user.getId(), user.getEstablishment().getId());
+        return response;
     }
 
     @Transactional
@@ -85,7 +91,9 @@ public class AuthService {
         }
 
         Authentication authentication = authenticationFor(user);
-        return issueTokens(authentication, user, refreshJti);
+        RespostaTokenDto response = issueTokens(authentication, user, refreshJti);
+        businessEventLogger.authenticationSuccess("auth.token.refreshed", user.getId(), user.getEstablishment().getId());
+        return response;
     }
 
     @Transactional

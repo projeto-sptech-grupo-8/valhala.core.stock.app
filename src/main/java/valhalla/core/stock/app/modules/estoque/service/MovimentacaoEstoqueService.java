@@ -35,6 +35,7 @@ import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.Paginacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
+import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -68,6 +69,7 @@ public class MovimentacaoEstoqueService {
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<TipoMovimentacaoEstoque, EstrategiaMovimentacaoEstoque> estrategias;
+    private final BusinessEventLogger businessEventLogger;
 
     public MovimentacaoEstoqueService(
             ProdutoRepository produtoRepository,
@@ -75,13 +77,15 @@ public class MovimentacaoEstoqueService {
             ComposicaoDrinkRepository composicaoDrinkRepository,
             MovimentacaoEstoqueRepository movimentacaoEstoqueRepository,
             UserRepository userRepository,
-            List<EstrategiaMovimentacaoEstoque> estrategias
+            List<EstrategiaMovimentacaoEstoque> estrategias,
+            BusinessEventLogger businessEventLogger
     ) {
         this.produtoRepository = produtoRepository;
         this.estoqueRepository = estoqueRepository;
         this.composicaoDrinkRepository = composicaoDrinkRepository;
         this.movimentacaoEstoqueRepository = movimentacaoEstoqueRepository;
         this.userRepository = userRepository;
+        this.businessEventLogger = businessEventLogger;
         this.estrategias = estrategias.stream().collect(Collectors.toMap(
                 EstrategiaMovimentacaoEstoque::tipoSuportado,
                 Function.identity(),
@@ -163,7 +167,10 @@ public class MovimentacaoEstoqueService {
                 normalizar(dto.numeroNotaFiscal()), null, null
         );
         UUID usuarioId = obterIdUsuarioAutenticado();
-        return aplicarMovimentacao(estoque, command, usuarioId, nomeUsuario(usuarioId));
+        MovimentacaoResponseDto response = aplicarMovimentacao(estoque, command, usuarioId, nomeUsuario(usuarioId));
+        businessEventLogger.success("stock.movement.registered." + dto.tipo().name().toLowerCase(),
+                "stock-movement", response.id());
+        return response;
     }
 
     @Transactional
@@ -212,13 +219,15 @@ public class MovimentacaoEstoqueService {
 
         UUID usuarioId = obterIdUsuarioAutenticado();
         String usuarioNome = nomeUsuario(usuarioId);
-        return itens.stream()
+        List<MovimentacaoResponseDto> resposta = itens.stream()
                 .map(item -> aplicarMovimentacao(item.estoque(), new MovimentacaoCommand(
                         TipoMovimentacaoEstoque.SAIDA_DRINK,
                         item.quantidade(),
                         commandBase.motivo(), null, null, drink.getId(), receitaAplicada.deepCopy()
                 ), usuarioId, usuarioNome))
                 .toList();
+        businessEventLogger.success("stock.drink-output.registered", "product", drink.getId());
+        return resposta;
     }
 
     @Transactional
@@ -236,7 +245,9 @@ public class MovimentacaoEstoqueService {
         if (estoque.getQuantidadeAtual().compareTo(saldoPosterior) != 0) {
             throw new IllegalStateException("O saldo inicial informado é inconsistente");
         }
-        salvarHistorico(estoque, command, ZERO, saldoPosterior, obterIdUsuarioAutenticado());
+        MovimentacaoEstoqueEntity movimento = salvarHistorico(
+                estoque, command, ZERO, saldoPosterior, obterIdUsuarioAutenticado());
+        businessEventLogger.success("stock.initial-entry.registered", "stock-movement", movimento.getId());
     }
 
     private MovimentacaoResponseDto aplicarMovimentacao(

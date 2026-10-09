@@ -21,6 +21,7 @@ import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.modules.accesscontrol.security.PermissionResolver;
 import valhalla.core.stock.app.modules.auth.security.CustomUserDetailsService;
 import valhalla.core.stock.app.shared.error.AccessConfigurationConflictException;
+import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -34,6 +35,7 @@ public class ServicoPermissoes {
     private final UserRepository userRepository;
     private final TokenStateService tokenStateService;
     private final EstablishmentRepository establishmentRepository;
+    private final BusinessEventLogger businessEventLogger;
 
     @Transactional
     public java.util.List<RespostaFuncionalidadeDto> listarFuncionalidadesDisponiveis() {
@@ -61,7 +63,9 @@ public class ServicoPermissoes {
                 .functionalities(carregarFuncionalidadesPorCodigo(
                         conjuntoVazioQuandoNulo(requisicao.codigosFuncionalidades())))
                 .build();
-        return paraRespostaPerfil(salvarPerfil(perfil));
+        ProfileEntity salvo = salvarPerfil(perfil);
+        businessEventLogger.success("access.profile.created", "profile", salvo.getId());
+        return paraRespostaPerfil(salvo);
     }
 
     @Transactional
@@ -86,7 +90,9 @@ public class ServicoPermissoes {
             perfil.setName(nome);
         }
         if (requisicao.descricao() != null) perfil.setDescription(requisicao.descricao());
-        return paraRespostaPerfil(salvarPerfil(perfil));
+        ProfileEntity salvo = salvarPerfil(perfil);
+        businessEventLogger.success("access.profile.updated", "profile", salvo.getId());
+        return paraRespostaPerfil(salvo);
     }
 
     @Transactional
@@ -97,6 +103,7 @@ public class ServicoPermissoes {
                     "Perfil não pode ser excluído porque possui usuários vinculados");
         }
         profileRepository.delete(perfil);
+        businessEventLogger.success("access.profile.deleted", "profile", idPerfil);
     }
 
     @Transactional
@@ -109,7 +116,9 @@ public class ServicoPermissoes {
         garantirAoMenosUmUsuarioAtivoPodeCriarUsuarios(perfil.getEstablishment().getId());
         userRepository.findAllByProfile_Id(idPerfil)
                 .forEach(usuario -> tokenStateService.revokeAll(usuario.getId()));
-        return paraRespostaPerfil(profileRepository.save(perfil));
+        ProfileEntity salvo = profileRepository.save(perfil);
+        businessEventLogger.success("access.profile.permissions-replaced", "profile", salvo.getId());
+        return paraRespostaPerfil(salvo);
     }
 
     @Transactional
@@ -139,6 +148,7 @@ public class ServicoPermissoes {
         garantirAoMenosUmUsuarioAtivoPodeCriarUsuarios(usuario.getEstablishment().getId());
         userRepository.save(usuario);
         tokenStateService.revokeAll(idUsuario);
+        businessEventLogger.success("access.user-permissions-replaced", "user", idUsuario);
     }
 
     /** Valida uma alteração de perfil ou status antes de persistir o usuário. */

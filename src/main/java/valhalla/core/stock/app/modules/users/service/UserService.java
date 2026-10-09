@@ -28,6 +28,7 @@ import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.InvalidUserUpdateException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
+import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
 import java.util.*;
 
@@ -41,6 +42,7 @@ public class UserService {
     private final UserAuthorizationService userAuthorizationService;
     private final TokenStateService tokenStateService;
     private final ServicoPermissoes servicoPermissoes;
+    private final BusinessEventLogger businessEventLogger;
 
     @Transactional
     @PreAuthorize("@permissionAuthorizationService.hasPermission('USUARIOS_CRIAR', authentication)")
@@ -73,6 +75,7 @@ public class UserService {
             throw new EmailAlreadyExistsException("Email informado já cadastrado");
         }
 
+        businessEventLogger.success("user.created", "user", savedUser.getId());
         return UserMapper.toResponse(savedUser);
     }
 
@@ -184,6 +187,7 @@ public class UserService {
             tokenStateService.revokeAll(savedUser.getId());
         }
 
+        businessEventLogger.success("user.updated", "user", savedUser.getId());
         return UserMapper.toResponse(savedUser);
     }
 
@@ -200,6 +204,7 @@ public class UserService {
             tokenStateService.revokeAll(idUsuario);
             userRepository.delete(user);
             userRepository.flush();
+            businessEventLogger.success("user.deleted", "user", idUsuario);
         } catch (DataIntegrityViolationException exception) {
             throw new UserDeletionConflictException(
                     "Usuário não pode ser excluído porque possui registros vinculados",

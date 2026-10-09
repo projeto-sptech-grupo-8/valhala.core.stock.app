@@ -17,6 +17,7 @@ import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
 import valhalla.core.stock.app.modules.estoque.entity.UnidadeConsumoDrink;
 import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkRepository;
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
+import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
 import java.util.HashSet;
 import java.util.List;
@@ -28,13 +29,16 @@ public class ReceitaDrinkService {
 
     private final ProdutoRepository produtoRepository;
     private final ComposicaoDrinkRepository composicaoDrinkRepository;
+    private final BusinessEventLogger businessEventLogger;
 
     public ReceitaDrinkService(
             ProdutoRepository produtoRepository,
-            ComposicaoDrinkRepository composicaoDrinkRepository
+            ComposicaoDrinkRepository composicaoDrinkRepository,
+            BusinessEventLogger businessEventLogger
     ) {
         this.produtoRepository = produtoRepository;
         this.composicaoDrinkRepository = composicaoDrinkRepository;
+        this.businessEventLogger = businessEventLogger;
     }
 
     @Transactional(readOnly = true)
@@ -63,9 +67,11 @@ public class ReceitaDrinkService {
                 .map(ingrediente -> criarComposicao(drink, ingrediente))
                 .toList();
 
-        return composicaoDrinkRepository.saveAll(receita).stream()
+        List<IngredienteDrinkResponseDto> resposta = composicaoDrinkRepository.saveAll(receita).stream()
                 .map(this::paraResposta)
                 .toList();
+        businessEventLogger.success("stock.drink-recipe.replaced", "product", drink.getId());
+        return resposta;
     }
 
     private void validarIngredientes(

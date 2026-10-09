@@ -27,6 +27,7 @@ import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.Paginacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
+import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
 import java.math.BigDecimal;
 import java.util.Collection;
@@ -47,19 +48,22 @@ public class ProdutoService {
     private final EstoqueRepository estoqueRepository;
     private final MovimentacaoEstoqueService movimentacaoEstoqueService;
     private final MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
+    private final BusinessEventLogger businessEventLogger;
 
     public ProdutoService(
             ProdutoRepository produtoRepository,
             CategoriaRepository categoriaRepository,
             EstoqueRepository estoqueRepository,
             MovimentacaoEstoqueService movimentacaoEstoqueService,
-            MovimentacaoEstoqueRepository movimentacaoEstoqueRepository
+            MovimentacaoEstoqueRepository movimentacaoEstoqueRepository,
+            BusinessEventLogger businessEventLogger
     ) {
         this.produtoRepository = produtoRepository;
         this.categoriaRepository = categoriaRepository;
         this.estoqueRepository = estoqueRepository;
         this.movimentacaoEstoqueService = movimentacaoEstoqueService;
         this.movimentacaoEstoqueRepository = movimentacaoEstoqueRepository;
+        this.businessEventLogger = businessEventLogger;
     }
 
     @Transactional(readOnly = true)
@@ -162,6 +166,7 @@ public class ProdutoService {
             movimentacaoEstoqueService.registrarEntradaInicial(estoque, estoque.getQuantidadeAtual());
         }
 
+        businessEventLogger.success("stock.product.created", "product", produtoSalvo.getId());
         return ProdutoMapper.paraResposta(produtoSalvo, estoque);
     }
 
@@ -188,6 +193,7 @@ public class ProdutoService {
         atualizarEstoqueMinimo(dto.estoqueMinimo(), produto.getTipo(), estoque);
 
         ProdutoEntity produtoSalvo = produtoRepository.saveAndFlush(produto);
+        businessEventLogger.success("stock.product.updated", "product", produtoSalvo.getId());
         return ProdutoMapper.paraResposta(produtoSalvo, estoque);
     }
 
@@ -205,6 +211,7 @@ public class ProdutoService {
         try {
             produtoRepository.delete(produto);
             produtoRepository.flush();
+            businessEventLogger.success("stock.product.deleted", "product", idProduto);
         } catch (DataIntegrityViolationException excecao) {
             throw new ProdutoPossuiMovimentacoesException(
                     "Produto não pode ser excluído porque possui movimentações ou vínculos registrados",

@@ -44,10 +44,13 @@ import org.springframework.security.oauth2.server.resource.web.authentication.Be
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
 import valhalla.core.stock.app.modules.auth.security.AccessTokenStateValidator;
 import valhalla.core.stock.app.modules.auth.security.CsrfTokenValidationFilter;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
+import valhalla.core.stock.app.shared.logging.RequestFailureContext;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -63,6 +66,8 @@ import java.util.ArrayList;
 @EnableMethodSecurity
 @EnableConfigurationProperties(JwtProperties.class)
 public class SecurityConfig {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(SecurityConfig.class);
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -85,21 +90,33 @@ public class SecurityConfig {
             CsrfTokenValidationFilter csrfTokenValidationFilter,
             ObjectMapper objectMapper
     ) throws Exception {
-        AuthenticationEntryPoint authenticationEntryPoint = (request, response, exception) ->
-                writeSecurityError(
+        AuthenticationEntryPoint authenticationEntryPoint = (request, response, exception) -> {
+            RequestFailureContext.markFailure(request, "AUTHENTICATION_REJECTED", "Token inválido ou expirado");
+            LOGGER.atWarn().addKeyValue("event", "security.authentication.rejected")
+                    .addKeyValue("method", request.getMethod())
+                    .addKeyValue("path", request.getRequestURI())
+                    .log("Authentication rejected");
+            writeSecurityError(
                         response,
                         objectMapper,
                         HttpStatus.UNAUTHORIZED,
                         "Token inválido ou expirado"
                 );
+        };
 
-        AccessDeniedHandler accessDeniedHandler = (request, response, exception) ->
-                writeSecurityError(
+        AccessDeniedHandler accessDeniedHandler = (request, response, exception) -> {
+            RequestFailureContext.markFailure(request, "AUTHORIZATION_REJECTED", "Acesso negado");
+            LOGGER.atWarn().addKeyValue("event", "security.authorization.rejected")
+                    .addKeyValue("method", request.getMethod())
+                    .addKeyValue("path", request.getRequestURI())
+                    .log("Authorization rejected");
+            writeSecurityError(
                         response,
                         objectMapper,
                         HttpStatus.FORBIDDEN,
                         "Acesso negado"
                 );
+        };
 
         http
                 .cors(Customizer.withDefaults())
