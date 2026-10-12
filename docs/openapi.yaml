@@ -4,11 +4,10 @@ info:
   description: |
     API de autenticação, usuários, perfis, permissões e estoque.
 
-    Operações autenticadas que alteram estado exigem validação CSRF.
-    Após login ou refresh, a API também emite o cookie XSRF-TOKEN. Chamadas de um
-    frontend na origem configurada podem usá-lo automaticamente; integrações que
-    enviam o header X-XSRF-TOKEN continuam suportadas. GET /auth/csrf permanece
-    disponível para clientes que precisem obter o valor explicitamente.
+    Operações autenticadas que alteram estado exigem o header X-XSRF-TOKEN.
+    Após login ou refresh, o frontend deve chamar GET /auth/csrf usando o cookie
+    HttpOnly accessToken e enviar o campo token retornado nesse header. O token CSRF
+    é controlado pelo backend e não é armazenado em cookie.
   version: v1
 servers:
 - url: http://localhost
@@ -21,6 +20,8 @@ tags:
   description: Produtos do estabelecimento autenticado.
 - name: Movimentações de estoque
   description: Histórico e alterações auditáveis do saldo dos produtos.
+- name: Dashboard
+  description: Indicadores consolidados do estabelecimento autenticado.
 - name: Receitas de drinks
   description: Ingredientes rastreáveis dos drinks do estabelecimento autenticado.
 - name: Categorias
@@ -1584,6 +1585,49 @@ paths:
                 $ref: "#/components/schemas/ApiErrorResponse"
       security:
       - accessTokenCookie: []
+  /dashboard/resumo:
+    get:
+      tags:
+      - Dashboard
+      summary: Obter resumo inicial da dashboard
+      operationId: obterResumo
+      parameters:
+      - name: meses
+        in: query
+        description: "Quantidade de meses na série de movimentações, incluindo o mê\
+          s atual. Padrão: 6; máximo: 24."
+        required: false
+        schema:
+          type: string
+          maximum: 24
+          minimum: 1
+      responses:
+        "200":
+          description: Resumo retornado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DashboardResumoResponseDto"
+        "400":
+          description: Parâmetro de consulta inválido.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para visualizar estoque.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
   /autorizacoes/usuarios/{userId}/permissoes:
     get:
       tags:
@@ -2295,6 +2339,156 @@ components:
           type: boolean
         ultima:
           type: boolean
+    AlertaEstoqueDashboardResponseDto:
+      type: object
+      description: Produto com saldo abaixo do estoque mínimo
+      properties:
+        produtoId:
+          type: string
+          format: uuid
+        nome:
+          type: string
+        categoria:
+          type: string
+        unidadeMedida:
+          type: string
+        quantidadeAtual:
+          type: number
+        estoqueMinimo:
+          type: number
+        status:
+          type: string
+          enum:
+          - ZERADO
+          - CRITICO
+    DashboardResumoResponseDto:
+      type: object
+      description: Resumo consolidado da dashboard do estabelecimento autenticado
+      properties:
+        referencia:
+          $ref: "#/components/schemas/ReferenciaDashboardResponseDto"
+        estoque:
+          $ref: "#/components/schemas/EstoqueDashboardResponseDto"
+        movimentacoes:
+          $ref: "#/components/schemas/MovimentacoesDashboardResponseDto"
+        financeiro:
+          $ref: "#/components/schemas/ModuloDashboardResponseDto"
+        caixa:
+          $ref: "#/components/schemas/ModuloDashboardResponseDto"
+    EstoqueDashboardResponseDto:
+      type: object
+      description: Indicadores e alertas de estoque da dashboard
+      properties:
+        totalProdutos:
+          type: integer
+          format: int64
+        produtosComMinimoDefinido:
+          type: integer
+          format: int64
+        produtosSemMinimoDefinido:
+          type: integer
+          format: int64
+        criticos:
+          type: integer
+          format: int64
+        zerados:
+          type: integer
+          format: int64
+        saudaveis:
+          type: integer
+          format: int64
+        saudePercentual:
+          type: integer
+          format: int32
+        alertas:
+          type: array
+          items:
+            $ref: "#/components/schemas/AlertaEstoqueDashboardResponseDto"
+    ModuloDashboardResponseDto:
+      type: object
+      description: Situação de um módulo ainda não integrado à dashboard
+      properties:
+        status:
+          type: string
+          enum:
+          - INDISPONIVEL
+    MovimentacaoMensalDashboardResponseDto:
+      type: object
+      description: Quantidade de registros de entrada e saída em um mês
+      properties:
+        mes:
+          type: string
+        entradas:
+          type: integer
+          format: int64
+        saidas:
+          type: integer
+          format: int64
+    MovimentacoesDashboardResponseDto:
+      type: object
+      description: Série mensal e últimas movimentações de estoque
+      properties:
+        serieMensal:
+          type: array
+          items:
+            $ref: "#/components/schemas/MovimentacaoMensalDashboardResponseDto"
+        ultimas:
+          type: array
+          items:
+            $ref: "#/components/schemas/UltimaMovimentacaoDashboardResponseDto"
+    ReferenciaDashboardResponseDto:
+      type: object
+      description: Data de referência e período usado para compor a dashboard
+      properties:
+        geradoEm:
+          type: string
+          format: date-time
+        inicioPeriodoMovimentacoes:
+          type: string
+          format: date
+        fimPeriodoMovimentacoes:
+          type: string
+          format: date
+        fusoHorario:
+          type: string
+    UltimaMovimentacaoDashboardResponseDto:
+      type: object
+      description: Movimentação recente exibida na dashboard
+      properties:
+        id:
+          type: integer
+          format: int64
+        ocorridoEm:
+          type: string
+          format: date-time
+        produtoId:
+          type: string
+          format: uuid
+        produtoNome:
+          type: string
+        unidadeMedida:
+          type: string
+        tipo:
+          type: string
+          enum:
+          - ENTRADA_INICIAL
+          - ENTRADA
+          - SAIDA
+          - AJUSTE_POSITIVO
+          - AJUSTE_NEGATIVO
+          - PERDA
+          - SAIDA_DRINK
+        direcao:
+          type: string
+          enum:
+          - ENTRADA
+          - SAIDA
+        quantidade:
+          type: number
+        operador:
+          type: string
+        motivo:
+          type: string
     RespostaPaginadaDtoCategoriaResponseDto:
       type: object
       properties:
@@ -2355,7 +2549,7 @@ components:
           type: string
     RespostaCsrfTokenDto:
       type: object
-      description: "Token CSRF de uma sessão autenticada, disponível também no cookie XSRF-TOKEN"
+      description: "Token CSRF de uma sessão autenticada, usado apenas no header X-XSRF-TOKEN"
       properties:
         token:
           type: string
