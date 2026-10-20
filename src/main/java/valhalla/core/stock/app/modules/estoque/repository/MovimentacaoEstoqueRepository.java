@@ -42,8 +42,8 @@ public interface MovimentacaoEstoqueRepository extends JpaRepository<Movimentaca
     );
 
     @Query("""
-            select function('year', m.ocorridoEm) as ano,
-                   function('month', m.ocorridoEm) as mes,
+            select extract(year from m.ocorridoEm) as ano,
+                   extract(month from m.ocorridoEm) as mes,
                    coalesce(sum(case when m.tipo in :tiposEntrada then 1 else 0 end), 0) as entradas,
                    coalesce(sum(case when m.tipo in :tiposSaida then 1 else 0 end), 0) as saidas
             from MovimentacaoEstoqueEntity m
@@ -52,8 +52,8 @@ public interface MovimentacaoEstoqueRepository extends JpaRepository<Movimentaca
             where p.estabelecimentoId = :idEstabelecimento
               and m.ocorridoEm >= :inicio
               and m.ocorridoEm < :fimExclusivo
-            group by function('year', m.ocorridoEm), function('month', m.ocorridoEm)
-            order by function('year', m.ocorridoEm), function('month', m.ocorridoEm)
+            group by extract(year from m.ocorridoEm), extract(month from m.ocorridoEm)
+            order by extract(year from m.ocorridoEm), extract(month from m.ocorridoEm)
             """)
     List<ResumoMovimentacaoMensalDashboardProjection> resumirMensalParaDashboard(
             @Param("idEstabelecimento") UUID idEstabelecimento,
