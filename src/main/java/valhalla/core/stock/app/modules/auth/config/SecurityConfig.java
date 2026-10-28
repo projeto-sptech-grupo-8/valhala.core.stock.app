@@ -209,7 +209,7 @@ public class SecurityConfig {
         configuration.setAllowedMethods(
                 List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
         );
-        configuration.setAllowedHeaders(List.of("Content-Type"));
+        configuration.setAllowedHeaders(List.of("Content-Type", CsrfTokenValidationFilter.CABECALHO_CSRF));
         configuration.setExposedHeaders(List.of("Location"));
         configuration.setAllowCredentials(true);
 

@@ -144,7 +144,11 @@ public class ServicoPermissoes {
                     .functionality(porCodigo.get(sobrescrita.codigoFuncionalidade()))
                     .effect(sobrescrita.efeito()).build());
         }
-        usuario.setFunctionalityOverrides(entidades);
+        // A coleção tem orphanRemoval: precisa ser a mesma instância. O flush remove as antigas antes
+        // de inserir as novas (o Hibernate insere antes de remover no mesmo flush e violaria a unicidade).
+        usuario.getFunctionalityOverrides().clear();
+        userRepository.flush();
+        usuario.getFunctionalityOverrides().addAll(entidades);
         garantirAoMenosUmUsuarioAtivoPodeCriarUsuarios(usuario.getEstablishment().getId());
         userRepository.save(usuario);
         tokenStateService.revokeAll(idUsuario);

@@ -118,7 +118,7 @@ class ServicoPermissoesTest {
         ProfileEntity perfil = perfil(nomePerfil);
         UserEntity usuario = UserEntity.builder().id(UUID.randomUUID()).profile(perfil)
                 .establishment(perfil.getEstablishment()).status(UserStatus.ATIVO)
-                .functionalityOverrides(sobrescritas).build();
+                .functionalityOverrides(new java.util.HashSet<>(sobrescritas)).build();
         sobrescritas.forEach(sobrescrita -> sobrescrita.setUser(usuario));
         return usuario;
     }
