@@ -12,7 +12,6 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +31,7 @@ import valhalla.core.stock.app.modules.auth.dto.RespostaCsrfTokenDto;
 import valhalla.core.stock.app.modules.auth.dto.RespostaTokenDto;
 import valhalla.core.stock.app.modules.auth.service.AuthService;
 import valhalla.core.stock.app.modules.auth.security.CsrfTokenStore;
+import valhalla.core.stock.app.shared.config.CookieProperties;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 
 import java.time.Duration;
@@ -50,19 +50,19 @@ public class AuthController {
 
     private final AuthService authService;
     private final JwtProperties jwtProperties;
-    private final boolean secureCookies;
+    private final CookieProperties cookieProperties;
     private final CsrfTokenStore csrfTokenStore;
 
     public AuthController(
             AuthService authService,
             JwtProperties jwtProperties,
             CsrfTokenStore csrfTokenStore,
-            @Value("${app.cookie.secure:false}") boolean secureCookies
+            CookieProperties cookieProperties
     ) {
         this.authService = authService;
         this.jwtProperties = jwtProperties;
         this.csrfTokenStore = csrfTokenStore;
-        this.secureCookies = secureCookies;
+        this.cookieProperties = cookieProperties;
     }
 
     @PostMapping("/login")
@@ -184,7 +184,7 @@ public class AuthController {
         ResponseCookie accessCookie = ResponseCookie
                 .from("accessToken", tokenResponse.tokenAcesso())
                 .httpOnly(true)
-                .secure(secureCookies)
+                .secure(cookieProperties.secure())
                 .path("/")
                 .maxAge(jwtProperties.expiration())
                 .sameSite("Strict")
@@ -193,7 +193,7 @@ public class AuthController {
         ResponseCookie refreshCookie = ResponseCookie
                 .from("refreshToken", tokenResponse.tokenRenovacao())
                 .httpOnly(true)
-                .secure(secureCookies)
+                .secure(cookieProperties.secure())
                 .path("/auth")
                 .maxAge(jwtProperties.refreshExpiration())
                 .sameSite("Strict")
@@ -204,7 +204,7 @@ public class AuthController {
         response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie
                 .from(COOKIE_CSRF, tokenResponse.tokenCsrf())
                 .httpOnly(false)
-                .secure(secureCookies)
+                .secure(cookieProperties.secure())
                 .path("/")
                 .maxAge(jwtProperties.refreshExpiration())
                 .sameSite("Strict")
@@ -225,7 +225,7 @@ public class AuthController {
     private ResponseCookie expiredCookie(String name, String path) {
         return ResponseCookie.from(name, "")
                 .httpOnly(true)
-                .secure(secureCookies)
+                .secure(cookieProperties.secure())
                 .path(path)
                 .maxAge(Duration.ZERO)
                 .sameSite("Strict")

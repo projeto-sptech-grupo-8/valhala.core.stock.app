@@ -3,8 +3,6 @@ package valhalla.core.stock.app.modules.auth.config;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -49,22 +47,19 @@ import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
 import valhalla.core.stock.app.modules.auth.security.AccessTokenStateValidator;
 import valhalla.core.stock.app.modules.auth.security.CsrfTokenValidationFilter;
+import valhalla.core.stock.app.shared.config.CorsProperties;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 import valhalla.core.stock.app.shared.logging.RequestFailureContext;
 
-import javax.crypto.SecretKey;
-import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
 
 @Configuration
 @EnableMethodSecurity
-@EnableConfigurationProperties(JwtProperties.class)
 public class SecurityConfig {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SecurityConfig.class);
@@ -183,7 +178,7 @@ public class SecurityConfig {
 
     @Bean
     public JwtEncoder jwtEncoder(JwtProperties properties) {
-        return NimbusJwtEncoder.withSecretKey(secretKey(properties)).build();
+        return NimbusJwtEncoder.withSecretKey(properties.secretKey()).build();
     }
 
     @Bean
@@ -201,11 +196,9 @@ public class SecurityConfig {
     }
 
     @Bean
-    public CorsConfigurationSource corsConfigurationSource(
-            @Value("${app.cors.allowed-origin}") String allowedOrigin
-    ) {
+    public CorsConfigurationSource corsConfigurationSource(CorsProperties corsProperties) {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of(allowedOrigin));
+        configuration.setAllowedOrigins(corsProperties.allowedOrigins());
         configuration.setAllowedMethods(
                 List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
         );
@@ -273,7 +266,7 @@ public class SecurityConfig {
             OAuth2TokenValidator<Jwt> stateValidator
     ) {
         NimbusJwtDecoder decoder = NimbusJwtDecoder
-                .withSecretKey(secretKey(properties))
+                .withSecretKey(properties.secretKey())
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
 
@@ -304,25 +297,5 @@ public class SecurityConfig {
             );
             return OAuth2TokenValidatorResult.failure(error);
         };
-    }
-
-    private SecretKey secretKey(JwtProperties properties) {
-        byte[] secret;
-        try {
-            secret = Base64.getDecoder().decode(properties.secret());
-        } catch (IllegalArgumentException exception) {
-            throw new IllegalStateException(
-                    "security.jwt.secret deve estar codificado em Base64",
-                    exception
-            );
-        }
-
-        if (secret.length < 32) {
-            throw new IllegalStateException(
-                    "security.jwt.secret deve representar pelo menos 32 bytes"
-            );
-        }
-
-        return new SecretKeySpec(secret, "HmacSHA256");
     }
 }

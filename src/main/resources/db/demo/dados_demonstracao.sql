@@ -1,7 +1,9 @@
 -- Dados de demonstração para desenvolvimento (substitui o antigo mockServer do front).
--- Só é aplicado com o perfil `dev` (ver application-dev.properties); nunca em produção.
--- Migração repetível e idempotente: reexecuta quando o arquivo muda e não duplica registros.
+-- Aplicado por DemoDataSeeder somente com o perfil `dev`; nunca em produção.
+-- NÃO é uma migração Flyway: dados de demonstração não fazem parte do schema.
+-- Script idempotente: pode rodar a cada inicialização sem duplicar registros.
 -- Todos os usuários usam a senha 'Senha@123'.
+-- Requer a extensão pgcrypto (criada por db/script.sql) para crypt()/gen_salt().
 --
 -- Fora do escopo do back hoje (não semeado): caixa, pedidos, notas fiscais e financeiro.
 

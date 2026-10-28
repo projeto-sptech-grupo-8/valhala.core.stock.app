@@ -6,7 +6,6 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -20,6 +19,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
+import valhalla.core.stock.app.shared.config.CorsProperties;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 import valhalla.core.stock.app.shared.logging.RequestFailureContext;
 
@@ -43,18 +43,18 @@ public class CsrfTokenValidationFilter extends OncePerRequestFilter {
     private final CsrfTokenStore csrfTokenStore;
     private final JwtDecoder refreshTokenDecoder;
     private final ObjectMapper objectMapper;
-    private final String allowedOrigin;
+    private final CorsProperties corsProperties;
 
     public CsrfTokenValidationFilter(
             CsrfTokenStore csrfTokenStore,
             @Qualifier("refreshTokenDecoder") JwtDecoder refreshTokenDecoder,
             ObjectMapper objectMapper,
-            @Value("${app.cors.allowed-origin}") String allowedOrigin
+            CorsProperties corsProperties
     ) {
         this.csrfTokenStore = csrfTokenStore;
         this.refreshTokenDecoder = refreshTokenDecoder;
         this.objectMapper = objectMapper;
-        this.allowedOrigin = allowedOrigin;
+        this.corsProperties = corsProperties;
     }
 
     @Override
@@ -86,7 +86,7 @@ public class CsrfTokenValidationFilter extends OncePerRequestFilter {
                 ? obterCookie(request, COOKIE_CSRF)
                 : tokenNoCabecalho;
         boolean possuiTokenNoCabecalho = tokenNoCabecalho != null && !tokenNoCabecalho.isBlank();
-        boolean origemDoFrontendConfigurado = allowedOrigin.equals(request.getHeader("Origin"));
+        boolean origemDoFrontendConfigurado = corsProperties.allows(request.getHeader("Origin"));
         if (csrfTokenStore.ehValido(idSessao, token)
                 && (possuiTokenNoCabecalho || origemDoFrontendConfigurado)) {
             filterChain.doFilter(request, response);

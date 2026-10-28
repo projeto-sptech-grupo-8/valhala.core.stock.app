@@ -27,45 +27,40 @@ antes de aplicá-la.
 
 ## Configurar e iniciar a aplicação
 
-Na raiz deste projeto, configure as variáveis no mesmo terminal PowerShell que
-será usado para iniciar a API:
+Copie o modelo de configuração e ajuste os valores:
 
 ```powershell
-$env:DB_PASSWORD = 'senha-do-postgres'
-$env:JWT_SECRET = 'secret-base64-com-pelo-menos-32-bytes'
-$env:FRONTEND_URL = 'http://localhost:5173'
+Copy-Item .env.example .env
 ```
 
-Em produção, habilite cookies seguros e, se necessário, ajuste a duração do
-refresh token (o padrão é sete dias):
-
-```powershell
-$env:COOKIE_SECURE = 'true'
-$env:JWT_REFRESH_EXPIRATION = 'P7D'
-```
-
-Para gerar um novo secret compatível com versões antigas do PowerShell:
+O arquivo `.env` na raiz é carregado automaticamente pelo Spring Boot
+(`spring.config.import`) e não é versionado. Os únicos campos obrigatórios são
+`DB_PASSWORD` e `JWT_SECRET`; os demais têm padrão local. Para gerar o secret:
 
 ```powershell
 $jwtBytes = New-Object byte[] 32
 $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
 $rng.GetBytes($jwtBytes)
 $rng.Dispose()
-$env:JWT_SECRET = [Convert]::ToBase64String($jwtBytes)
+[Convert]::ToBase64String($jwtBytes)
 ```
 
-Se o banco não estiver em `localhost:5432/valhalla`, configure também:
+O `.env` usa o formato `.properties`: não use aspas (`JWT_SECRET="..."` é lido com
+as aspas) nem espaços ao redor do `=`. Para carregar os dados de demonstração no
+desenvolvimento, descomente `spring.profiles.active=dev` no `.env`.
 
-```powershell
-$env:DB_URL = 'jdbc:postgresql://localhost:5432/valhalla'
-$env:DB_USERNAME = 'postgres'
-```
+Em produção, não envie o `.env` para o servidor: defina as mesmas variáveis no
+ambiente (container, CI ou gerenciador de segredos). Variáveis de ambiente reais
+sempre têm precedência sobre o `.env`, e o secret deve ser diferente por ambiente.
 
 Depois, inicie a aplicação:
 
 ```powershell
 .\mvnw.cmd spring-boot:run
 ```
+
+A referência completa de variáveis, valores padrão, precedência e erros comuns
+está em [docs/CONFIGURACAO.md](docs/CONFIGURACAO.md).
 
 ## Consumo pelo frontend
 
