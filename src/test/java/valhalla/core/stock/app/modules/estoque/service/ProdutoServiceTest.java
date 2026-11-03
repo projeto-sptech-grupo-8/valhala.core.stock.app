@@ -24,6 +24,7 @@ import valhalla.core.stock.app.modules.estoque.repository.CategoriaRepository;
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
+import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
 
@@ -48,6 +49,7 @@ class ProdutoServiceTest {
     @Mock private EstoqueRepository estoqueRepository;
     @Mock private MovimentacaoEstoqueService movimentacaoEstoqueService;
     @Mock private MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
+    @Mock private BusinessEventLogger businessEventLogger;
     @InjectMocks private ProdutoService produtoService;
 
     @AfterEach

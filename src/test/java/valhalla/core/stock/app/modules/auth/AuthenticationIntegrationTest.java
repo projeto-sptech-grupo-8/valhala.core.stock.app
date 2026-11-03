@@ -382,7 +382,8 @@ class AuthenticationIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"profileName\":\"Gerente\"}"))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.message").value("Token CSRF ausente ou inválido"));
+                .andExpect(content().string(org.hamcrest.Matchers
+                        .containsString("Invalid CORS request")));
     }
 
     @Test

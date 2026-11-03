@@ -18,6 +18,11 @@ import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
 import valhalla.core.stock.app.shared.logging.RequestFailureContext;
 import valhalla.core.stock.app.shared.error.AccessConfigurationConflictException;
+import valhalla.core.stock.app.modules.caixa.exception.ConfiguracaoCaixaInvalidaException;
+import valhalla.core.stock.app.modules.caixa.exception.PagamentoPendenteFechamentoException;
+import valhalla.core.stock.app.modules.caixa.exception.SaldoInsuficienteCaixaException;
+import valhalla.core.stock.app.modules.caixa.exception.SessaoCaixaEstadoInvalidoException;
+import valhalla.core.stock.app.modules.caixa.exception.SessaoCaixaJaAbertaException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaJaExisteException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaPossuiProdutosException;
 import valhalla.core.stock.app.modules.estoque.exception.ProdutoPossuiMovimentacoesException;
@@ -25,6 +30,7 @@ import valhalla.core.stock.app.modules.estoque.exception.ProdutoPossuiMovimentac
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -115,6 +121,56 @@ public class GlobalExceptionHandler {
             ProdutoPossuiMovimentacoesException exception
     ) {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(ConfiguracaoCaixaInvalidaException.class)
+    public ResponseEntity<ApiErrorResponse> handleConfiguracaoCaixaInvalida(
+            ConfiguracaoCaixaInvalidaException exception
+    ) {
+        return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(SessaoCaixaJaAbertaException.class)
+    public ResponseEntity<ApiErrorResponse> handleSessaoCaixaJaAberta(
+            SessaoCaixaJaAbertaException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(SessaoCaixaEstadoInvalidoException.class)
+    public ResponseEntity<ApiErrorResponse> handleSessaoCaixaEstadoInvalido(
+            SessaoCaixaEstadoInvalidoException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(SaldoInsuficienteCaixaException.class)
+    public ResponseEntity<ApiErrorResponse> handleSaldoInsuficienteCaixa(
+            SaldoInsuficienteCaixaException exception
+    ) {
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                exception.getMessage(),
+                Map.of(
+                        "valor",
+                        "Disponível para sangria: R$ " + exception.getDisponivel().toPlainString()
+                )
+        );
+    }
+
+    @ExceptionHandler(PagamentoPendenteFechamentoException.class)
+    public ResponseEntity<ApiErrorResponse> handlePagamentoPendenteFechamento(
+            PagamentoPendenteFechamentoException exception
+    ) {
+        String pendencias = exception.getPendenciasPorStatus().entrySet().stream()
+                .map(entrada -> entrada.getKey() + ": " + entrada.getValue())
+                .collect(Collectors.joining(", "));
+
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                exception.getMessage(),
+                Map.of("pagamentosPendentes", pendencias)
+        );
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

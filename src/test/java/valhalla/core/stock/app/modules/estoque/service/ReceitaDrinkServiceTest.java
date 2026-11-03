@@ -19,6 +19,7 @@ import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
 import valhalla.core.stock.app.modules.estoque.entity.UnidadeConsumoDrink;
 import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkRepository;
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
+import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -37,6 +38,7 @@ class ReceitaDrinkServiceTest {
 
     @Mock private ProdutoRepository produtoRepository;
     @Mock private ComposicaoDrinkRepository composicaoDrinkRepository;
+    @Mock private BusinessEventLogger businessEventLogger;
     @InjectMocks private ReceitaDrinkService receitaDrinkService;
 
     @AfterEach

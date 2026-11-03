@@ -11,10 +11,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.util.UUID;
 
-/**
- * Emits semantic, identifier-only business events. Events inside a transaction are
- * emitted only after its commit, preventing logs for rolled-back changes.
- */
 @Component
 public class BusinessEventLogger {
 

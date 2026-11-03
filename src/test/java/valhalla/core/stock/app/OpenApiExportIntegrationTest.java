@@ -36,6 +36,13 @@ class OpenApiExportIntegrationTest {
                 .contains("/drinks/{idDrink}/receita:")
                 .contains("/movimentacoes-estoque:")
                 .contains("/dashboard/resumo:")
+                .contains("/caixa/configuracao:")
+                .contains("/caixa/sessoes:")
+                .contains("/caixa/sessoes/atual:")
+                .contains("/caixa/sessoes/{id}/movimentacoes:")
+                .contains("/caixa/sessoes/{id}/fechamento:")
+                .contains("/caixa/sessoes/{id}/resolucao-divergencia:")
+                .contains("/caixa/auditoria:")
                 .contains("/auth/csrf:")
                 .contains("csrfTokenHeader:");
 
