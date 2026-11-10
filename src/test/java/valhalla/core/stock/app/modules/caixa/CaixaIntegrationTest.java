@@ -8,11 +8,11 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.caixa.entity.AuditoriaCaixaEntity;
+import valhalla.core.stock.app.modules.caixa.entity.CaixaEntity;
 import valhalla.core.stock.app.modules.caixa.entity.ConfiguracaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.entity.PagamentoPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.entity.SessaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.entity.StatusPagamentoPedido;
-import valhalla.core.stock.app.modules.caixa.entity.StatusSessaoCaixa;
 import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
 
 import java.util.List;
@@ -20,6 +20,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -42,11 +43,9 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
                         .cookie(gerente.accessToken())
                         .with(csrf(gerente))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(configuracaoJson("TERM-001", "Caixa principal")))
+                        .content(configuracaoJson()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").isNotEmpty())
-                .andExpect(jsonPath("$.terminalId").value("TERM-001"))
-                .andExpect(jsonPath("$.terminalNome").value("Caixa principal"))
                 .andExpect(jsonPath("$.pointHabilitado").value(false))
                 .andExpect(jsonPath("$.pixHabilitado").value(true))
                 .andExpect(jsonPath("$.limiteDescontoPercentual").value(10.0))
@@ -59,7 +58,6 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
 
         mockMvc.perform(get("/caixa/configuracao").cookie(operador.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.terminalId").value("TERM-001"))
                 .andExpect(jsonPath("$.parcelasMaximas").value(5));
 
         List<AuditoriaCaixaEntity> eventos = auditorias();
@@ -102,7 +100,7 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
                         .cookie(gerente.accessToken())
                         .with(csrf(gerente))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(configuracaoJson("TERM-001", "Caixa principal")
+                        .content(configuracaoJson()
                                 .replace("\"parcelasMaximas\": 5", "\"parcelasMaximas\": 13")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Dados de entrada inválidos"))
@@ -119,7 +117,7 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
                         .cookie(gerente.accessToken())
                         .with(csrf(gerente))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(configuracaoJson("TERM-001", "Caixa principal")
+                        .content(configuracaoJson()
                                 .replace("\"dinheiroHabilitado\": true", "\"dinheiroHabilitado\": false")
                                 .replace("\"debitoHabilitado\": true", "\"debitoHabilitado\": false")
                                 .replace("\"creditoHabilitado\": true", "\"creditoHabilitado\": false")
@@ -133,11 +131,11 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
                         .cookie(gerente.accessToken())
                         .with(csrf(gerente))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(configuracaoJson(null, null)
+                        .content(configuracaoJson()
                                 .replace("\"pointHabilitado\": false", "\"pointHabilitado\": true")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(
-                        "O terminal Point é obrigatório quando a Point está habilitada"
+                        "Cadastre ao menos um terminal ativo para habilitar a Point"
                 ));
     }
 
@@ -152,39 +150,244 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
                         .cookie(operador.accessToken())
                         .with(csrf(operador))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(configuracaoJson("TERM-001", "Caixa principal")))
+                        .content(configuracaoJson()))
                 .andExpect(status().isForbidden());
     }
 
     @Test
-    void abreSessaoEConsultaAtualComDadosDoTerminal() throws Exception {
-        configuracao(estabelecimento, "TERM-001");
-        UsuarioAutenticado operador = autenticarComPermissoes(
-                "operador.abertura@meraki.com",
+    void gerenciaCaixasComDuasMaquinasEProtegeUltimoTerminalAtivoDaPoint() throws Exception {
+        UsuarioAutenticado gerente = autenticarGerente("gerente.caixas@meraki.com");
+
+        MvcResult criacaoCaixa = mockMvc.perform(post("/caixa/caixas")
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\"Caixa Principal\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nome").value("Caixa Principal"))
+                .andExpect(jsonPath("$.ativo").value(true))
+                .andExpect(jsonPath("$.emUso").value(false))
+                .andReturn();
+
+        String caixaId = JsonPath.read(criacaoCaixa.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(post("/caixa/caixas")
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\"caixa principal\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value(
+                        "Já existe um caixa com este nome no estabelecimento"
+                ));
+
+        MvcResult term1 = mockMvc.perform(post("/caixa/caixas/{caixaId}/terminais", caixaId)
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"terminalId\":\"POINT-SMART-001\",\"nome\":\"Point 1\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.terminalId").value("POINT-SMART-001"))
+                .andReturn();
+        String term1Id = JsonPath.read(term1.getResponse().getContentAsString(), "$.id");
+
+        MvcResult term2 = mockMvc.perform(post("/caixa/caixas/{caixaId}/terminais", caixaId)
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"terminalId\":\"POINT-SMART-002\",\"nome\":\"Point 2\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.terminalId").value("POINT-SMART-002"))
+                .andReturn();
+        String term2Id = JsonPath.read(term2.getResponse().getContentAsString(), "$.id");
+
+        // O mesmo dispositivo físico não pode ser vinculado duas vezes.
+        mockMvc.perform(post("/caixa/caixas/{caixaId}/terminais", caixaId)
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"terminalId\":\"POINT-SMART-001\",\"nome\":\"Point 3\"}"))
+                .andExpect(status().isConflict());
+
+        // Agora há terminal ativo: a Point pode ser habilitada.
+        mockMvc.perform(put("/caixa/configuracao")
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(configuracaoJson()
+                                .replace("\"pointHabilitado\": false", "\"pointHabilitado\": true")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pointHabilitado").value(true));
+
+        // Inativa a primeira maquininha: a segunda mantém a Point coberta.
+        mockMvc.perform(patch("/caixa/caixas/{caixaId}/terminais/{terminalId}", caixaId, term1Id)
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ativo\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ativo").value(false));
+
+        // Tentar inativar a última maquininha ativa com a Point habilitada é bloqueado.
+        mockMvc.perform(patch("/caixa/caixas/{caixaId}/terminais/{terminalId}", caixaId, term2Id)
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ativo\":false}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value(
+                        "A Point está habilitada: mantenha ao menos um terminal ativo ou desabilite a Point antes"
+                ));
+
+        mockMvc.perform(get("/caixa/caixas/{id}", caixaId).cookie(gerente.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.terminais.length()").value(2));
+    }
+
+    @Test
+    void cadastraTaxasComHerancaESobrescritaDaPoliticaDeJuros() throws Exception {
+        UsuarioAutenticado gerente = autenticarGerente("gerente.taxas@meraki.com");
+
+        // Crédito 1x sem sobrescrita: segue a política global (ABSORVIDA_PELA_LOJA → repasseEfetivo=false).
+        MvcResult taxa1x = mockMvc.perform(post("/caixa/taxas")
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "forma": "CREDITO",
+                                  "parcelas": 1,
+                                  "taxaPercentual": 4.9800,
+                                  "taxaFixa": 0.00,
+                                  "repassarAoCliente": null,
+                                  "ativo": true
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.repassarAoCliente").isEmpty())
+                .andExpect(jsonPath("$.repasseEfetivo").value(false))
+                .andReturn();
+        String taxa1xId = JsonPath.read(taxa1x.getResponse().getContentAsString(), "$.id");
+
+        // Crédito 10x com sobrescrita explícita para repassar ao cliente, mesmo com a loja absorvendo no global.
+        mockMvc.perform(post("/caixa/taxas")
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "forma": "CREDITO",
+                                  "parcelas": 10,
+                                  "taxaPercentual": 16.5000,
+                                  "taxaFixa": 0.00,
+                                  "repassarAoCliente": true,
+                                  "ativo": true
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.repassarAoCliente").value(true))
+                .andExpect(jsonPath("$.repasseEfetivo").value(true));
+
+        // Débito com mais de 1 parcela e dinheiro são rejeitados.
+        mockMvc.perform(post("/caixa/taxas")
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "forma": "DEBITO",
+                                  "parcelas": 2,
+                                  "taxaPercentual": 1.99,
+                                  "taxaFixa": 0.00,
+                                  "ativo": true
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Débito e Pix aceitam somente 1 parcela"));
+
+        mockMvc.perform(post("/caixa/taxas")
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "forma": "DINHEIRO",
+                                  "parcelas": 1,
+                                  "taxaPercentual": 0.00,
+                                  "taxaFixa": 0.00,
+                                  "ativo": true
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Pagamento em dinheiro não possui taxa"));
+
+        // Atualiza a taxa de 1x.
+        mockMvc.perform(put("/caixa/taxas/{id}", taxa1xId)
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "taxaPercentual": 3.9900,
+                                  "taxaFixa": 0.00,
+                                  "repassarAoCliente": null,
+                                  "ativo": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.taxaPercentual").value(3.99));
+
+        mockMvc.perform(get("/caixa/taxas")
+                        .cookie(gerente.accessToken())
+                        .param("forma", "CREDITO"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItens").value(2));
+    }
+
+    @Test
+    void abreSessoesSimultaneasEmCaixasSeparadosEConsultaAtual() throws Exception {
+        CaixaEntity caixa1 = caixa(estabelecimento, "Caixa 1");
+        CaixaEntity caixa2 = caixa(estabelecimento, "Caixa 2");
+        UsuarioAutenticado operador1 = autenticarComPermissoes(
+                "operador.caixa1@meraki.com",
+                PERMISSOES_OPERADOR
+        );
+        UsuarioAutenticado operador2 = autenticarComPermissoes(
+                "operador.caixa2@meraki.com",
                 PERMISSOES_OPERADOR
         );
 
-        MvcResult abertura = mockMvc.perform(post("/caixa/sessoes")
-                        .cookie(operador.accessToken())
-                        .with(csrf(operador))
+        MvcResult abertura1 = mockMvc.perform(post("/caixa/sessoes")
+                        .cookie(operador1.accessToken())
+                        .with(csrf(operador1))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"fundoTroco":100.00,"observacao":"Abertura do turno"}
-                                """))
+                                {"caixaId":"%s","fundoTroco":100.00,"observacao":"Abertura do turno"}
+                                """.formatted(caixa1.getId())))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("ABERTA"))
-                .andExpect(jsonPath("$.terminalId").value("TERM-001"))
+                .andExpect(jsonPath("$.caixaId").value(caixa1.getId().toString()))
+                .andExpect(jsonPath("$.caixaNome").value("Caixa 1"))
                 .andExpect(jsonPath("$.fundoTroco").value(100.0))
-                .andExpect(jsonPath("$.operadorUsuarioId").value(operador.usuarioId().toString()))
+                .andExpect(jsonPath("$.operadorUsuarioId").value(operador1.usuarioId().toString()))
                 .andExpect(jsonPath("$.resumoAtual.dinheiroEsperado").value(100.0))
                 .andReturn();
 
-        String sessaoId = JsonPath.read(abertura.getResponse().getContentAsString(), "$.id");
+        String sessaoId1 = JsonPath.read(abertura1.getResponse().getContentAsString(), "$.id");
+        String sessaoId2 = abrir(operador2, caixa2.getId(), "80.00");
+        assertThat(sessaoId2).isNotEqualTo(sessaoId1);
 
-        mockMvc.perform(get("/caixa/sessoes/atual").cookie(operador.accessToken()))
+        mockMvc.perform(get("/caixa/sessoes/atual").cookie(operador1.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(sessaoId))
-                .andExpect(jsonPath("$.status").value("ABERTA"));
+                .andExpect(jsonPath("$.id").value(sessaoId1))
+                .andExpect(jsonPath("$.caixaId").value(caixa1.getId().toString()));
+
+        mockMvc.perform(get("/caixa/sessoes")
+                        .cookie(operador1.accessToken())
+                        .param("caixaId", caixa2.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItens").value(1))
+                .andExpect(jsonPath("$.itens[0].id").value(sessaoId2));
 
         assertThat(auditorias())
                 .anyMatch(evento -> "ABERTURA_CAIXA".equals(evento.getTipoEvento())
@@ -192,20 +395,22 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
     }
 
     @Test
-    void bloqueiaSegundaSessaoAbertaParaMesmoOperadorOuTerminal() throws Exception {
-        configuracao(estabelecimento, "TERM-001");
+    void bloqueiaSegundaSessaoAbertaParaMesmoOperadorOuCaixaEImpedeInativarCaixaAberto() throws Exception {
+        CaixaEntity caixa1 = caixa(estabelecimento, "Caixa 1");
+        CaixaEntity caixa2 = caixa(estabelecimento, "Caixa 2");
         UsuarioAutenticado operador = autenticarComPermissoes(
                 "operador.duplicado@meraki.com",
                 PERMISSOES_OPERADOR
         );
 
-        abrir(operador, "100.00");
+        abrir(operador, caixa1.getId(), "100.00");
 
+        // O mesmo operador não pode abrir um segundo caixa sem fechar o atual.
         mockMvc.perform(post("/caixa/sessoes")
                         .cookie(operador.accessToken())
                         .with(csrf(operador))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"fundoTroco\":50.00}"))
+                        .content("{\"caixaId\":\"%s\",\"fundoTroco\":50.00}".formatted(caixa2.getId())))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value(
                         "O operador já possui uma sessão de caixa aberta"
@@ -216,14 +421,26 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
                 PERMISSOES_OPERADOR
         );
 
+        // Outro operador não pode abrir o mesmo caixa já aberto.
         mockMvc.perform(post("/caixa/sessoes")
                         .cookie(outroOperador.accessToken())
                         .with(csrf(outroOperador))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"fundoTroco\":50.00}"))
+                        .content("{\"caixaId\":\"%s\",\"fundoTroco\":50.00}".formatted(caixa1.getId())))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value(
-                        "Já existe uma sessão de caixa aberta para este terminal"
+                        "Já existe uma sessão de caixa aberta para este caixa"
+                ));
+
+        UsuarioAutenticado gerente = autenticarGerente("gerente.inativar@meraki.com");
+        mockMvc.perform(patch("/caixa/caixas/{id}", caixa1.getId())
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ativo\":false}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value(
+                        "Não é possível inativar um caixa com sessão aberta"
                 ));
     }
 
@@ -240,12 +457,12 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
 
     @Test
     void sangriaRespeitaDinheiroDisponivelEOutroOperadorNaoMovimenta() throws Exception {
-        configuracao(estabelecimento, "TERM-002");
+        CaixaEntity caixa = caixa(estabelecimento, "Caixa Sangria");
         UsuarioAutenticado operador = autenticarComPermissoes(
                 "operador.sangria@meraki.com",
                 PERMISSOES_OPERADOR
         );
-        String sessaoId = abrir(operador, "100.00");
+        String sessaoId = abrir(operador, caixa.getId(), "100.00");
 
         mockMvc.perform(post("/caixa/sessoes/{id}/movimentacoes", sessaoId)
                         .cookie(operador.accessToken())
@@ -311,12 +528,12 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
 
     @Test
     void fechaSemDiferencaEDepoisRejeitaNovoFechamento() throws Exception {
-        configuracao(estabelecimento, "TERM-003");
+        CaixaEntity caixa = caixa(estabelecimento, "Caixa Fechamento");
         UsuarioAutenticado operador = autenticarComPermissoes(
                 "operador.fechamento@meraki.com",
                 PERMISSOES_OPERADOR
         );
-        String sessaoId = abrir(operador, "100.00");
+        String sessaoId = abrir(operador, caixa.getId(), "100.00");
 
         mockMvc.perform(post("/caixa/sessoes/{id}/fechamento", sessaoId)
                         .cookie(operador.accessToken())
@@ -351,13 +568,13 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
     }
 
     @Test
-    void fechamentoComDiferencaExigeJustificativaELiberaTerminalParaOutroOperador() throws Exception {
-        configuracao(estabelecimento, "TERM-004");
+    void fechamentoComDiferencaExigeJustificativaELiberaCaixaParaOutroOperador() throws Exception {
+        CaixaEntity caixa = caixa(estabelecimento, "Caixa Divergencia");
         UsuarioAutenticado operadorA = autenticarComPermissoes(
                 "operador.divergencia@meraki.com",
                 PERMISSOES_OPERADOR
         );
-        String sessaoId = abrir(operadorA, "100.00");
+        String sessaoId = abrir(operadorA, caixa.getId(), "100.00");
 
         mockMvc.perform(post("/caixa/sessoes/{id}/fechamento", sessaoId)
                         .cookie(operadorA.accessToken())
@@ -387,7 +604,7 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
                 "operador.turno2@meraki.com",
                 PERMISSOES_OPERADOR
         );
-        String novaSessaoId = abrir(operadorB, "50.00");
+        String novaSessaoId = abrir(operadorB, caixa.getId(), "50.00");
         assertThat(novaSessaoId).isNotEqualTo(sessaoId);
 
         UsuarioAutenticado gerente = autenticarGerente("gerente.divergencia@meraki.com");
@@ -422,12 +639,12 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
 
     @Test
     void usuarioComPermissaoDeDivergenciaSemPapelGerentePodeResolver() throws Exception {
-        configuracao(estabelecimento, "TERM-007");
+        CaixaEntity caixa = caixa(estabelecimento, "Caixa Permissao");
         UsuarioAutenticado operador = autenticarComPermissoes(
                 "operador.divergencia.permissao@meraki.com",
                 PERMISSOES_OPERADOR
         );
-        String sessaoId = abrir(operador, "100.00");
+        String sessaoId = abrir(operador, caixa.getId(), "100.00");
 
         mockMvc.perform(post("/caixa/sessoes/{id}/fechamento", sessaoId)
                         .cookie(operador.accessToken())
@@ -463,12 +680,12 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
 
     @Test
     void fechamentoEhBloqueadoPorPagamentoPendente() throws Exception {
-        configuracao(estabelecimento, "TERM-005");
+        CaixaEntity caixa = caixa(estabelecimento, "Caixa Pendente");
         UsuarioAutenticado operador = autenticarComPermissoes(
                 "operador.pendente@meraki.com",
                 PERMISSOES_OPERADOR
         );
-        String sessaoId = abrir(operador, "100.00");
+        String sessaoId = abrir(operador, caixa.getId(), "100.00");
 
         PagamentoPedidoEntity pagamento = pagamento(
                 UUID.fromString(sessaoId),
@@ -515,10 +732,11 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
                 outroEstabelecimento,
                 "gerente.outro@outra.com"
         );
+        CaixaEntity caixaExterno = caixa(outroEstabelecimento, "Caixa Externo");
         SessaoCaixaEntity sessaoExterna = sessaoAberta(
                 outroEstabelecimento,
                 gerenteOutro.usuarioId(),
-                "TERM-EXTERNO",
+                caixaExterno,
                 "25.00"
         );
 
@@ -535,12 +753,12 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
 
     @Test
     void auditoriaFiltraPorTipoDeEventoEExigePermissaoDeVisualizacao() throws Exception {
-        configuracao(estabelecimento, "TERM-006");
+        CaixaEntity caixa = caixa(estabelecimento, "Caixa Auditoria");
         UsuarioAutenticado operador = autenticarComPermissoes(
                 "operador.auditoria@meraki.com",
                 PERMISSOES_OPERADOR
         );
-        abrir(operador, "100.00");
+        abrir(operador, caixa.getId(), "100.00");
 
         UsuarioAutenticado gerente = autenticarGerente("gerente.auditoria@meraki.com");
 
@@ -567,30 +785,26 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
                 .andExpect(status().isForbidden());
     }
 
-    private String abrir(UsuarioAutenticado usuario, String fundoTroco) throws Exception {
+    private String abrir(UsuarioAutenticado usuario, UUID caixaId, String fundoTroco) throws Exception {
         MvcResult resultado = mockMvc.perform(post("/caixa/sessoes")
                         .cookie(usuario.accessToken())
                         .with(csrf(usuario))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"fundoTroco\":%s}".formatted(fundoTroco)))
+                        .content("{\"caixaId\":\"%s\",\"fundoTroco\":%s}".formatted(caixaId, fundoTroco)))
                 .andExpect(status().isCreated())
                 .andReturn();
         return JsonPath.read(resultado.getResponse().getContentAsString(), "$.id");
     }
 
     private String configuracaoPadraoJson() {
-        return configuracaoJson(null, null)
+        return configuracaoJson()
                 .replace("\"limiteDescontoPercentual\": 10.00", "\"limiteDescontoPercentual\": 0.00")
                 .replace("\"limiteDescontoValor\": 20.00", "\"limiteDescontoValor\": 0.00");
     }
 
-    private String configuracaoJson(String terminalId, String terminalNome) {
-        String terminal = terminalId == null ? "null" : "\"" + terminalId + "\"";
-        String nome = terminalNome == null ? "null" : "\"" + terminalNome + "\"";
+    private String configuracaoJson() {
         return """
                 {
-                  "terminalId": %s,
-                  "terminalNome": %s,
                   "pointHabilitado": false,
                   "dinheiroHabilitado": true,
                   "debitoHabilitado": true,
@@ -607,6 +821,6 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
                   "imprimirComprovante": true,
                   "permitirPagamentoManual": false
                 }
-                """.formatted(terminal, nome);
+                """;
     }
 }

@@ -28,6 +28,8 @@ As migrações atuais:
 - impedem que a exclusão de usuário apague o responsável pelo fechamento da sessão ou pela resolução de divergência (V14).
 - liberam o terminal para uma nova abertura enquanto a sessão anterior aguarda aprovação de divergência, restringindo o índice único às sessões `ABERTA` (V15).
 - reforçam as invariantes do caixa: uma única sessão `ABERTA` por operador e teto de 12 parcelas na configuração (V16).
+- implementam a Fase 1 do caixa multi-terminal: criam `caixa`, `terminal_caixa` e `taxa_pagamento`, migram `sessao_caixa` para `caixa_id`, removem `terminal_id` da sessão e da configuração e adicionam terminal e snapshot de taxas em `pagamento_pedido` (V17).
+- implementam a Fase 1.5 de pedidos, descontos híbridos, cancelamento e estorno: adicionam os campos de ciclo de vida do desconto (`tipo_desconto`, `valor_desconto_informado`, `status_desconto`, `desconto_solicitado`, `motivo_desconto`, `desconto_decidido_por_usuario_id`, `desconto_decidido_em`, `observacao_decisao_desconto`), cancelamento e estorno (`motivo_cancelamento`, `cancelado_por_usuario_id`, `motivo_estorno`, `estornado_por_usuario_id`, `estornado_em`) e o status `ESTORNADO` em `pedido`, índice único de idempotência `(pedido_id, chave_idempotencia)` em `pagamento_pedido` e concedem `CAIXA_CANCELAR` por padrão aos perfis `Atendente` e `Caixa` (V18).
 
 Antes de aplicar a V3 em um banco existente, confira se não há nomes de perfis que diferem apenas por capitalização. A migration não escolhe nem remove dados automaticamente.
 
@@ -128,6 +130,8 @@ WHERE parcelas_maximas > 12;
 O índice `uq_pagamento_point_ativo_terminal` é global por `terminal_id`, sem escopo
 de estabelecimento. O identificador pertence ao dispositivo físico, então o índice
 também impede duas cobranças simultâneas no mesmo terminal entre tenants.
+
+A V17 substitui o vínculo direto de sessão com terminal pelo modelo multi-terminal (`caixa`, `terminal_caixa` e `taxa_pagamento`), migra sessões e pagamentos existentes para o `Caixa Principal` (ou caixas por terminal legado), recria `uq_sessao_caixa_aberta` em `(caixa_id) WHERE status = 'ABERTA'` e remove `terminal_id` de `sessao_caixa` e `configuracao_caixa`.
 
 Antes de aplicar a V10 em um banco que já possua pagamentos, confira se há valores de `forma`
 ou `status` fora dos domínios documentados. As constraints são `NOT VALID` e não corrigem

@@ -23,7 +23,7 @@ import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 @RestController
 @Validated
 @RequestMapping("/caixa/configuracao")
-@Tag(name = "Configuração do caixa", description = "Configuração do terminal e das formas de pagamento do estabelecimento.")
+@Tag(name = "Configuração do caixa", description = "Configuração das formas de pagamento e políticas comerciais do estabelecimento.")
 @SecurityRequirement(name = "accessTokenCookie")
 public class ConfiguracaoCaixaController {
 

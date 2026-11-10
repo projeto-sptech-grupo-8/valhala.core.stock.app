@@ -7,8 +7,13 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 public record AbrirSessaoCaixaRequestDto(
+
+        @NotNull(message = "O caixa é obrigatório")
+        @Schema(description = "Caixa (posto físico) em que a sessão será aberta")
+        UUID caixaId,
 
         @NotNull(message = "O fundo de troco é obrigatório")
         @DecimalMin(value = "0.00", message = "O fundo de troco não pode ser negativo")

@@ -18,11 +18,18 @@ import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
 import valhalla.core.stock.app.shared.logging.RequestFailureContext;
 import valhalla.core.stock.app.shared.error.AccessConfigurationConflictException;
+import valhalla.core.stock.app.modules.caixa.exception.AutorizacaoCaixaNegadaException;
+import valhalla.core.stock.app.modules.caixa.exception.CaixaEstadoInvalidoException;
+import valhalla.core.stock.app.modules.caixa.exception.CaixaJaExisteException;
 import valhalla.core.stock.app.modules.caixa.exception.ConfiguracaoCaixaInvalidaException;
+import valhalla.core.stock.app.modules.caixa.exception.EstoqueInsuficientePedidoException;
 import valhalla.core.stock.app.modules.caixa.exception.PagamentoPendenteFechamentoException;
+import valhalla.core.stock.app.modules.caixa.exception.PedidoEstadoInvalidoException;
 import valhalla.core.stock.app.modules.caixa.exception.SaldoInsuficienteCaixaException;
 import valhalla.core.stock.app.modules.caixa.exception.SessaoCaixaEstadoInvalidoException;
 import valhalla.core.stock.app.modules.caixa.exception.SessaoCaixaJaAbertaException;
+import valhalla.core.stock.app.modules.caixa.exception.TaxaPagamentoJaExisteException;
+import valhalla.core.stock.app.modules.caixa.exception.TerminalCaixaJaExisteException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaJaExisteException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaPossuiProdutosException;
 import valhalla.core.stock.app.modules.estoque.exception.ProdutoPossuiMovimentacoesException;
@@ -130,6 +137,34 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), Map.of());
     }
 
+    @ExceptionHandler(CaixaJaExisteException.class)
+    public ResponseEntity<ApiErrorResponse> handleCaixaJaExiste(
+            CaixaJaExisteException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(TerminalCaixaJaExisteException.class)
+    public ResponseEntity<ApiErrorResponse> handleTerminalCaixaJaExiste(
+            TerminalCaixaJaExisteException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(TaxaPagamentoJaExisteException.class)
+    public ResponseEntity<ApiErrorResponse> handleTaxaPagamentoJaExiste(
+            TaxaPagamentoJaExisteException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(CaixaEstadoInvalidoException.class)
+    public ResponseEntity<ApiErrorResponse> handleCaixaEstadoInvalido(
+            CaixaEstadoInvalidoException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
     @ExceptionHandler(SessaoCaixaJaAbertaException.class)
     public ResponseEntity<ApiErrorResponse> handleSessaoCaixaJaAberta(
             SessaoCaixaJaAbertaException exception
@@ -142,6 +177,35 @@ public class GlobalExceptionHandler {
             SessaoCaixaEstadoInvalidoException exception
     ) {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(PedidoEstadoInvalidoException.class)
+    public ResponseEntity<ApiErrorResponse> handlePedidoEstadoInvalido(
+            PedidoEstadoInvalidoException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(EstoqueInsuficientePedidoException.class)
+    public ResponseEntity<ApiErrorResponse> handleEstoqueInsuficientePedido(
+            EstoqueInsuficientePedidoException exception
+    ) {
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                exception.getMessage(),
+                Map.of(
+                        "estoque",
+                        "Saldo disponível de " + exception.getProdutoNome()
+                                + ": " + exception.getDisponivel().toPlainString()
+                )
+        );
+    }
+
+    @ExceptionHandler(AutorizacaoCaixaNegadaException.class)
+    public ResponseEntity<ApiErrorResponse> handleAutorizacaoCaixaNegada(
+            AutorizacaoCaixaNegadaException exception
+    ) {
+        return buildResponse(HttpStatus.FORBIDDEN, exception.getMessage(), Map.of());
     }
 
     @ExceptionHandler(SaldoInsuficienteCaixaException.class)

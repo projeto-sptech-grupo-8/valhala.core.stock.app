@@ -10,7 +10,8 @@ import java.util.UUID;
 
 public record SessaoCaixaDetalheResponseDto(
         @Schema(description = "Identificador da sessão") UUID id,
-        @Schema(description = "Terminal da sessão") String terminalId,
+        @Schema(description = "Caixa da sessão") UUID caixaId,
+        @Schema(description = "Nome do caixa da sessão") String caixaNome,
         @Schema(description = "Operador que abriu a sessão") UUID operadorUsuarioId,
         @Schema(description = "Nome do operador") String operadorNome,
         @Schema(description = "Situação da sessão") StatusSessaoCaixa status,

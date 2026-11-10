@@ -21,7 +21,8 @@ public final class SessaoCaixaMapper {
     ) {
         return new SessaoCaixaResumoResponseDto(
                 sessao.getId(),
-                sessao.getTerminalId(),
+                sessao.getCaixa().getId(),
+                sessao.getCaixa().getNome(),
                 sessao.getOperadorUsuarioId(),
                 nome(nomesUsuarios, sessao.getOperadorUsuarioId()),
                 sessao.getStatus(),
@@ -50,7 +51,8 @@ public final class SessaoCaixaMapper {
     ) {
         return new SessaoCaixaDetalheResponseDto(
                 sessao.getId(),
-                sessao.getTerminalId(),
+                sessao.getCaixa().getId(),
+                sessao.getCaixa().getNome(),
                 sessao.getOperadorUsuarioId(),
                 nome(nomesUsuarios, sessao.getOperadorUsuarioId()),
                 sessao.getStatus(),

@@ -14,17 +14,9 @@ import java.math.BigDecimal;
 
 public record ConfiguracaoCaixaRequestDto(
 
-        @Size(max = 100, message = "O terminal deve ter no máximo 100 caracteres")
-        @Schema(description = "Identificador do terminal Point. Obrigatório quando pointHabilitado=true.",
-                example = "TERM-001", nullable = true)
-        String terminalId,
-
-        @Size(max = 100, message = "O nome do terminal deve ter no máximo 100 caracteres")
-        @Schema(description = "Nome amigável do terminal", example = "Caixa principal", nullable = true)
-        String terminalNome,
-
         @NotNull(message = "pointHabilitado é obrigatório")
-        @Schema(description = "Habilita cobranças na Point", example = "false")
+        @Schema(description = "Habilita cobranças na Point; exige ao menos um terminal ativo cadastrado",
+                example = "false")
         Boolean pointHabilitado,
 
         @NotNull(message = "dinheiroHabilitado é obrigatório")

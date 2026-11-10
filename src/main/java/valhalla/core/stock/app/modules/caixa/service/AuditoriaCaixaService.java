@@ -53,6 +53,44 @@ public class AuditoriaCaixaService {
             JsonNode dadosAnteriores,
             JsonNode dadosNovos
     ) {
+        registrar(
+                estabelecimentoId,
+                usuarioId,
+                sessaoCaixaId,
+                tipoEvento,
+                entidade,
+                entidadeId,
+                descricao,
+                valor,
+                motivo,
+                null,
+                null,
+                null,
+                null,
+                null,
+                dadosAnteriores,
+                dadosNovos
+        );
+    }
+
+    public void registrar(
+            UUID estabelecimentoId,
+            UUID usuarioId,
+            UUID sessaoCaixaId,
+            String tipoEvento,
+            String entidade,
+            String entidadeId,
+            String descricao,
+            BigDecimal valor,
+            String motivo,
+            UUID pedidoId,
+            String pedidoIdentificador,
+            UUID pagamentoPedidoId,
+            UUID autorizadoPorUsuarioId,
+            String autorizadoPorNome,
+            JsonNode dadosAnteriores,
+            JsonNode dadosNovos
+    ) {
         AuditoriaCaixaEntity auditoria = new AuditoriaCaixaEntity();
         auditoria.setEstabelecimentoId(estabelecimentoId);
         auditoria.setUsuarioId(usuarioId);
@@ -62,6 +100,11 @@ public class AuditoriaCaixaService {
         auditoria.setEntidadeId(entidadeId);
         auditoria.setDescricao(descricao);
         auditoria.setMotivo(motivo);
+        auditoria.setPedidoId(pedidoId);
+        auditoria.setPedidoIdentificador(pedidoIdentificador);
+        auditoria.setPagamentoPedidoId(pagamentoPedidoId);
+        auditoria.setAutorizadoPorUsuarioId(autorizadoPorUsuarioId);
+        auditoria.setAutorizadoPorNome(autorizadoPorNome);
         auditoria.setDadosAnteriores(dadosAnteriores);
         auditoria.setDadosNovos(dadosNovos);
         auditoria.setOrigem(usuarioId == null ? OrigemAuditoriaCaixa.SISTEMA : OrigemAuditoriaCaixa.API);
@@ -74,6 +117,12 @@ public class AuditoriaCaixaService {
             userRepository.findById(usuarioId)
                     .map(UserEntity::getName)
                     .ifPresent(auditoria::setUsuarioNome);
+        }
+
+        if (autorizadoPorUsuarioId != null && (autorizadoPorNome == null || autorizadoPorNome.isBlank())) {
+            userRepository.findById(autorizadoPorUsuarioId)
+                    .map(UserEntity::getName)
+                    .ifPresent(auditoria::setAutorizadoPorNome);
         }
 
         auditoriaCaixaRepository.save(auditoria);

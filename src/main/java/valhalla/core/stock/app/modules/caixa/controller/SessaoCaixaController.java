@@ -55,10 +55,9 @@ public class SessaoCaixaController {
     @Operation(
             summary = "Abrir uma sessão de caixa",
             description = """
-                    Abre uma sessão para o operador autenticado usando o terminal configurado
-                    para o estabelecimento. Um terminal não aceita duas sessões ABERTAS ao
-                    mesmo tempo; sessões EM_FECHAMENTO aguardando aprovação não bloqueiam
-                    uma nova abertura.
+                    Abre uma sessão para o operador autenticado no caixa informado. Um caixa
+                    não aceita duas sessões ABERTAS ao mesmo tempo; sessões EM_FECHAMENTO
+                    aguardando aprovação não bloqueiam uma nova abertura.
                     """
     )
     @ApiResponses({
@@ -69,7 +68,9 @@ public class SessaoCaixaController {
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
             @ApiResponse(responseCode = "403", description = "Usuário sem permissão para operar o caixa.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
-            @ApiResponse(responseCode = "409", description = "Já existe sessão aberta para o operador ou terminal.",
+            @ApiResponse(responseCode = "404", description = "Caixa não encontrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "Já existe sessão aberta para o operador ou caixa, ou o caixa está inativo.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     public ResponseEntity<SessaoCaixaDetalheResponseDto> abrirSessao(
@@ -112,9 +113,8 @@ public class SessaoCaixaController {
     public ResponseEntity<RespostaPaginadaDto<SessaoCaixaResumoResponseDto>> listarSessoes(
             @Parameter(description = "Situação da sessão. Omitido: todas.", example = "ABERTA")
             @RequestParam(required = false) StatusSessaoCaixa status,
-            @Parameter(description = "Trecho do identificador do terminal. Omitido: todos.",
-                    example = "TERM-001")
-            @RequestParam(required = false) String terminalId,
+            @Parameter(description = "Caixa da sessão. Omitido: todos.")
+            @RequestParam(required = false) UUID caixaId,
             @Parameter(description = "Operador que abriu a sessão. Omitido: todos.")
             @RequestParam(required = false) UUID operadorUsuarioId,
             @Parameter(description = "Data inicial da abertura no formato ISO (AAAA-MM-DD).")
@@ -136,7 +136,7 @@ public class SessaoCaixaController {
     ) {
         return ResponseEntity.ok(sessaoCaixaService.listarSessoes(
                 status,
-                terminalId,
+                caixaId,
                 operadorUsuarioId,
                 dataInicio,
                 dataFim,

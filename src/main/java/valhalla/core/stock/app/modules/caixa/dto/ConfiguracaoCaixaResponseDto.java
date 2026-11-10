@@ -9,8 +9,6 @@ import java.util.UUID;
 
 public record ConfiguracaoCaixaResponseDto(
         @Schema(description = "Identificador da configuração") UUID id,
-        @Schema(description = "Terminal Point configurado") String terminalId,
-        @Schema(description = "Nome amigável do terminal") String terminalNome,
         @Schema(description = "Cobrança na Point habilitada") boolean pointHabilitado,
         @Schema(description = "Pagamento em dinheiro habilitado") boolean dinheiroHabilitado,
         @Schema(description = "Pagamento em débito habilitado") boolean debitoHabilitado,

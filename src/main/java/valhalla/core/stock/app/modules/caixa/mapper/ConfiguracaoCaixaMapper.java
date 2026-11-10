@@ -21,8 +21,6 @@ public final class ConfiguracaoCaixaMapper {
     }
 
     public static void aplicar(ConfiguracaoCaixaEntity configuracao, ConfiguracaoCaixaRequestDto dto) {
-        configuracao.setTerminalId(normalizar(dto.terminalId()));
-        configuracao.setTerminalNome(normalizar(dto.terminalNome()));
         configuracao.setPointHabilitado(dto.pointHabilitado());
         configuracao.setDinheiroHabilitado(dto.dinheiroHabilitado());
         configuracao.setDebitoHabilitado(dto.debitoHabilitado());
@@ -43,8 +41,6 @@ public final class ConfiguracaoCaixaMapper {
     public static ConfiguracaoCaixaResponseDto paraResposta(ConfiguracaoCaixaEntity configuracao) {
         return new ConfiguracaoCaixaResponseDto(
                 configuracao.getId(),
-                configuracao.getTerminalId(),
-                configuracao.getTerminalNome(),
                 configuracao.isPointHabilitado(),
                 configuracao.isDinheiroHabilitado(),
                 configuracao.isDebitoHabilitado(),
@@ -68,8 +64,6 @@ public final class ConfiguracaoCaixaMapper {
 
     public static Map<String, Object> snapshot(ConfiguracaoCaixaEntity configuracao) {
         Map<String, Object> dados = new LinkedHashMap<>();
-        dados.put("terminalId", configuracao.getTerminalId());
-        dados.put("terminalNome", configuracao.getTerminalNome());
         dados.put("pointHabilitado", configuracao.isPointHabilitado());
         dados.put("dinheiroHabilitado", configuracao.isDinheiroHabilitado());
         dados.put("debitoHabilitado", configuracao.isDebitoHabilitado());
@@ -89,9 +83,7 @@ public final class ConfiguracaoCaixaMapper {
     }
 
     public static boolean mesmoEstado(ConfiguracaoCaixaEntity configuracao, ConfiguracaoCaixaRequestDto dto) {
-        return iguais(configuracao.getTerminalId(), normalizar(dto.terminalId()))
-                && iguais(configuracao.getTerminalNome(), normalizar(dto.terminalNome()))
-                && configuracao.isPointHabilitado() == dto.pointHabilitado()
+        return configuracao.isPointHabilitado() == dto.pointHabilitado()
                 && configuracao.isDinheiroHabilitado() == dto.dinheiroHabilitado()
                 && configuracao.isDebitoHabilitado() == dto.debitoHabilitado()
                 && configuracao.isCreditoHabilitado() == dto.creditoHabilitado()
@@ -113,13 +105,6 @@ public final class ConfiguracaoCaixaMapper {
             return valorAtual.compareTo(valorNovo) == 0;
         }
         return atual == null ? novo == null : atual.equals(novo);
-    }
-
-    private static String normalizar(String valor) {
-        if (valor == null || valor.isBlank()) {
-            return null;
-        }
-        return valor.trim();
     }
 
     private static BigDecimal escala(BigDecimal valor) {

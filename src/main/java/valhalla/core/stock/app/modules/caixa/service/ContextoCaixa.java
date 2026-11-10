@@ -12,21 +12,12 @@ import java.util.UUID;
 @Component
 public class ContextoCaixa {
 
-    public static final String TERMINAL_SEM_IDENTIFICADOR = "SEM_TERMINAL";
-
     public UUID estabelecimentoId() {
         return UUID.fromString(claimObrigatoria("establishmentId"));
     }
 
     public UUID usuarioId() {
         return UUID.fromString(claimObrigatoria("userId"));
-    }
-
-    public String terminalKey(String terminalId) {
-        if (terminalId == null || terminalId.isBlank()) {
-            return TERMINAL_SEM_IDENTIFICADOR;
-        }
-        return terminalId.trim();
     }
 
     public boolean isGerente() {

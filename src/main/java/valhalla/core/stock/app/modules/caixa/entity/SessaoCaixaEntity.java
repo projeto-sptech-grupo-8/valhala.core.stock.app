@@ -8,6 +8,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -35,8 +37,9 @@ public class SessaoCaixaEntity {
     @Column(name = "estabelecimento_id", nullable = false)
     private UUID estabelecimentoId;
 
-    @Column(name = "terminal_id", length = 100)
-    private String terminalId;
+    @ManyToOne
+    @JoinColumn(name = "caixa_id", nullable = false)
+    private CaixaEntity caixa;
 
     @Column(name = "operador_usuario_id", nullable = false)
     private UUID operadorUsuarioId;

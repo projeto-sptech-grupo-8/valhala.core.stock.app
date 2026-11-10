@@ -37,8 +37,11 @@ public class MovimentacaoEstoqueEntity {
     @JoinColumn(name = "estoque_id", nullable = false)
     private EstoqueEntity estoque;
 
-    @Column(name = "usuario_id", nullable = false)
+    @Column(name = "usuario_id")
     private UUID usuarioId;
+
+    @Column(name = "origem", nullable = false, length = 20)
+    private String origem = "USUARIO";
 
     @Column(name = "item_pedido_id")
     private Long itemPedidoId;

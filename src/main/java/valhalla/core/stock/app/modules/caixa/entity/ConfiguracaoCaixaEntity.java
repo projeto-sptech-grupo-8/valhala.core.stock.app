@@ -39,12 +39,6 @@ public class ConfiguracaoCaixaEntity {
     @Column(name = "estabelecimento_id", nullable = false)
     private UUID estabelecimentoId;
 
-    @Column(name = "terminal_id", length = 100)
-    private String terminalId;
-
-    @Column(name = "terminal_nome", length = 100)
-    private String terminalNome;
-
     @Column(name = "point_habilitado", nullable = false)
     private boolean pointHabilitado;
 

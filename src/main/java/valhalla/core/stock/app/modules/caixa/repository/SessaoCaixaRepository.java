@@ -30,18 +30,17 @@ public interface SessaoCaixaRepository
             StatusSessaoCaixa status
     );
 
+    boolean existsByCaixaIdAndStatus(UUID caixaId, StatusSessaoCaixa status);
+
     @Query("""
-            select s
+            select s.caixa.id
             from SessaoCaixaEntity s
             where s.estabelecimentoId = :estabelecimentoId
               and s.status = :status
-              and coalesce(s.terminalId, 'SEM_TERMINAL') = :terminalKey
-            order by s.abertaEm desc
             """)
-    List<SessaoCaixaEntity> buscarPorEstabelecimentoStatusETerminal(
+    List<UUID> buscarCaixaIdsPorStatus(
             @Param("estabelecimentoId") UUID estabelecimentoId,
-            @Param("status") StatusSessaoCaixa status,
-            @Param("terminalKey") String terminalKey
+            @Param("status") StatusSessaoCaixa status
     );
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

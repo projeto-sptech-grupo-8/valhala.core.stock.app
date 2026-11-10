@@ -19,19 +19,20 @@ import valhalla.core.stock.app.modules.caixa.dto.ResolverDivergenciaCaixaRequest
 import valhalla.core.stock.app.modules.caixa.dto.ResumoFechamentoDto;
 import valhalla.core.stock.app.modules.caixa.dto.SessaoCaixaDetalheResponseDto;
 import valhalla.core.stock.app.modules.caixa.dto.SessaoCaixaResumoResponseDto;
-import valhalla.core.stock.app.modules.caixa.entity.ConfiguracaoCaixaEntity;
+import valhalla.core.stock.app.modules.caixa.entity.CaixaEntity;
 import valhalla.core.stock.app.modules.caixa.entity.MovimentacaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.entity.PagamentoPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.entity.SessaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.entity.StatusSessaoCaixa;
 import valhalla.core.stock.app.modules.caixa.entity.TipoMovimentacaoCaixa;
+import valhalla.core.stock.app.modules.caixa.exception.CaixaEstadoInvalidoException;
 import valhalla.core.stock.app.modules.caixa.exception.PagamentoPendenteFechamentoException;
 import valhalla.core.stock.app.modules.caixa.exception.SaldoInsuficienteCaixaException;
 import valhalla.core.stock.app.modules.caixa.exception.SessaoCaixaEstadoInvalidoException;
 import valhalla.core.stock.app.modules.caixa.exception.SessaoCaixaJaAbertaException;
 import valhalla.core.stock.app.modules.caixa.mapper.MovimentacaoCaixaMapper;
 import valhalla.core.stock.app.modules.caixa.mapper.SessaoCaixaMapper;
-import valhalla.core.stock.app.modules.caixa.repository.ConfiguracaoCaixaRepository;
+import valhalla.core.stock.app.modules.caixa.repository.CaixaRepository;
 import valhalla.core.stock.app.modules.caixa.repository.MovimentacaoCaixaRepository;
 import valhalla.core.stock.app.modules.caixa.repository.PagamentoPedidoRepository;
 import valhalla.core.stock.app.modules.caixa.repository.SessaoCaixaRepository;
@@ -64,9 +65,9 @@ public class SessaoCaixaService {
             Set.of("abertaEm", "fechadaEm", "atualizadoEm", "status", "diferenca");
 
     private final SessaoCaixaRepository sessaoCaixaRepository;
+    private final CaixaRepository caixaRepository;
     private final MovimentacaoCaixaRepository movimentacaoCaixaRepository;
     private final PagamentoPedidoRepository pagamentoPedidoRepository;
-    private final ConfiguracaoCaixaRepository configuracaoCaixaRepository;
     private final UserRepository userRepository;
     private final ContextoCaixa contextoCaixa;
     private final CalculadoraFechamentoCaixa calculadoraFechamentoCaixa;
@@ -76,9 +77,9 @@ public class SessaoCaixaService {
 
     public SessaoCaixaService(
             SessaoCaixaRepository sessaoCaixaRepository,
+            CaixaRepository caixaRepository,
             MovimentacaoCaixaRepository movimentacaoCaixaRepository,
             PagamentoPedidoRepository pagamentoPedidoRepository,
-            ConfiguracaoCaixaRepository configuracaoCaixaRepository,
             UserRepository userRepository,
             ContextoCaixa contextoCaixa,
             CalculadoraFechamentoCaixa calculadoraFechamentoCaixa,
@@ -86,9 +87,9 @@ public class SessaoCaixaService {
             BusinessEventLogger businessEventLogger
     ) {
         this.sessaoCaixaRepository = sessaoCaixaRepository;
+        this.caixaRepository = caixaRepository;
         this.movimentacaoCaixaRepository = movimentacaoCaixaRepository;
         this.pagamentoPedidoRepository = pagamentoPedidoRepository;
-        this.configuracaoCaixaRepository = configuracaoCaixaRepository;
         this.userRepository = userRepository;
         this.contextoCaixa = contextoCaixa;
         this.calculadoraFechamentoCaixa = calculadoraFechamentoCaixa;
@@ -117,30 +118,26 @@ public class SessaoCaixaService {
             );
         }
 
-        String terminalId = configuracaoCaixaRepository
-                .findByEstabelecimentoId(estabelecimentoId)
-                .map(ConfiguracaoCaixaEntity::getTerminalId)
-                .map(this::normalizar)
-                .orElse(null);
+        CaixaEntity caixa = caixaRepository
+                .buscarParaAtualizacao(dto.caixaId(), estabelecimentoId)
+                .orElseThrow(() -> new EntityNotFoundException("Caixa não encontrado"));
 
-        String terminalKey = contextoCaixa.terminalKey(terminalId);
-        boolean terminalOcupado = !sessaoCaixaRepository
-                .buscarPorEstabelecimentoStatusETerminal(
-                        estabelecimentoId,
-                        StatusSessaoCaixa.ABERTA,
-                        terminalKey
-                )
-                .isEmpty();
+        if (!caixa.isAtivo()) {
+            throw new CaixaEstadoInvalidoException("Não é possível abrir sessão em um caixa inativo");
+        }
 
-        if (terminalOcupado) {
+        if (sessaoCaixaRepository.existsByCaixaIdAndStatus(
+                caixa.getId(),
+                StatusSessaoCaixa.ABERTA
+        )) {
             throw new SessaoCaixaJaAbertaException(
-                    "Já existe uma sessão de caixa aberta para este terminal"
+                    "Já existe uma sessão de caixa aberta para este caixa"
             );
         }
 
         SessaoCaixaEntity sessao = new SessaoCaixaEntity();
         sessao.setEstabelecimentoId(estabelecimentoId);
-        sessao.setTerminalId(terminalId);
+        sessao.setCaixa(caixa);
         sessao.setOperadorUsuarioId(usuarioId);
         sessao.setStatus(StatusSessaoCaixa.ABERTA);
         sessao.setFundoTroco(escala(dto.fundoTroco()));
@@ -198,7 +195,7 @@ public class SessaoCaixaService {
             """)
     public RespostaPaginadaDto<SessaoCaixaResumoResponseDto> listarSessoes(
             StatusSessaoCaixa status,
-            String terminalId,
+            UUID caixaId,
             UUID operadorUsuarioId,
             LocalDate dataInicio,
             LocalDate dataFim,
@@ -210,7 +207,6 @@ public class SessaoCaixaService {
         validarPeriodo(dataInicio, dataFim);
 
         UUID estabelecimentoId = contextoCaixa.estabelecimentoId();
-        String terminalNormalizado = normalizar(terminalId);
 
         Specification<SessaoCaixaEntity> especificacao =
                 (root, query, builder) -> builder.equal(root.get("estabelecimentoId"), estabelecimentoId);
@@ -220,13 +216,9 @@ public class SessaoCaixaService {
                     (root, query, builder) -> builder.equal(root.get("status"), status)
             );
         }
-        if (terminalNormalizado != null) {
-            String terminalBusca = terminalNormalizado.toLowerCase(Locale.ROOT);
+        if (caixaId != null) {
             especificacao = especificacao.and(
-                    (root, query, builder) -> builder.like(
-                            builder.lower(root.get("terminalId")),
-                            "%" + terminalBusca + "%"
-                    )
+                    (root, query, builder) -> builder.equal(root.get("caixa").get("id"), caixaId)
             );
         }
         if (operadorUsuarioId != null) {
@@ -527,7 +519,7 @@ public class SessaoCaixaService {
             return sessaoCaixaRepository.saveAndFlush(sessao);
         } catch (DataIntegrityViolationException excecao) {
             throw new SessaoCaixaJaAbertaException(
-                    "Já existe uma sessão de caixa aberta para este operador ou terminal"
+                    "Já existe uma sessão de caixa aberta para este operador ou caixa"
             );
         }
     }
@@ -672,7 +664,8 @@ public class SessaoCaixaService {
 
     private Map<String, Object> snapshotSessao(SessaoCaixaEntity sessao) {
         Map<String, Object> dados = new LinkedHashMap<>();
-        dados.put("terminalId", sessao.getTerminalId());
+        dados.put("caixaId", sessao.getCaixa().getId().toString());
+        dados.put("caixaNome", sessao.getCaixa().getNome());
         dados.put("operadorUsuarioId", texto(sessao.getOperadorUsuarioId()));
         dados.put("status", sessao.getStatus().name());
         dados.put("fundoTroco", sessao.getFundoTroco());
@@ -706,13 +699,6 @@ public class SessaoCaixaService {
         if (dataInicio != null && dataFim != null && dataInicio.isAfter(dataFim)) {
             throw new IllegalArgumentException("A data inicial não pode ser posterior à data final");
         }
-    }
-
-    private String normalizar(String valor) {
-        if (valor == null || valor.isBlank()) {
-            return null;
-        }
-        return valor.trim();
     }
 
     private String normalizarTexto(String valor) {

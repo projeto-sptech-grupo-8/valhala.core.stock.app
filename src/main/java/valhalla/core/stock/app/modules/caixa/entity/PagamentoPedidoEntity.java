@@ -5,6 +5,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -31,6 +33,28 @@ public class PagamentoPedidoEntity {
 
     @Column(name = "sessao_caixa_id")
     private UUID sessaoCaixaId;
+
+    @ManyToOne
+    @JoinColumn(name = "terminal_caixa_id")
+    private TerminalCaixaEntity terminalCaixa;
+
+    @Column(name = "terminal_id", length = 100)
+    private String terminalId;
+
+    @Column(name = "taxa_percentual_aplicada", precision = 7, scale = 4)
+    private BigDecimal taxaPercentualAplicada;
+
+    @Column(name = "taxa_fixa_aplicada", precision = 12, scale = 2)
+    private BigDecimal taxaFixaAplicada;
+
+    @Column(name = "valor_taxa_estimada", precision = 12, scale = 2)
+    private BigDecimal valorTaxaEstimada;
+
+    @Column(name = "valor_liquido_estimado", precision = 12, scale = 2)
+    private BigDecimal valorLiquidoEstimado;
+
+    @Column(name = "valor_juros", precision = 12, scale = 2)
+    private BigDecimal valorJuros;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "forma", nullable = false, length = 30)
@@ -61,8 +85,39 @@ public class PagamentoPedidoEntity {
     @Column(name = "parcelas", nullable = false)
     private Integer parcelas = 1;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "politica_juros", length = 30)
+    private PoliticaJurosCaixa politicaJuros;
+
+    @Column(name = "chave_idempotencia", length = 100)
+    private String chaveIdempotencia;
+
+    @Column(name = "comprovante_referencia", length = 255)
+    private String comprovanteReferencia;
+
+    @Column(name = "motivo_cancelamento", columnDefinition = "TEXT")
+    private String motivoCancelamento;
+
+    @Column(name = "motivo_estorno", columnDefinition = "TEXT")
+    private String motivoEstorno;
+
+    @Column(name = "solicitado_em")
+    private LocalDateTime solicitadoEm;
+
     @Column(name = "pago_em")
     private LocalDateTime pagoEm;
+
+    @Column(name = "cancelado_em")
+    private LocalDateTime canceladoEm;
+
+    @Column(name = "estornado_em")
+    private LocalDateTime estornadoEm;
+
+    @Column(name = "cancelado_por_usuario_id")
+    private UUID canceladoPorUsuarioId;
+
+    @Column(name = "estornado_por_usuario_id")
+    private UUID estornadoPorUsuarioId;
 
     @Column(name = "criado_em", nullable = false)
     private LocalDateTime criadoEm;
@@ -72,6 +127,9 @@ public class PagamentoPedidoEntity {
 
     @PrePersist
     private void prePersist() {
+        if (id == null) {
+            id = UUID.randomUUID();
+        }
         LocalDateTime agora = LocalDateTime.now();
         if (criadoEm == null) {
             criadoEm = agora;
@@ -100,5 +158,13 @@ public class PagamentoPedidoEntity {
 
     public boolean estaAprovado() {
         return status == StatusPagamentoPedido.APROVADO;
+    }
+
+    public boolean compoeSaldoEmAberto() {
+        return status == StatusPagamentoPedido.APROVADO
+                || status == StatusPagamentoPedido.PENDENTE
+                || status == StatusPagamentoPedido.PENDENTE_NA_POINT
+                || status == StatusPagamentoPedido.EM_TERMINAL
+                || status == StatusPagamentoPedido.PENDENTE_CONCILIACAO;
     }
 }

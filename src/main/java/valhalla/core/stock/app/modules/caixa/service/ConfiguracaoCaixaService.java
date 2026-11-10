@@ -22,6 +22,7 @@ public class ConfiguracaoCaixaService {
     private static final int LIMITE_MAXIMO_PARCELAS = 12;
 
     private final ConfiguracaoCaixaRepository configuracaoCaixaRepository;
+    private final DisponibilidadePoint disponibilidadePoint;
     private final AuditoriaCaixaService auditoriaCaixaService;
     private final ContextoCaixa contextoCaixa;
     private final BusinessEventLogger businessEventLogger;
@@ -29,11 +30,13 @@ public class ConfiguracaoCaixaService {
 
     public ConfiguracaoCaixaService(
             ConfiguracaoCaixaRepository configuracaoCaixaRepository,
+            DisponibilidadePoint disponibilidadePoint,
             AuditoriaCaixaService auditoriaCaixaService,
             ContextoCaixa contextoCaixa,
             BusinessEventLogger businessEventLogger
     ) {
         this.configuracaoCaixaRepository = configuracaoCaixaRepository;
+        this.disponibilidadePoint = disponibilidadePoint;
         this.auditoriaCaixaService = auditoriaCaixaService;
         this.contextoCaixa = contextoCaixa;
         this.businessEventLogger = businessEventLogger;
@@ -62,10 +65,10 @@ public class ConfiguracaoCaixaService {
             )
             """)
     public ConfiguracaoCaixaResponseDto atualizarConfiguracao(ConfiguracaoCaixaRequestDto dto) {
-        validar(dto);
-
         UUID estabelecimentoId = contextoCaixa.estabelecimentoId();
         UUID usuarioId = contextoCaixa.usuarioId();
+
+        validar(dto, estabelecimentoId);
 
         ConfiguracaoCaixaEntity configuracao = configuracaoCaixaRepository
                 .findByEstabelecimentoId(estabelecimentoId)
@@ -107,7 +110,7 @@ public class ConfiguracaoCaixaService {
         return ConfiguracaoCaixaMapper.paraResposta(configuracaoSalva);
     }
 
-    private void validar(ConfiguracaoCaixaRequestDto dto) {
+    private void validar(ConfiguracaoCaixaRequestDto dto, UUID estabelecimentoId) {
         if (!dto.dinheiroHabilitado()
                 && !dto.debitoHabilitado()
                 && !dto.creditoHabilitado()
@@ -117,9 +120,9 @@ public class ConfiguracaoCaixaService {
             );
         }
 
-        if (dto.pointHabilitado() && (dto.terminalId() == null || dto.terminalId().isBlank())) {
+        if (dto.pointHabilitado() && !disponibilidadePoint.possuiTerminalAtivo(estabelecimentoId)) {
             throw new ConfiguracaoCaixaInvalidaException(
-                    "O terminal Point é obrigatório quando a Point está habilitada"
+                    "Cadastre ao menos um terminal ativo para habilitar a Point"
             );
         }
 
