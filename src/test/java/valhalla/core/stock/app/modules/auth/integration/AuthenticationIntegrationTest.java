@@ -1,4 +1,4 @@
-package valhalla.core.stock.app.modules.auth;
+package valhalla.core.stock.app.modules.auth.integration;
 
 import jakarta.servlet.http.Cookie;
 import com.jayway.jsonpath.JsonPath;

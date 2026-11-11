@@ -229,6 +229,188 @@ class MovimentacaoEstoqueServiceTest {
         verify(movimentacaoEstoqueRepository, never()).findAll(any(Specification.class), any(Pageable.class));
     }
 
+    @Test
+    void registraEntradaComSucesso() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        ProdutoEntity produto = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Red Bull");
+        EstoqueEntity estoque = estoque(produto, "10");
+        autenticar(estabelecimentoId);
+        when(produtoRepository.findById(produto.getId())).thenReturn(Optional.of(produto));
+        when(estoqueRepository.findByProdutoIdForUpdate(produto.getId())).thenReturn(Optional.of(estoque));
+
+        MovimentacaoResponseDto resposta = movimentacaoEstoqueService.registrarMovimentacao(
+                new MovimentacaoRequestDto(
+                        produto.getId(), TipoMovimentacaoEstoque.ENTRADA, new BigDecimal("5"),
+                        "Compra fornecedor", "L123", "NF999"
+                )
+        );
+
+        assertThat(estoque.getQuantidadeAtual()).isEqualByComparingTo("15");
+        assertThat(resposta.saldoAnterior()).isEqualByComparingTo("10");
+        assertThat(resposta.saldoPosterior()).isEqualByComparingTo("15");
+        verify(estoqueRepository).save(estoque);
+    }
+
+    @Test
+    void registraAjustePositivoComSucesso() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        ProdutoEntity produto = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Cerveja Heineken");
+        EstoqueEntity estoque = estoque(produto, "20");
+        autenticar(estabelecimentoId);
+        when(produtoRepository.findById(produto.getId())).thenReturn(Optional.of(produto));
+        when(estoqueRepository.findByProdutoIdForUpdate(produto.getId())).thenReturn(Optional.of(estoque));
+
+        MovimentacaoResponseDto resposta = movimentacaoEstoqueService.registrarMovimentacao(
+                new MovimentacaoRequestDto(
+                        produto.getId(), TipoMovimentacaoEstoque.AJUSTE_POSITIVO, new BigDecimal("4"),
+                        "Contagem de inventário", null, null
+                )
+        );
+
+        assertThat(estoque.getQuantidadeAtual()).isEqualByComparingTo("24");
+        assertThat(resposta.saldoAnterior()).isEqualByComparingTo("20");
+        assertThat(resposta.saldoPosterior()).isEqualByComparingTo("24");
+        verify(estoqueRepository).save(estoque);
+    }
+
+    @Test
+    void registraAjusteNegativoComSucesso() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        ProdutoEntity produto = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Cerveja Heineken");
+        EstoqueEntity estoque = estoque(produto, "20");
+        autenticar(estabelecimentoId);
+        when(produtoRepository.findById(produto.getId())).thenReturn(Optional.of(produto));
+        when(estoqueRepository.findByProdutoIdForUpdate(produto.getId())).thenReturn(Optional.of(estoque));
+
+        MovimentacaoResponseDto resposta = movimentacaoEstoqueService.registrarMovimentacao(
+                new MovimentacaoRequestDto(
+                        produto.getId(), TipoMovimentacaoEstoque.AJUSTE_NEGATIVO, new BigDecimal("3"),
+                        "Contagem de inventário", null, null
+                )
+        );
+
+        assertThat(estoque.getQuantidadeAtual()).isEqualByComparingTo("17");
+        assertThat(resposta.saldoAnterior()).isEqualByComparingTo("20");
+        assertThat(resposta.saldoPosterior()).isEqualByComparingTo("17");
+        verify(estoqueRepository).save(estoque);
+    }
+
+    @Test
+    void registraPerdaComSucesso() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        ProdutoEntity produto = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Vinho Tinto");
+        EstoqueEntity estoque = estoque(produto, "10");
+        autenticar(estabelecimentoId);
+        when(produtoRepository.findById(produto.getId())).thenReturn(Optional.of(produto));
+        when(estoqueRepository.findByProdutoIdForUpdate(produto.getId())).thenReturn(Optional.of(estoque));
+
+        MovimentacaoResponseDto resposta = movimentacaoEstoqueService.registrarMovimentacao(
+                new MovimentacaoRequestDto(
+                        produto.getId(), TipoMovimentacaoEstoque.PERDA, new BigDecimal("2"),
+                        "Garrafa quebrada no transporte", null, null
+                )
+        );
+
+        assertThat(estoque.getQuantidadeAtual()).isEqualByComparingTo("8");
+        assertThat(resposta.saldoAnterior()).isEqualByComparingTo("10");
+        assertThat(resposta.saldoPosterior()).isEqualByComparingTo("8");
+        verify(estoqueRepository).save(estoque);
+    }
+
+    @Test
+    void impedeMovimentacaoDiretaEmDrink() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        ProdutoEntity drink = produto(estabelecimentoId, ProdutoTipo.DRINK, false, "Caipirinha");
+        autenticar(estabelecimentoId);
+        when(produtoRepository.findById(drink.getId())).thenReturn(Optional.of(drink));
+
+        assertThatThrownBy(() -> movimentacaoEstoqueService.registrarMovimentacao(
+                new MovimentacaoRequestDto(
+                        drink.getId(), TipoMovimentacaoEstoque.ENTRADA, new BigDecimal("5"),
+                        null, null, null
+                )
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Drink não possui estoque próprio; registre a saída de drink");
+    }
+
+    @Test
+    void impedeTipoNaoDireto() {
+        assertThatThrownBy(() -> movimentacaoEstoqueService.registrarMovimentacao(
+                new MovimentacaoRequestDto(
+                        UUID.randomUUID(), TipoMovimentacaoEstoque.SAIDA_DRINK, new BigDecimal("1"),
+                        null, null, null
+                )
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("O tipo informado não pode ser registrado diretamente");
+    }
+
+    @Test
+    void registraEntradaInicialComSucesso() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        ProdutoEntity produto = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Gin");
+        EstoqueEntity estoque = estoque(produto, "15");
+        autenticar(estabelecimentoId);
+
+        movimentacaoEstoqueService.registrarEntradaInicial(estoque, new BigDecimal("15"));
+
+        verify(movimentacaoEstoqueRepository).save(any(MovimentacaoEstoqueEntity.class));
+    }
+
+    @Test
+    void ignoraEntradaInicialSeZeroOuNula() {
+        EstoqueEntity estoque = new EstoqueEntity();
+        movimentacaoEstoqueService.registrarEntradaInicial(estoque, null);
+        movimentacaoEstoqueService.registrarEntradaInicial(estoque, BigDecimal.ZERO);
+
+        verify(movimentacaoEstoqueRepository, never()).save(any());
+    }
+
+    @Test
+    void lancaExcecaoSeEntradaInicialInconsistente() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        ProdutoEntity produto = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Gin");
+        EstoqueEntity estoque = estoque(produto, "10"); // saldo atual é 10
+        autenticar(estabelecimentoId);
+
+        // quantidadeInicial é 20, mas estoque atual é 10 -> inconsistente
+        assertThatThrownBy(() -> movimentacaoEstoqueService.registrarEntradaInicial(estoque, new BigDecimal("20")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("O saldo inicial informado é inconsistente");
+    }
+
+    @Test
+    void calculaCustoUnitarioProdutoPadraoEDrink() {
+        UUID estabelecimentoId = UUID.randomUUID();
+
+        // 1. Produto padrão com custo
+        ProdutoEntity cerveja = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Cerveja");
+        cerveja.setPrecoCusto(new BigDecimal("7.50"));
+        assertThat(movimentacaoEstoqueService.calcularCustoUnitario(cerveja)).isEqualByComparingTo("7.50");
+
+        // 2. Produto padrão sem custo
+        ProdutoEntity agua = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Água");
+        agua.setPrecoCusto(null);
+        assertThat(movimentacaoEstoqueService.calcularCustoUnitario(agua)).isEqualByComparingTo("0.00");
+
+        // 3. Drink composto por produto fracionado e produto unitário
+        ProdutoEntity drink = produto(estabelecimentoId, ProdutoTipo.DRINK, false, "Vodka Energy");
+        ProdutoEntity vodka = produto(estabelecimentoId, ProdutoTipo.PADRAO, true, "Vodka Absolut");
+        vodka.setPrecoCusto(new BigDecimal("100.00"));
+        vodka.setVolumeEmbalagemMl(new BigDecimal("1000")); // 1000 ml = 100.00 -> 0.10 por ml
+
+        ProdutoEntity energetico = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Red Bull");
+        energetico.setPrecoCusto(new BigDecimal("8.00")); // 8.00 cada
+
+        when(composicaoDrinkRepository.findAllByDrinkIdOrderByIdAsc(drink.getId()))
+                .thenReturn(List.of(
+                        composicao(drink, vodka, "50", UnidadeConsumoDrink.ML),      // 50 ml * 0.10 = 5.00
+                        composicao(drink, energetico, "1", UnidadeConsumoDrink.UN)   // 1 un * 8.00 = 8.00
+                ));
+
+        BigDecimal custoDrink = movimentacaoEstoqueService.calcularCustoUnitario(drink);
+        assertThat(custoDrink).isEqualByComparingTo("13.00");
+    }
+
     private ProdutoEntity produto(UUID estabelecimentoId, ProdutoTipo tipo, boolean fracionado, String nome) {
         ProdutoEntity produto = new ProdutoEntity();
         produto.setId(UUID.randomUUID());

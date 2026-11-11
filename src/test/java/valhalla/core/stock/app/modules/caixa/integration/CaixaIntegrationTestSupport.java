@@ -1,4 +1,4 @@
-package valhalla.core.stock.app.modules.caixa;
+package valhalla.core.stock.app.modules.caixa.integration;
 
 import com.jayway.jsonpath.JsonPath;
 import jakarta.persistence.EntityManager;

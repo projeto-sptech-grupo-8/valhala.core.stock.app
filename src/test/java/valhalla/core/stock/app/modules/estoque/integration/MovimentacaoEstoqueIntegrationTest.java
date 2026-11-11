@@ -1,4 +1,4 @@
-package valhalla.core.stock.app.modules.estoque;
+package valhalla.core.stock.app.modules.estoque.integration;
 
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;

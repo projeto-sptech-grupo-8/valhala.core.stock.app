@@ -1,4 +1,4 @@
-package valhalla.core.stock.app.modules.estoque;
+package valhalla.core.stock.app.modules.estoque.integration;
 
 import jakarta.persistence.EntityManager;
 import com.jayway.jsonpath.JsonPath;

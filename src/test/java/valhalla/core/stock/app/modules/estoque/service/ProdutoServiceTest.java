@@ -7,12 +7,15 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import jakarta.persistence.EntityNotFoundException;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoAtualizacaoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoResponseDto;
@@ -20,6 +23,7 @@ import valhalla.core.stock.app.modules.estoque.entity.CategoriaEntity;
 import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
+import valhalla.core.stock.app.modules.estoque.exception.ProdutoPossuiMovimentacoesException;
 import valhalla.core.stock.app.modules.estoque.repository.CategoriaRepository;
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRepository;
@@ -186,6 +190,84 @@ class ProdutoServiceTest {
         assertThat(resultado.itens()).extracting(ProdutoResponseDto::sku).containsExactly("PRD-AAAA0001");
         assertThat(resultado.totalItens()).isEqualTo(6);
         assertThat(resultado.totalPaginas()).isEqualTo(2);
+    }
+
+    @Test
+    void deveBuscarProdutoPorIdComSucesso() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        CategoriaEntity categoria = categoria(estabelecimentoId, true);
+        ProdutoEntity produto = produto(estabelecimentoId, categoria, "PRD-AAAA0001", "Vodka Absolut", ProdutoTipo.PADRAO, true);
+        EstoqueEntity estoque = new EstoqueEntity();
+        estoque.setProduto(produto);
+        estoque.setQuantidadeAtual(new BigDecimal("10"));
+
+        autenticarNoEstabelecimento(estabelecimentoId);
+        when(produtoRepository.findById(produto.getId())).thenReturn(Optional.of(produto));
+        when(estoqueRepository.findByProdutoId(produto.getId())).thenReturn(Optional.of(estoque));
+
+        ProdutoResponseDto resposta = produtoService.buscarProduto(produto.getId());
+
+        assertThat(resposta.id()).isEqualTo(produto.getId());
+        assertThat(resposta.nome()).isEqualTo("Vodka Absolut");
+        assertThat(resposta.quantidadeEstoque()).isEqualByComparingTo("10");
+    }
+
+    @Test
+    void deveNegarAcessoAoBuscarProdutoDeOutroEstabelecimento() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        UUID outroEstabelecimentoId = UUID.randomUUID();
+        CategoriaEntity categoria = categoria(outroEstabelecimentoId, true);
+        ProdutoEntity produto = produto(outroEstabelecimentoId, categoria, "PRD-AAAA0001", "Vodka Absolut", ProdutoTipo.PADRAO, true);
+
+        autenticarNoEstabelecimento(estabelecimentoId);
+        when(produtoRepository.findById(produto.getId())).thenReturn(Optional.of(produto));
+
+        assertThatThrownBy(() -> produtoService.buscarProduto(produto.getId()))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void deveLancarEntityNotFoundExceptionQuandoProdutoNaoExiste() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        UUID produtoId = UUID.randomUUID();
+
+        autenticarNoEstabelecimento(estabelecimentoId);
+        when(produtoRepository.findById(produtoId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> produtoService.buscarProduto(produtoId))
+                .isInstanceOf(EntityNotFoundException.class);
+    }
+
+    @Test
+    void deveExcluirProdutoComSucesso() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        CategoriaEntity categoria = categoria(estabelecimentoId, true);
+        ProdutoEntity produto = produto(estabelecimentoId, categoria, "PRD-AAAA0001", "Vodka Absolut", ProdutoTipo.PADRAO, true);
+
+        autenticarNoEstabelecimento(estabelecimentoId);
+        when(produtoRepository.findById(produto.getId())).thenReturn(Optional.of(produto));
+
+        produtoService.excluirProduto(produto.getId());
+
+        verify(estoqueRepository).deleteByProdutoId(produto.getId());
+        verify(produtoRepository).delete(produto);
+        verify(produtoRepository).flush();
+    }
+
+    @Test
+    void deveLancarProdutoPossuiMovimentacoesExceptionAoExcluirComVinculos() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        CategoriaEntity categoria = categoria(estabelecimentoId, true);
+        ProdutoEntity produto = produto(estabelecimentoId, categoria, "PRD-AAAA0001", "Vodka Absolut", ProdutoTipo.PADRAO, true);
+
+        autenticarNoEstabelecimento(estabelecimentoId);
+        when(produtoRepository.findById(produto.getId())).thenReturn(Optional.of(produto));
+        org.mockito.Mockito.doThrow(new DataIntegrityViolationException("FK constraint"))
+                .when(produtoRepository).flush();
+
+        assertThatThrownBy(() -> produtoService.excluirProduto(produto.getId()))
+                .isInstanceOf(ProdutoPossuiMovimentacoesException.class)
+                .hasMessage("Produto não pode ser excluído porque possui movimentações ou vínculos registrados");
     }
 
     private CategoriaEntity categoria(UUID estabelecimentoId, boolean ativa) {
