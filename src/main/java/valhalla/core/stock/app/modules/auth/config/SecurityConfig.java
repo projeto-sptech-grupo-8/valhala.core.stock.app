@@ -125,7 +125,8 @@ public class SecurityConfig {
                                 HttpMethod.POST,
                                 "/auth/login",
                                 "/auth/refresh",
-                                "/auth/logout"
+                                "/auth/logout",
+                                "/webhooks/mercado-pago/point"
                         ).permitAll()
                         .requestMatchers(
                                 "/swagger-ui/**",

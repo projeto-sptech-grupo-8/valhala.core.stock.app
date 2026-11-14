@@ -912,7 +912,7 @@ CREATE TABLE movimentacao_estoque (
     CONSTRAINT chk_movimentacao_quantidade CHECK (quantidade > 0),
 
     CONSTRAINT ck_movimentacao_estoque_origem
-        CHECK (origem IN ('USUARIO', 'SISTEMA', 'WEBHOOK')),
+        CHECK (origem IN ('USUARIO', 'SISTEMA', 'WEBHOOK', 'PEDIDO')),
 
     CONSTRAINT ck_movimentacao_estoque_usuario_origem
         CHECK (origem <> 'USUARIO' OR usuario_id IS NOT NULL),
@@ -1353,6 +1353,9 @@ CREATE INDEX idx_pagamento_sessao_status
 
 CREATE INDEX idx_pagamento_status
     ON pagamento_pedido(status);
+
+CREATE INDEX idx_pagamento_point_reconciliacao
+    ON pagamento_pedido(provedor, status, solicitado_em);
 
 CREATE INDEX idx_pagamento_pedido_status
     ON pagamento_pedido(pedido_id, status);

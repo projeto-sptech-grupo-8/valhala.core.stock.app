@@ -18,25 +18,38 @@ tags:
     do usuário.
 - name: Produtos
   description: Produtos do estabelecimento autenticado.
-- name: Configuração do caixa
-  description: Configuração do terminal e das formas de pagamento do estabelecimento.
-- name: Auditoria do caixa
-  description: "Trilha de eventos do caixa, incluindo configuração, abertura, fechamento,\
-    \ sangria, reforço e divergências."
+- name: Webhooks Mercado Pago
+  description: Recebimento assíncrono e idempotente de eventos de Orders Point do
+    Mercado Pago.
 - name: Sessões de caixa
   description: "Abertura, operação, fechamento e conferência das sessões de caixa."
+- name: Pedidos do caixa (PDV)
+  description: "Gestão de pedidos simultâneos, descontos híbridos, pagamentos, conciliaç\
+    ão manual e estorno no PDV."
 - name: Movimentações de estoque
   description: Histórico e alterações auditáveis do saldo dos produtos.
 - name: Dashboard
   description: Indicadores consolidados do estabelecimento autenticado.
 - name: Receitas de drinks
   description: Ingredientes rastreáveis dos drinks do estabelecimento autenticado.
-- name: Categorias
-  description: Categorias de produtos do estabelecimento autenticado.
+- name: Caixas e terminais
+  description: Cadastro dos caixas (postos físicos) e das maquininhas vinculadas.
 - name: Autorizações
   description: "Perfis, funcionalidades e permissões individuais."
+- name: Taxas de pagamento
+  description: Taxas estimadas por forma de pagamento e número de parcelas.
+- name: Auditoria do caixa
+  description: "Trilha de eventos do caixa, incluindo configuração, abertura, fechamento,\
+    \ sangria, reforço e divergências."
+- name: Categorias
+  description: Categorias de produtos do estabelecimento autenticado.
+- name: Configuração do caixa
+  description: Configuração das formas de pagamento e políticas comerciais do estabelecimento.
 - name: Usuários
   description: Operações de gerenciamento de usuários.
+- name: Terminais Point (Mercado Pago)
+  description: Sincronização e modo de operação (PDV/STANDALONE) das maquininhas Mercado
+    Pago Point.
 paths:
   /drinks/{idDrink}/receita:
     get:
@@ -127,6 +140,238 @@ paths:
                 $ref: "#/components/schemas/ApiErrorResponse"
         "404":
           description: Drink ou ingrediente não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/taxas/{id}:
+    put:
+      tags:
+      - Taxas de pagamento
+      summary: Atualizar os valores de uma taxa
+      description: A forma e o número de parcelas identificam a linha e não são alterados
+        por este endpoint.
+      operationId: atualizarTaxa
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaxaPagamentoAtualizacaoRequestDto"
+        required: true
+      responses:
+        "200":
+          description: Taxa atualizada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TaxaPagamentoResponseDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou taxa de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Taxa não encontrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/pedidos/{id}:
+    get:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: Consultar o detalhe completo de um pedido com itens e pagamentos
+      operationId: buscarPedido
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: Pedido encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PedidoCaixaDetalheResponseDto"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Pedido de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Pedido não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    put:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: "Atualizar itens, canal ou identificador de um pedido em atendimento"
+      description: "Substitui a lista de itens enquanto o pedido estiver EM_ATENDIMENTO\
+        \ e sem pagamentos ativos, auditando remoções/reduções de itens."
+      operationId: atualizarPedido
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PedidoCaixaAtualizacaoRequestDto"
+        required: true
+      responses:
+        "200":
+          description: Pedido atualizado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PedidoCaixaDetalheResponseDto"
+        "400":
+          description: Dados inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Pedido ou produto não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Pedido não editável ou estoque insuficiente.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/pedidos/{id}/desconto:
+    put:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: Aplicar ou solicitar desconto no pedido
+      description: |
+        Aplica o desconto imediatamente quando estiver dentro do limite duplo (% e R$) ou quando
+        autorizado por usuário com CAIXA_AUTORIZAR_DESCONTO. Caso contrário, registra a solicitação
+        como PENDENTE_AUTORIZACAO para aprovação posterior do gerente.
+      operationId: aplicarOuSolicitarDesconto
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DescontoPedidoCaixaRequestDto"
+        required: true
+      responses:
+        "200":
+          description: Desconto aplicado ou solicitado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PedidoCaixaDetalheResponseDto"
+        "400":
+          description: Dados inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Credenciais do autorizador inválidas ou sem permissão.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Pedido não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Estado inválido do pedido.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    delete:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: Remover desconto ou solicitação de desconto do pedido
+      description: "Limpa qualquer desconto aprovado, pendente ou negado, restaurando\
+        \ o total para o subtotal e destravando o pedido para pagamento."
+      operationId: removerDesconto
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: Desconto removido.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PedidoCaixaDetalheResponseDto"
+        "404":
+          description: Pedido não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: "Pedido já concluído, cancelado ou estornado."
           content:
             '*/*':
               schema:
@@ -317,6 +562,67 @@ paths:
                 $ref: "#/components/schemas/ApiErrorResponse"
       security:
       - accessTokenCookie: []
+  /webhooks/mercado-pago/point:
+    post:
+      tags:
+      - Webhooks Mercado Pago
+      summary: Receber notificação webhook de pagamento Point
+      description: "Valida assinatura HMAC-SHA256 (x-signature), deduplica eventos\
+        \ em evento_webhook_pagamento e confirma o estado da Order na API do Mercado\
+        \ Pago (Zero-Trust)."
+      operationId: receberWebhookPoint
+      parameters:
+      - name: data.id
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: id
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: type
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: x-signature
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: x-request-id
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: Webhook recebido e processado idempotentemente.
+          content:
+            '*/*':
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+        "401":
+          description: Assinatura HMAC inválida ou expirada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "429":
+          description: Rate limit de webhook excedido.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
   /usuario:
     get:
       tags:
@@ -850,6 +1156,132 @@ paths:
                 $ref: "#/components/schemas/ApiErrorResponse"
       security:
       - accessTokenCookie: []
+  /caixa/taxas:
+    get:
+      tags:
+      - Taxas de pagamento
+      summary: Listar taxas de pagamento do estabelecimento
+      operationId: listarTaxas
+      parameters:
+      - name: forma
+        in: query
+        description: "Forma de pagamento. Omitido: todas."
+        required: false
+        schema:
+          type: string
+          enum:
+          - DINHEIRO
+          - DEBITO
+          - CREDITO
+          - PIX
+      - name: ativo
+        in: query
+        description: "Situação da taxa. Omitido: ativas e inativas."
+        required: false
+        schema:
+          type: boolean
+      - name: pagina
+        in: query
+        description: "Número da página, iniciado em 0. Padrão: 0."
+        required: false
+        schema:
+          type: string
+          minimum: 0
+      - name: tamanho
+        in: query
+        description: "Itens por página. Padrão: 20; máximo: 100."
+        required: false
+        schema:
+          type: string
+          maximum: 100
+          minimum: 1
+      - name: ordenarPor
+        in: query
+        description: "Campo de ordenação: forma, parcelas, taxaPercentual, criadoEm\
+          \ ou atualizadoEm. Padrão: forma."
+        required: false
+        schema:
+          type: string
+      - name: direcao
+        in: query
+        description: "Direção da ordenação: ASC ou DESC. Padrão: ASC."
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: Taxas retornadas.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPaginadaDtoTaxaPagamentoResponseDto"
+        "400":
+          description: Parâmetros de consulta inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para visualizar o caixa.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    post:
+      tags:
+      - Taxas de pagamento
+      summary: Cadastrar taxa para uma forma e número de parcelas
+      description: |
+        A combinação (forma, parcelas) é única por estabelecimento. Quando
+        repassarAoCliente é nulo, vale a política de juros da configuração do caixa.
+      operationId: criarTaxa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaxaPagamentoRequestDto"
+        required: true
+      responses:
+        "201":
+          description: Taxa cadastrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TaxaPagamentoResponseDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para configurar o caixa.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Já existe taxa para esta forma e número de parcelas.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
   /caixa/sessoes:
     get:
       tags:
@@ -869,13 +1301,13 @@ paths:
           - FECHADA
           - CANCELADA
         example: ABERTA
-      - name: terminalId
+      - name: caixaId
         in: query
-        description: "Trecho do identificador do terminal. Omitido: todos."
+        description: "Caixa da sessão. Omitido: todos."
         required: false
         schema:
           type: string
-        example: TERM-001
+          format: uuid
       - name: operadorUsuarioId
         in: query
         description: "Operador que abriu a sessão. Omitido: todos."
@@ -957,10 +1389,9 @@ paths:
       - Sessões de caixa
       summary: Abrir uma sessão de caixa
       description: |
-        Abre uma sessão para o operador autenticado usando o terminal configurado
-        para o estabelecimento. Um terminal não aceita duas sessões ABERTAS ao
-        mesmo tempo; sessões EM_FECHAMENTO aguardando aprovação não bloqueiam
-        uma nova abertura.
+        Abre uma sessão para o operador autenticado no caixa informado. Um caixa
+        não aceita duas sessões ABERTAS ao mesmo tempo; sessões EM_FECHAMENTO
+        aguardando aprovação não bloqueiam uma nova abertura.
       operationId: abrirSessao
       requestBody:
         content:
@@ -993,8 +1424,15 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Caixa não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
         "409":
-          description: Já existe sessão aberta para o operador ou terminal.
+          description: "Já existe sessão aberta para o operador ou caixa, ou o caixa\
+            \ está inativo."
           content:
             '*/*':
               schema:
@@ -1179,6 +1617,741 @@ paths:
         "409":
           description: "Sessão não está aberta, falta justificativa ou há pagamento\
             \ pendente."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/pedidos:
+    get:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: Listar pedidos do caixa com filtros e paginação
+      operationId: listarPedidos
+      parameters:
+      - name: sessaoCaixaId
+        in: query
+        description: Filtrar por sessão de caixa.
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: status
+        in: query
+        description: Filtrar por status do pedido.
+        required: false
+        schema:
+          type: string
+          enum:
+          - EM_ATENDIMENTO
+          - AGUARDANDO_MAQUINA
+          - AGUARDANDO_PAGAMENTO
+          - PAGAMENTO_PARCIAL
+          - CONCLUIDO
+          - CANCELADO
+          - ESTORNADO
+        example: EM_ATENDIMENTO
+      - name: canal
+        in: query
+        description: Filtrar por canal do pedido.
+        required: false
+        schema:
+          type: string
+          enum:
+          - BALCAO
+          - MESA
+          - RETIRADA
+          - DELIVERY
+        example: MESA
+      - name: dataInicio
+        in: query
+        description: Data inicial de criação no formato ISO (AAAA-MM-DD).
+        required: false
+        schema:
+          type: string
+          format: date
+      - name: dataFim
+        in: query
+        description: "Data final de criação no formato ISO (AAAA-MM-DD), inclusiva."
+        required: false
+        schema:
+          type: string
+          format: date
+      - name: pagina
+        in: query
+        description: "Número da página, iniciado em 0."
+        required: false
+        schema:
+          type: string
+          minimum: 0
+      - name: tamanho
+        in: query
+        description: Itens por página.
+        required: false
+        schema:
+          type: string
+          maximum: 100
+          minimum: 1
+      - name: ordenarPor
+        in: query
+        description: "Campo de ordenação: criadoEm, atualizadoEm, concluidoEm, numero,\
+          \ total ou status."
+        required: false
+        schema:
+          type: string
+      - name: direcao
+        in: query
+        description: "Direção da ordenação: ASC ou DESC."
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: Pedidos retornados.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPaginadaDtoPedidoCaixaResumoResponseDto"
+        "400":
+          description: Parâmetros de consulta inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Sem permissão para visualizar o caixa.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    post:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: Abrir um novo pedido no caixa
+      description: |
+        Cria um pedido vinculado à sessão aberta do operador (ou à sessão informada) com numeração
+        sequencial por estabelecimento e validação imediata de disponibilidade de estoque dos itens.
+      operationId: criarPedido
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PedidoCaixaRequestDto"
+      responses:
+        "201":
+          description: Pedido criado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PedidoCaixaDetalheResponseDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Sem permissão para operar o caixa.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Sessão ou produto não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Sessão fechada ou estoque insuficiente.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/pedidos/{pedidoId}/pagamentos/{pagamentoId}/sincronizar:
+    post:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: Sincronizar pagamento Point com a API do Mercado Pago
+      description: Consulta o status atualizado da Order no Mercado Pago e aplica
+        a transição no pagamento e no estoque.
+      operationId: sincronizarCobrancaPoint
+      parameters:
+      - name: pedidoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: pagamentoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: Sincronização concluída.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PedidoCaixaDetalheResponseDto"
+        "404":
+          description: Pedido ou pagamento não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Pagamento inválido para sincronização Point ou estoque insuficiente.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "502":
+          description: Falha de comunicação com o Mercado Pago.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/pedidos/{pedidoId}/pagamentos/{pagamentoId}/conciliacao:
+    post:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: Conciliar manualmente um pagamento pendente de conciliação
+      description: Aprova (status APROVADO) ou rejeita/cancela (status CANCELADO)
+        um pagamento registrado em contingência manual.
+      operationId: conciliarPagamento
+      parameters:
+      - name: pedidoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: pagamentoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConciliarPagamentoPedidoRequestDto"
+        required: true
+      responses:
+        "200":
+          description: Conciliação registrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PedidoCaixaDetalheResponseDto"
+        "400":
+          description: Motivo obrigatório ao rejeitar.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Pedido ou pagamento não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Pagamento não está pendente de conciliação ou estoque insuficiente.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/pedidos/{pedidoId}/pagamentos/{pagamentoId}/cancelamento-point:
+    post:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: Cancelar cobrança pendente na maquininha Point
+      description: "Solicita o cancelamento da Order na API Point do Mercado Pago,\
+        \ libera a reserva de estoque e desbloqueia o terminal."
+      operationId: cancelarCobrancaPoint
+      parameters:
+      - name: pedidoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: pagamentoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: Solicitação de cancelamento processada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PedidoCaixaDetalheResponseDto"
+        "404":
+          description: Pedido ou pagamento não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: "Cobrança não pode mais ser cancelada (ex.: já paga)."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "502":
+          description: Falha de comunicação com o Mercado Pago.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/pedidos/{id}/pagamentos:
+    get:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: Listar todos os pagamentos e tentativas de um pedido para acompanhamento
+        e auditoria
+      operationId: listarPagamentosDoPedido
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: Pagamentos retornados.
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PagamentoPedidoResponseDto"
+        "404":
+          description: Pedido não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    post:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: Registrar pagamento (dinheiro ou contingência manual) no pedido
+      description: |
+        Suporta pagamento integral ou parcial/misto e idempotência por chaveIdempotencia.
+        Em DINHEIRO aprova imediatamente com cálculo de troco. Em DEBITO/CREDITO/PIX manual cria
+        registro PENDENTE_CONCILIACAO com snapshot de taxas. Ao atingir o total aprovado, conclui
+        o pedido e baixa o estoque automaticamente.
+      operationId: registrarPagamento
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegistrarPagamentoPedidoRequestDto"
+        required: true
+      responses:
+        "200":
+          description: Pagamento processado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PedidoCaixaDetalheResponseDto"
+        "400":
+          description: Dados do pagamento inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Pedido não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Estado inválido do pedido/sessão ou estoque insuficiente.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/pedidos/{id}/estorno:
+    post:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: Estornar integralmente um pedido concluído
+      description: "Exige permissão CAIXA_ESTORNAR (ou credenciais de autorizador),\
+        \ marca os pagamentos como ESTORNADO e devolve os itens ao estoque via AJUSTE_POSITIVO."
+      operationId: estornarPedido
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EstornarPedidoCaixaRequestDto"
+        required: true
+      responses:
+        "200":
+          description: Pedido estornado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PedidoCaixaDetalheResponseDto"
+        "400":
+          description: Motivo obrigatório.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Sem permissão CAIXA_ESTORNAR.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Pedido não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Somente pedidos CONCLUIDO podem ser estornados.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/pedidos/{id}/desconto/decisao:
+    post:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: Aprovar ou negar solicitação de desconto pendente
+      description: Permite que um usuário com CAIXA_AUTORIZAR_DESCONTO aprove ou negue
+        o desconto solicitado pelo operador.
+      operationId: decidirDescontoPendente
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecisaoDescontoPedidoRequestDto"
+        required: true
+      responses:
+        "200":
+          description: Decisão registrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PedidoCaixaDetalheResponseDto"
+        "400":
+          description: Dados inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Sem permissão CAIXA_AUTORIZAR_DESCONTO.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Pedido não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Não há desconto pendente de autorização.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/pedidos/{id}/cancelamento:
+    post:
+      tags:
+      - Pedidos do caixa (PDV)
+      summary: Cancelar um pedido ainda não pago
+      description: |
+        Pedidos vazios podem ser descartados por qualquer operador com CAIXA_OPERAR.
+        Pedidos com itens exigem motivo e a permissão CAIXA_CANCELAR (ou credenciais de autorizador).
+      operationId: cancelarPedido
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelarPedidoCaixaRequestDto"
+      responses:
+        "200":
+          description: Pedido cancelado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PedidoCaixaDetalheResponseDto"
+        "400":
+          description: Motivo ausente ou inválido.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Sem permissão CAIXA_CANCELAR.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Pedido não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Pedido já possui pagamentos ou não pode ser cancelado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/caixas:
+    get:
+      tags:
+      - Caixas e terminais
+      summary: Listar caixas do estabelecimento com suas maquininhas
+      operationId: listarCaixas
+      parameters:
+      - name: busca
+        in: query
+        description: "Trecho do nome do caixa. Omitido: sem filtro."
+        required: false
+        schema:
+          type: string
+        example: Principal
+      - name: ativo
+        in: query
+        description: "Situação do caixa. Omitido: ativos e inativos."
+        required: false
+        schema:
+          type: boolean
+        example: true
+      - name: pagina
+        in: query
+        description: "Número da página, iniciado em 0. Padrão: 0."
+        required: false
+        schema:
+          type: string
+          minimum: 0
+      - name: tamanho
+        in: query
+        description: "Itens por página. Padrão: 20; máximo: 100."
+        required: false
+        schema:
+          type: string
+          maximum: 100
+          minimum: 1
+      - name: ordenarPor
+        in: query
+        description: "Campo de ordenação: nome, criadoEm ou atualizadoEm. Padrão:\
+          \ nome."
+        required: false
+        schema:
+          type: string
+      - name: direcao
+        in: query
+        description: "Direção da ordenação: ASC ou DESC. Padrão: ASC."
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: Caixas retornados.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPaginadaDtoCaixaResponseDto"
+        "400":
+          description: Parâmetros de consulta inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para visualizar o caixa.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    post:
+      tags:
+      - Caixas e terminais
+      summary: Cadastrar um novo caixa
+      operationId: criarCaixa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CaixaRequestDto"
+        required: true
+      responses:
+        "201":
+          description: Caixa criado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CaixaResponseDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para configurar o caixa.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Já existe um caixa com este nome.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/caixas/{caixaId}/terminais:
+    post:
+      tags:
+      - Caixas e terminais
+      summary: Vincular uma maquininha ao caixa
+      description: Um caixa pode ter diversas maquininhas; o terminalId do dispositivo
+        é único no sistema.
+      operationId: criarTerminal
+      parameters:
+      - name: caixaId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TerminalCaixaRequestDto"
+        required: true
+      responses:
+        "201":
+          description: Terminal vinculado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TerminalCaixaResponseDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou caixa de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Caixa não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Terminal ou nome já em uso.
           content:
             '*/*':
               schema:
@@ -1858,6 +3031,225 @@ paths:
                 $ref: "#/components/schemas/ApiErrorResponse"
       security:
       - accessTokenCookie: []
+  /caixa/terminais/{id}/modo-operacao:
+    patch:
+      tags:
+      - Terminais Point (Mercado Pago)
+      summary: Alternar modo de operação da Point Smart 2 (PDV ou STANDALONE)
+      description: Envia PATCH /terminals/v1/setup para ativar o modo PDV integrado
+        ao caixa ou retornar para STANDALONE.
+      operationId: atualizarModoOperacao
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarModoOperacaoTerminalRequestDto"
+        required: true
+      responses:
+        "200":
+          description: Modo de operação atualizado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ModoOperacaoTerminalResponseDto"
+        "400":
+          description: Dados inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão CAIXA_CONFIGURAR.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Terminal não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "502":
+          description: Falha de comunicação com a API do Mercado Pago.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/caixas/{id}:
+    get:
+      tags:
+      - Caixas e terminais
+      summary: Consultar um caixa pelo identificador
+      operationId: buscarCaixa
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: Caixa encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CaixaResponseDto"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Caixa de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Caixa não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+    patch:
+      tags:
+      - Caixas e terminais
+      summary: Atualizar o nome ou a situação de um caixa
+      description: Não é permitido inativar um caixa com sessão aberta nem deixar
+        a Point sem terminal ativo.
+      operationId: atualizarCaixa
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CaixaAtualizacaoRequestDto"
+        required: true
+      responses:
+        "200":
+          description: Caixa atualizado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CaixaResponseDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou caixa de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Caixa não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: "Nome duplicado, sessão aberta ou último terminal da Point."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/caixas/{caixaId}/terminais/{terminalId}:
+    patch:
+      tags:
+      - Caixas e terminais
+      summary: Atualizar o nome ou a situação de um terminal
+      description: "O terminalId do dispositivo não é editável; para trocá-lo, inative\
+        \ o atual e cadastre outro."
+      operationId: atualizarTerminal
+      parameters:
+      - name: caixaId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: terminalId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TerminalCaixaAtualizacaoRequestDto"
+        required: true
+      responses:
+        "200":
+          description: Terminal atualizado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TerminalCaixaResponseDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão ou caixa de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Caixa ou terminal não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Nome duplicado ou último terminal da Point.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
   /autorizacoes/perfis/{profileId}:
     get:
       tags:
@@ -2033,6 +3425,43 @@ paths:
                 $ref: "#/components/schemas/ApiErrorResponse"
         "403":
           description: Usuário sem permissão para visualizar estoque.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /caixa/terminais/mercado-pago:
+    get:
+      tags:
+      - Terminais Point (Mercado Pago)
+      summary: Listar terminais Point disponíveis na conta Mercado Pago
+      description: Consulta a API do Mercado Pago (/terminals/v1/list) para auxiliar
+        o vínculo do terminal_id no cadastro de caixas.
+      operationId: listarTerminaisMercadoPago
+      responses:
+        "200":
+          description: Terminais retornados.
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TerminalMercadoPagoDto"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão CAIXA_CONFIGURAR.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "502":
+          description: Falha de comunicação com a API do Mercado Pago.
           content:
             '*/*':
               schema:
@@ -2366,24 +3795,468 @@ components:
           enum:
           - ML
           - UN
+    TaxaPagamentoAtualizacaoRequestDto:
+      type: object
+      properties:
+        taxaPercentual:
+          type: number
+          description: Percentual total sobre o valor da venda
+          example: "11.5000"
+          maximum: 100.0000
+          minimum: 0.0000
+        taxaFixa:
+          type: number
+          description: Valor fixo por transação; zero quando não houver
+          example: "0.00"
+          minimum: 0.00
+        repassarAoCliente:
+          type: boolean
+          description: Repassa a taxa ao cliente; nulo segue a política de juros da
+            configuração
+          example: false
+        ativo:
+          type: boolean
+          description: Somente taxas ativas são usadas no cálculo
+          example: true
+      required:
+      - ativo
+      - taxaFixa
+      - taxaPercentual
+    TaxaPagamentoResponseDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador da taxa
+        forma:
+          type: string
+          description: Forma de pagamento
+          enum:
+          - DINHEIRO
+          - DEBITO
+          - CREDITO
+          - PIX
+        parcelas:
+          type: integer
+          format: int32
+          description: Número de parcelas
+        taxaPercentual:
+          type: number
+          description: Percentual total sobre o valor da venda
+        taxaFixa:
+          type: number
+          description: Valor fixo por transação
+        repassarAoCliente:
+          type: boolean
+          description: Configuração própria de repasse; nulo segue a política global
+        repasseEfetivo:
+          type: boolean
+          description: "Resultado final: a taxa é repassada ao cliente considerando\
+            \ a política global"
+        ativo:
+          type: boolean
+          description: Taxa ativa
+        criadoEm:
+          type: string
+          format: date-time
+          description: Data de criação
+        atualizadoEm:
+          type: string
+          format: date-time
+          description: Data da última alteração
+    ItemPedidoCaixaRequestDto:
+      type: object
+      properties:
+        produtoId:
+          type: string
+          format: uuid
+          description: Identificador do produto ou drink
+        quantidade:
+          type: number
+          description: Quantidade solicitada do item
+          example: 2
+          minimum: 0.001
+      required:
+      - produtoId
+      - quantidade
+    PedidoCaixaAtualizacaoRequestDto:
+      type: object
+      properties:
+        canal:
+          type: string
+          description: Novo canal de atendimento
+          enum:
+          - BALCAO
+          - MESA
+          - RETIRADA
+          - DELIVERY
+          example: MESA
+        identificadorAtendimento:
+          type: string
+          description: Novo rótulo de identificação do pedido
+          example: Mesa 04
+          maxLength: 60
+          minLength: 0
+        observacao:
+          type: string
+          description: Observação do pedido
+          maxLength: 500
+          minLength: 0
+        itens:
+          type: array
+          description: Lista atualizada de itens do pedido
+          items:
+            $ref: "#/components/schemas/ItemPedidoCaixaRequestDto"
+    ItemPedidoCaixaResponseDto:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Identificador do item no pedido
+        produtoId:
+          type: string
+          format: uuid
+          description: Identificador do produto
+        descricaoProduto:
+          type: string
+          description: Descrição congelada do produto no momento da venda
+        quantidade:
+          type: number
+          description: Quantidade vendida
+        precoUnitario:
+          type: number
+          description: Preço unitário congelado
+        custoUnitario:
+          type: number
+          description: Custo unitário congelado
+        desconto:
+          type: number
+          description: Desconto aplicado ao item
+        subtotal:
+          type: number
+          description: Subtotal do item
+        categoriaId:
+          type: integer
+          format: int32
+          description: Identificador da categoria do produto
+        categoriaNome:
+          type: string
+          description: Snapshot do nome da categoria
+    PagamentoPedidoResponseDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador do pagamento
+        pedidoId:
+          type: string
+          format: uuid
+          description: Identificador do pedido
+        sessaoCaixaId:
+          type: string
+          format: uuid
+          description: Sessão de caixa que recebeu o pagamento
+        terminalCaixaId:
+          type: string
+          format: uuid
+          description: Identificador do terminal cadastrado no caixa
+        terminalId:
+          type: string
+          description: Identificador externo do terminal Point (snapshot)
+        forma:
+          type: string
+          description: Forma de pagamento
+          enum:
+          - DINHEIRO
+          - DEBITO
+          - CREDITO
+          - PIX
+        status:
+          type: string
+          description: Status do pagamento
+          enum:
+          - PENDENTE
+          - PENDENTE_NA_POINT
+          - EM_TERMINAL
+          - APROVADO
+          - RECUSADO
+          - EXPIRADO
+          - CANCELAMENTO_SOLICITADO
+          - CANCELADO
+          - ACAO_NECESSARIA
+          - PENDENTE_CONCILIACAO
+          - ESTORNO_EM_ANDAMENTO
+          - ESTORNADO
+        statusDetalhe:
+          type: string
+          description: Detalhe do status retornado pelo provedor
+        provedor:
+          type: string
+          description: "Provedor do processamento: INTERNO, MANUAL ou MERCADO_PAGO"
+        orderExternaId:
+          type: string
+          description: Identificador da Order externa no Mercado Pago
+        paymentExternoId:
+          type: string
+          description: Identificador do Payment externo no Mercado Pago
+        referenciaExterna:
+          type: string
+          description: Referência externa enviada ao provedor
+        valor:
+          type: number
+          description: Valor abatido do saldo do pedido
+        valorCobrado:
+          type: number
+          description: Valor cobrado do cliente (pode incluir repasse de taxa)
+        valorRecebido:
+          type: number
+          description: Valor físico recebido em dinheiro
+        valorTroco:
+          type: number
+          description: Troco devolvido em dinheiro
+        valorEstornado:
+          type: number
+          description: Valor estornado
+        parcelas:
+          type: integer
+          format: int32
+          description: Quantidade de parcelas
+        politicaJuros:
+          type: string
+          description: Política de juros/taxa aplicada
+          enum:
+          - ABSORVIDA_PELA_LOJA
+          - REPASSADA_AO_CLIENTE
+        taxaPercentualAplicada:
+          type: number
+          description: Taxa percentual aplicada na venda
+        taxaFixaAplicada:
+          type: number
+          description: Taxa fixa aplicada na venda
+        valorTaxaEstimada:
+          type: number
+          description: Valor estimado da taxa da adquirente
+        valorLiquidoEstimado:
+          type: number
+          description: Valor líquido estimado para o estabelecimento
+        valorJuros:
+          type: number
+          description: Valor de juros/acréscimo repassado ao cliente
+        chaveIdempotencia:
+          type: string
+          description: Chave de idempotência informada
+        comprovanteReferencia:
+          type: string
+          description: Referência do comprovante/NSU
+        motivoCancelamento:
+          type: string
+          description: Motivo de cancelamento do pagamento
+        motivoEstorno:
+          type: string
+          description: Motivo de estorno do pagamento
+        solicitadoEm:
+          type: string
+          format: date-time
+          description: Data/hora em que o pagamento foi solicitado
+        pagoEm:
+          type: string
+          format: date-time
+          description: Data/hora da aprovação
+        canceladoEm:
+          type: string
+          format: date-time
+          description: Data/hora do cancelamento
+        estornadoEm:
+          type: string
+          format: date-time
+          description: Data/hora do estorno
+        criadoEm:
+          type: string
+          format: date-time
+          description: Data/hora de criação do registro
+    PedidoCaixaDetalheResponseDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador do pedido
+        numero:
+          type: integer
+          format: int64
+          description: Número sequencial do pedido no estabelecimento
+        sessaoCaixaId:
+          type: string
+          format: uuid
+          description: Sessão de caixa vinculada
+        operadorUsuarioId:
+          type: string
+          format: uuid
+          description: Operador que abriu o pedido
+        operadorNome:
+          type: string
+          description: Nome do operador
+        status:
+          type: string
+          description: Status atual do pedido
+          enum:
+          - EM_ATENDIMENTO
+          - AGUARDANDO_MAQUINA
+          - AGUARDANDO_PAGAMENTO
+          - PAGAMENTO_PARCIAL
+          - CONCLUIDO
+          - CANCELADO
+          - ESTORNADO
+        canal:
+          type: string
+          description: Canal do pedido
+          enum:
+          - BALCAO
+          - MESA
+          - RETIRADA
+          - DELIVERY
+        identificadorAtendimento:
+          type: string
+          description: "Rótulo de atendimento (ex.: Mesa 04)"
+        observacao:
+          type: string
+          description: Observação do pedido
+        subtotal:
+          type: number
+          description: Subtotal dos itens
+        desconto:
+          type: number
+          description: Desconto efetivamente aprovado e aplicado
+        total:
+          type: number
+          description: Total líquido do pedido
+        totalPago:
+          type: number
+          description: Total já pago com status APROVADO
+        saldoRestante:
+          type: number
+          description: Saldo restante para concluir o pedido
+        statusDesconto:
+          type: string
+          description: Status do fluxo de desconto
+          enum:
+          - NENHUM
+          - PENDENTE_AUTORIZACAO
+          - APROVADO
+          - NEGADO
+        tipoDesconto:
+          type: string
+          description: Tipo do desconto solicitado/aplicado
+          enum:
+          - PERCENTUAL
+          - VALOR
+        valorDescontoInformado:
+          type: number
+          description: Valor informado para o desconto (% ou R$)
+        descontoSolicitado:
+          type: number
+          description: Valor em R$ do desconto solicitado
+        motivoDesconto:
+          type: string
+          description: Motivo do desconto
+        descontoDecididoPorUsuarioId:
+          type: string
+          format: uuid
+          description: Usuário que aprovou/negou o desconto
+        descontoDecididoPorNome:
+          type: string
+          description: Nome de quem aprovou/negou o desconto
+        descontoDecididoEm:
+          type: string
+          format: date-time
+          description: Data/hora da decisão sobre o desconto
+        observacaoDecisaoDesconto:
+          type: string
+          description: Observação da decisão sobre o desconto
+        motivoCancelamento:
+          type: string
+          description: Motivo do cancelamento
+        canceladoPorUsuarioId:
+          type: string
+          format: uuid
+          description: Usuário que cancelou o pedido
+        motivoEstorno:
+          type: string
+          description: Motivo do estorno
+        estornadoPorUsuarioId:
+          type: string
+          format: uuid
+          description: Usuário que estornou o pedido
+        criadoEm:
+          type: string
+          format: date-time
+          description: Data/hora de criação
+        atualizadoEm:
+          type: string
+          format: date-time
+          description: Data/hora da última atualização
+        concluidoEm:
+          type: string
+          format: date-time
+          description: Data/hora de conclusão
+        canceladoEm:
+          type: string
+          format: date-time
+          description: Data/hora de cancelamento
+        estornadoEm:
+          type: string
+          format: date-time
+          description: Data/hora de estorno
+        itens:
+          type: array
+          description: Itens do pedido
+          items:
+            $ref: "#/components/schemas/ItemPedidoCaixaResponseDto"
+        pagamentos:
+          type: array
+          description: Pagamentos e tentativas registradas para o pedido
+          items:
+            $ref: "#/components/schemas/PagamentoPedidoResponseDto"
+    DescontoPedidoCaixaRequestDto:
+      type: object
+      properties:
+        tipoDesconto:
+          type: string
+          description: "Tipo do desconto: PERCENTUAL ou VALOR"
+          enum:
+          - PERCENTUAL
+          - VALOR
+          example: PERCENTUAL
+        valorDescontoInformado:
+          type: number
+          description: Percentual (0.01 a 100) ou valor em reais conforme o tipoDesconto
+          example: "15.00"
+          minimum: 0.01
+        motivo:
+          type: string
+          description: Motivo do desconto (obrigatório quando acima do limite sem
+            autorização direta)
+          maxLength: 500
+          minLength: 0
+        autorizadorEmail:
+          type: string
+          description: E-mail do gerente/autorizador para aprovação imediata no balcão
+        autorizadorSenha:
+          type: string
+          description: Senha do gerente/autorizador para aprovação imediata no balcão
+      required:
+      - tipoDesconto
+      - valorDescontoInformado
     ConfiguracaoCaixaRequestDto:
       type: object
       properties:
-        terminalId:
-          type: string
-          description: Identificador do terminal Point. Obrigatório quando pointHabilitado=true.
-          example: TERM-001
-          maxLength: 100
-          minLength: 0
-        terminalNome:
-          type: string
-          description: Nome amigável do terminal
-          example: Caixa principal
-          maxLength: 100
-          minLength: 0
         pointHabilitado:
           type: boolean
-          description: Habilita cobranças na Point
+          description: Habilita cobranças na Point; exige ao menos um terminal ativo
+            cadastrado
           example: false
         dinheiroHabilitado:
           type: boolean
@@ -2478,12 +4351,6 @@ components:
           type: string
           format: uuid
           description: Identificador da configuração
-        terminalId:
-          type: string
-          description: Terminal Point configurado
-        terminalNome:
-          type: string
-          description: Nome amigável do terminal
         pointHabilitado:
           type: boolean
           description: Cobrança na Point habilitada
@@ -2913,9 +4780,58 @@ components:
         atualizadoEm:
           type: string
           format: date-time
+    TaxaPagamentoRequestDto:
+      type: object
+      properties:
+        forma:
+          type: string
+          description: "Forma de pagamento com taxa: DEBITO, CREDITO ou PIX"
+          enum:
+          - DINHEIRO
+          - DEBITO
+          - CREDITO
+          - PIX
+          example: CREDITO
+        parcelas:
+          type: integer
+          format: int32
+          description: Número de parcelas; débito e Pix aceitam somente 1
+          example: 3
+          maximum: 12
+          minimum: 1
+        taxaPercentual:
+          type: number
+          description: Percentual total sobre o valor da venda
+          example: "11.5000"
+          maximum: 100.0000
+          minimum: 0.0000
+        taxaFixa:
+          type: number
+          description: Valor fixo por transação; zero quando não houver
+          example: "0.00"
+          minimum: 0.00
+        repassarAoCliente:
+          type: boolean
+          description: Repassa a taxa ao cliente; nulo segue a política de juros da
+            configuração
+          example: false
+        ativo:
+          type: boolean
+          description: Somente taxas ativas são usadas no cálculo
+          example: true
+      required:
+      - ativo
+      - forma
+      - parcelas
+      - taxaFixa
+      - taxaPercentual
     AbrirSessaoCaixaRequestDto:
       type: object
       properties:
+        caixaId:
+          type: string
+          format: uuid
+          description: Caixa (posto físico) em que a sessão será aberta
         fundoTroco:
           type: number
           description: Dinheiro inicial disponível para troco
@@ -2928,6 +4844,7 @@ components:
           maxLength: 2000
           minLength: 0
       required:
+      - caixaId
       - fundoTroco
     MovimentacaoCaixaResponseDto:
       type: object
@@ -3013,9 +4930,13 @@ components:
           type: string
           format: uuid
           description: Identificador da sessão
-        terminalId:
+        caixaId:
           type: string
-          description: Terminal da sessão
+          format: uuid
+          description: Caixa da sessão
+        caixaNome:
+          type: string
+          description: Nome do caixa da sessão
         operadorUsuarioId:
           type: string
           format: uuid
@@ -3152,6 +5073,256 @@ components:
           minLength: 0
       required:
       - dinheiroContado
+    PedidoCaixaRequestDto:
+      type: object
+      properties:
+        sessaoCaixaId:
+          type: string
+          format: uuid
+          description: "Sessão de caixa vinculada; quando omitido, usa a sessão aberta\
+            \ do operador"
+        canal:
+          type: string
+          description: Canal de atendimento (padrão BALCAO)
+          enum:
+          - BALCAO
+          - MESA
+          - RETIRADA
+          - DELIVERY
+          example: MESA
+        identificadorAtendimento:
+          type: string
+          description: Rótulo de identificação para pedidos simultâneos (obrigatório
+            quando canal = MESA)
+          example: Mesa 04
+          maxLength: 60
+          minLength: 0
+        observacao:
+          type: string
+          description: Observação opcional do pedido
+          maxLength: 500
+          minLength: 0
+        itens:
+          type: array
+          description: Lista inicial de itens do pedido
+          items:
+            $ref: "#/components/schemas/ItemPedidoCaixaRequestDto"
+    ConciliarPagamentoPedidoRequestDto:
+      type: object
+      properties:
+        aprovado:
+          type: boolean
+          description: "True para aprovar o pagamento pendente de conciliação, false\
+            \ para cancelar/rejeitar"
+          example: true
+        motivo:
+          type: string
+          description: Observação da conciliação ou motivo do cancelamento (obrigatório
+            quando aprovado = false)
+          maxLength: 500
+          minLength: 0
+        comprovanteReferencia:
+          type: string
+          description: NSU ou referência atualizada do comprovante
+          maxLength: 255
+          minLength: 0
+      required:
+      - aprovado
+    RegistrarPagamentoPedidoRequestDto:
+      type: object
+      properties:
+        forma:
+          type: string
+          description: "Forma de pagamento: DINHEIRO, DEBITO, CREDITO ou PIX"
+          enum:
+          - DINHEIRO
+          - DEBITO
+          - CREDITO
+          - PIX
+          example: DINHEIRO
+        valor:
+          type: number
+          description: Valor da parcela aplicada ao saldo do pedido
+          example: "50.00"
+          minimum: 0.01
+        parcelas:
+          type: integer
+          format: int32
+          description: Quantidade de parcelas (exclusivo de CREDITO; padrão 1)
+          example: 1
+          maximum: 24
+          minimum: 1
+        valorRecebido:
+          type: number
+          description: Valor físico entregue pelo cliente (obrigatório quando forma
+            = DINHEIRO)
+          example: "100.00"
+          minimum: 0.01
+        chaveIdempotencia:
+          type: string
+          description: Chave de idempotência para evitar cobranças duplicadas
+          example: pag-pedido-10-01
+          maxLength: 100
+          minLength: 0
+        comprovanteReferencia:
+          type: string
+          description: "NSU, código de autorização ou referência do comprovante em\
+            \ pagamento manual"
+          maxLength: 255
+          minLength: 0
+        terminalCaixaId:
+          type: string
+          format: uuid
+          description: Identificador do terminal cadastrado no caixa (obrigatório
+            para cobrança integrada na Point Smart 2)
+        contingenciaManual:
+          type: boolean
+          description: "Quando true e permitirPagamentoManual=true, força registro\
+            \ em contingência manual mesmo com a Point habilitada"
+      required:
+      - forma
+      - valor
+    EstornarPedidoCaixaRequestDto:
+      type: object
+      properties:
+        motivo:
+          type: string
+          description: Motivo do estorno total do pedido concluído
+          example: Cobrança duplicada / desistência do cliente
+          maxLength: 500
+          minLength: 0
+        autorizadorEmail:
+          type: string
+          description: E-mail do autorizador caso o usuário logado não possua CAIXA_ESTORNAR
+        autorizadorSenha:
+          type: string
+          description: Senha do autorizador caso o usuário logado não possua CAIXA_ESTORNAR
+      required:
+      - motivo
+    DecisaoDescontoPedidoRequestDto:
+      type: object
+      properties:
+        aprovado:
+          type: boolean
+          description: "True para aprovar o desconto pendente, false para negar"
+          example: true
+        observacao:
+          type: string
+          description: Observação ou justificativa da decisão (obrigatória ao negar)
+          maxLength: 500
+          minLength: 0
+        autorizadorEmail:
+          type: string
+          description: E-mail do gerente/autorizador caso o operador logado não tenha
+            CAIXA_AUTORIZAR_DESCONTO
+        autorizadorSenha:
+          type: string
+          description: Senha do gerente/autorizador caso o operador logado não tenha
+            CAIXA_AUTORIZAR_DESCONTO
+      required:
+      - aprovado
+    CancelarPedidoCaixaRequestDto:
+      type: object
+      properties:
+        motivo:
+          type: string
+          description: Motivo do cancelamento (obrigatório quando o pedido já possui
+            itens)
+          maxLength: 500
+          minLength: 0
+        autorizadorEmail:
+          type: string
+          description: E-mail do autorizador caso o usuário não possua CAIXA_CANCELAR
+        autorizadorSenha:
+          type: string
+          description: Senha do autorizador caso o usuário não possua CAIXA_CANCELAR
+    CaixaRequestDto:
+      type: object
+      properties:
+        nome:
+          type: string
+          description: Nome único do caixa no estabelecimento
+          example: Caixa 1
+          maxLength: 100
+          minLength: 0
+      required:
+      - nome
+    CaixaResponseDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador do caixa
+        nome:
+          type: string
+          description: Nome do caixa
+        ativo:
+          type: boolean
+          description: Caixa ativo
+        emUso:
+          type: boolean
+          description: Existe uma sessão ABERTA neste caixa
+        terminais:
+          type: array
+          description: Maquininhas vinculadas ao caixa
+          items:
+            $ref: "#/components/schemas/TerminalCaixaResponseDto"
+        criadoEm:
+          type: string
+          format: date-time
+          description: Data de criação
+        atualizadoEm:
+          type: string
+          format: date-time
+          description: Data da última alteração
+    TerminalCaixaResponseDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador do vínculo terminal e caixa
+        caixaId:
+          type: string
+          format: uuid
+          description: Caixa ao qual a maquininha pertence
+        terminalId:
+          type: string
+          description: Identificador do dispositivo no Mercado Pago
+        nome:
+          type: string
+          description: Nome amigável da maquininha
+        ativo:
+          type: boolean
+          description: Terminal ativo
+        criadoEm:
+          type: string
+          format: date-time
+          description: Data de criação
+        atualizadoEm:
+          type: string
+          format: date-time
+          description: Data da última alteração
+    TerminalCaixaRequestDto:
+      type: object
+      properties:
+        terminalId:
+          type: string
+          description: Identificador do dispositivo no Mercado Pago; único em todo
+            o sistema
+          example: PAX_A910__SMARTPOS1234567890
+          maxLength: 100
+          minLength: 0
+        nome:
+          type: string
+          description: "Nome amigável, único dentro do caixa"
+          example: Maquininha 1
+          maxLength: 100
+          minLength: 0
+      required:
+      - nome
+      - terminalId
     RequisicaoPerfilDto:
       type: object
       properties:
@@ -3284,6 +5455,67 @@ components:
         ativo:
           type: boolean
           description: Define se a categoria está disponível para uso
+          example: true
+    AtualizarModoOperacaoTerminalRequestDto:
+      type: object
+      properties:
+        modoOperacao:
+          type: string
+          description: "Modo de operação desejado na Point Smart 2: PDV ou STANDALONE"
+          enum:
+          - PDV
+          - STANDALONE
+          example: PDV
+      required:
+      - modoOperacao
+    ModoOperacaoTerminalResponseDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador do terminal cadastrado no caixa
+        caixaId:
+          type: string
+          format: uuid
+          description: Identificador do caixa
+        terminalId:
+          type: string
+          description: Identificador externo da maquininha no Mercado Pago
+        nome:
+          type: string
+          description: Nome amigável da maquininha
+        modoOperacao:
+          type: string
+          description: Modo de operação sincronizado no Mercado Pago
+          enum:
+          - PDV
+          - STANDALONE
+    CaixaAtualizacaoRequestDto:
+      type: object
+      properties:
+        nome:
+          type: string
+          description: Novo nome do caixa; omitido mantém o atual
+          example: Caixa 2
+          maxLength: 100
+          minLength: 0
+        ativo:
+          type: boolean
+          description: Ativa ou inativa o caixa; omitido mantém o atual
+          example: true
+    TerminalCaixaAtualizacaoRequestDto:
+      type: object
+      properties:
+        nome:
+          type: string
+          description: Novo nome do terminal; omitido mantém o atual
+          example: Maquininha 2
+          maxLength: 100
+          minLength: 0
+        ativo:
+          type: boolean
+          description: Ativa ou inativa o terminal; omitido mantém o atual
           example: true
     RequisicaoAtualizacaoPerfilDto:
       type: object
@@ -3514,6 +5746,49 @@ components:
           type: boolean
         ultima:
           type: boolean
+    TerminalMercadoPagoDto:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Identificador único do terminal na API do Mercado Pago
+          example: PAX_A910__SMARTPOS1234567890
+        posId:
+          type: string
+          description: Identificador do POS vinculado
+        storeId:
+          type: string
+          description: Identificador da loja vinculada
+        externalPosId:
+          type: string
+          description: Referência externa do POS
+        operatingMode:
+          type: string
+          description: "Modo de operação atual: PDV ou STANDALONE"
+          example: PDV
+    RespostaPaginadaDtoTaxaPagamentoResponseDto:
+      type: object
+      properties:
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaxaPagamentoResponseDto"
+        pagina:
+          type: integer
+          format: int32
+        tamanho:
+          type: integer
+          format: int32
+        totalItens:
+          type: integer
+          format: int64
+        totalPaginas:
+          type: integer
+          format: int32
+        primeira:
+          type: boolean
+        ultima:
+          type: boolean
     RespostaPaginadaDtoSessaoCaixaResumoResponseDto:
       type: object
       properties:
@@ -3544,9 +5819,13 @@ components:
           type: string
           format: uuid
           description: Identificador da sessão
-        terminalId:
+        caixaId:
           type: string
-          description: Terminal da sessão
+          format: uuid
+          description: Caixa da sessão
+        caixaNome:
+          type: string
+          description: Nome do caixa da sessão
         operadorUsuarioId:
           type: string
           format: uuid
@@ -3607,6 +5886,155 @@ components:
           type: string
           format: date-time
           description: Última atualização
+    PedidoCaixaResumoResponseDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador do pedido
+        numero:
+          type: integer
+          format: int64
+          description: Número sequencial do pedido no estabelecimento
+        sessaoCaixaId:
+          type: string
+          format: uuid
+          description: Sessão de caixa vinculada
+        operadorUsuarioId:
+          type: string
+          format: uuid
+          description: Operador que abriu o pedido
+        operadorNome:
+          type: string
+          description: Nome do operador
+        status:
+          type: string
+          description: Status atual do pedido
+          enum:
+          - EM_ATENDIMENTO
+          - AGUARDANDO_MAQUINA
+          - AGUARDANDO_PAGAMENTO
+          - PAGAMENTO_PARCIAL
+          - CONCLUIDO
+          - CANCELADO
+          - ESTORNADO
+        canal:
+          type: string
+          description: Canal do pedido
+          enum:
+          - BALCAO
+          - MESA
+          - RETIRADA
+          - DELIVERY
+        identificadorAtendimento:
+          type: string
+          description: "Rótulo de atendimento (ex.: Mesa 04)"
+        subtotal:
+          type: number
+          description: Subtotal dos itens
+        desconto:
+          type: number
+          description: Desconto efetivamente aprovado e aplicado
+        total:
+          type: number
+          description: Total líquido do pedido
+        totalPago:
+          type: number
+          description: Total já pago com status APROVADO
+        saldoRestante:
+          type: number
+          description: Saldo restante para concluir o pedido
+        statusDesconto:
+          type: string
+          description: Status do fluxo de desconto
+          enum:
+          - NENHUM
+          - PENDENTE_AUTORIZACAO
+          - APROVADO
+          - NEGADO
+        tipoDesconto:
+          type: string
+          description: Tipo do desconto solicitado/aplicado
+          enum:
+          - PERCENTUAL
+          - VALOR
+        valorDescontoInformado:
+          type: number
+          description: Valor informado para o desconto (% ou R$)
+        descontoSolicitado:
+          type: number
+          description: Valor em R$ do desconto solicitado aguardando aprovação
+        quantidadeItens:
+          type: integer
+          format: int32
+          description: Quantidade de linhas de itens no pedido
+        criadoEm:
+          type: string
+          format: date-time
+          description: Data/hora de criação
+        atualizadoEm:
+          type: string
+          format: date-time
+          description: Data/hora da última atualização
+        concluidoEm:
+          type: string
+          format: date-time
+          description: Data/hora de conclusão
+        canceladoEm:
+          type: string
+          format: date-time
+          description: Data/hora de cancelamento
+        estornadoEm:
+          type: string
+          format: date-time
+          description: Data/hora de estorno
+    RespostaPaginadaDtoPedidoCaixaResumoResponseDto:
+      type: object
+      properties:
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/PedidoCaixaResumoResponseDto"
+        pagina:
+          type: integer
+          format: int32
+        tamanho:
+          type: integer
+          format: int32
+        totalItens:
+          type: integer
+          format: int64
+        totalPaginas:
+          type: integer
+          format: int32
+        primeira:
+          type: boolean
+        ultima:
+          type: boolean
+    RespostaPaginadaDtoCaixaResponseDto:
+      type: object
+      properties:
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/CaixaResponseDto"
+        pagina:
+          type: integer
+          format: int32
+        tamanho:
+          type: integer
+          format: int32
+        totalItens:
+          type: integer
+          format: int64
+        totalPaginas:
+          type: integer
+          format: int32
+        primeira:
+          type: boolean
+        ultima:
+          type: boolean
     AuditoriaCaixaResponseDto:
       type: object
       properties:

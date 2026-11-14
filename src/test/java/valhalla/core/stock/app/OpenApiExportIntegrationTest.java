@@ -46,8 +46,14 @@ class OpenApiExportIntegrationTest {
                 .contains("/caixa/sessoes/{id}/fechamento:")
                 .contains("/caixa/sessoes/{id}/resolucao-divergencia:")
                 .contains("/caixa/auditoria:")
+                .contains("/caixa/terminais/mercado-pago:")
+                .contains("/caixa/terminais/{id}/modo-operacao:")
+                .contains("/caixa/pedidos/{pedidoId}/pagamentos/{pagamentoId}/cancelamento-point:")
+                .contains("/caixa/pedidos/{pedidoId}/pagamentos/{pagamentoId}/sincronizar:")
+                .contains("/webhooks/mercado-pago/point:")
                 .contains("/auth/csrf:")
-                .contains("csrfTokenHeader:");
+                .contains("csrfTokenHeader:")
+                .doesNotContain("/dev/mercado-pago/point/");
 
         String caminhoDeExportacao = System.getProperty("openapi.export.path");
         if (caminhoDeExportacao != null && !caminhoDeExportacao.isBlank()) {

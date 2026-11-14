@@ -23,13 +23,17 @@ import valhalla.core.stock.app.modules.caixa.exception.CaixaEstadoInvalidoExcept
 import valhalla.core.stock.app.modules.caixa.exception.CaixaJaExisteException;
 import valhalla.core.stock.app.modules.caixa.exception.ConfiguracaoCaixaInvalidaException;
 import valhalla.core.stock.app.modules.caixa.exception.EstoqueInsuficientePedidoException;
+import valhalla.core.stock.app.modules.caixa.exception.IntegracaoMercadoPagoException;
 import valhalla.core.stock.app.modules.caixa.exception.PagamentoPendenteFechamentoException;
 import valhalla.core.stock.app.modules.caixa.exception.PedidoEstadoInvalidoException;
+import valhalla.core.stock.app.modules.caixa.exception.RateLimitExcedidoException;
 import valhalla.core.stock.app.modules.caixa.exception.SaldoInsuficienteCaixaException;
 import valhalla.core.stock.app.modules.caixa.exception.SessaoCaixaEstadoInvalidoException;
 import valhalla.core.stock.app.modules.caixa.exception.SessaoCaixaJaAbertaException;
 import valhalla.core.stock.app.modules.caixa.exception.TaxaPagamentoJaExisteException;
 import valhalla.core.stock.app.modules.caixa.exception.TerminalCaixaJaExisteException;
+import valhalla.core.stock.app.modules.caixa.exception.TerminalOcupadoPointException;
+import valhalla.core.stock.app.modules.caixa.exception.WebhookAssinaturaInvalidaException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaJaExisteException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaPossuiProdutosException;
 import valhalla.core.stock.app.modules.estoque.exception.ProdutoPossuiMovimentacoesException;
@@ -235,6 +239,37 @@ public class GlobalExceptionHandler {
                 exception.getMessage(),
                 Map.of("pagamentosPendentes", pendencias)
         );
+    }
+
+    @ExceptionHandler(TerminalOcupadoPointException.class)
+    public ResponseEntity<ApiErrorResponse> handleTerminalOcupadoPoint(
+            TerminalOcupadoPointException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(IntegracaoMercadoPagoException.class)
+    public ResponseEntity<ApiErrorResponse> handleIntegracaoMercadoPago(
+            IntegracaoMercadoPagoException exception
+    ) {
+        HttpStatus status = exception.getHttpStatus() != null
+                ? exception.getHttpStatus()
+                : HttpStatus.BAD_GATEWAY;
+        return buildResponse(status, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(RateLimitExcedidoException.class)
+    public ResponseEntity<ApiErrorResponse> handleRateLimitExcedido(
+            RateLimitExcedidoException exception
+    ) {
+        return buildResponse(HttpStatus.TOO_MANY_REQUESTS, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(WebhookAssinaturaInvalidaException.class)
+    public ResponseEntity<ApiErrorResponse> handleWebhookAssinaturaInvalida(
+            WebhookAssinaturaInvalidaException exception
+    ) {
+        return buildResponse(HttpStatus.UNAUTHORIZED, exception.getMessage(), Map.of());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

@@ -1,6 +1,8 @@
 package valhalla.core.stock.app.modules.caixa.repository;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import valhalla.core.stock.app.modules.caixa.entity.TerminalCaixaEntity;
@@ -11,6 +13,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface TerminalCaixaRepository extends JpaRepository<TerminalCaixaEntity, UUID> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select t from TerminalCaixaEntity t where t.id = :id")
+    Optional<TerminalCaixaEntity> buscarParaAtualizacao(@Param("id") UUID id);
 
     List<TerminalCaixaEntity> findAllByCaixaIdOrderByNomeAsc(UUID caixaId);
 

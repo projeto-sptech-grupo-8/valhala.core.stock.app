@@ -36,6 +36,7 @@ import valhalla.core.stock.app.modules.caixa.dto.PedidoCaixaResumoResponseDto;
 import valhalla.core.stock.app.modules.caixa.dto.RegistrarPagamentoPedidoRequestDto;
 import valhalla.core.stock.app.modules.caixa.entity.CanalPedidoCaixa;
 import valhalla.core.stock.app.modules.caixa.entity.StatusPedidoCaixa;
+import valhalla.core.stock.app.modules.caixa.service.OrquestradorPagamentoPointService;
 import valhalla.core.stock.app.modules.caixa.service.PedidoCaixaService;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
@@ -54,9 +55,14 @@ import java.util.UUID;
 public class PedidoCaixaController {
 
     private final PedidoCaixaService pedidoCaixaService;
+    private final OrquestradorPagamentoPointService orquestradorPagamentoPointService;
 
-    public PedidoCaixaController(PedidoCaixaService pedidoCaixaService) {
+    public PedidoCaixaController(
+            PedidoCaixaService pedidoCaixaService,
+            OrquestradorPagamentoPointService orquestradorPagamentoPointService
+    ) {
         this.pedidoCaixaService = pedidoCaixaService;
+        this.orquestradorPagamentoPointService = orquestradorPagamentoPointService;
     }
 
     @PostMapping
@@ -331,6 +337,50 @@ public class PedidoCaixaController {
             @Valid @RequestBody ConciliarPagamentoPedidoRequestDto requestDto
     ) {
         return ResponseEntity.ok(pedidoCaixaService.conciliarPagamento(pedidoId, pagamentoId, requestDto));
+    }
+
+    @PostMapping("/{pedidoId}/pagamentos/{pagamentoId}/cancelamento-point")
+    @SecurityRequirement(name = "csrfTokenHeader")
+    @Operation(
+            summary = "Cancelar cobrança pendente na maquininha Point",
+            description = "Solicita o cancelamento da Order na API Point do Mercado Pago, libera a reserva de estoque e desbloqueia o terminal."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Solicitação de cancelamento processada."),
+            @ApiResponse(responseCode = "404", description = "Pedido ou pagamento não encontrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "Cobrança não pode mais ser cancelada (ex.: já paga).",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "502", description = "Falha de comunicação com o Mercado Pago.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    public ResponseEntity<PedidoCaixaDetalheResponseDto> cancelarCobrancaPoint(
+            @PathVariable("pedidoId") UUID pedidoId,
+            @PathVariable("pagamentoId") UUID pagamentoId
+    ) {
+        return ResponseEntity.ok(orquestradorPagamentoPointService.cancelarCobrancaPoint(pedidoId, pagamentoId));
+    }
+
+    @PostMapping("/{pedidoId}/pagamentos/{pagamentoId}/sincronizar")
+    @SecurityRequirement(name = "csrfTokenHeader")
+    @Operation(
+            summary = "Sincronizar pagamento Point com a API do Mercado Pago",
+            description = "Consulta o status atualizado da Order no Mercado Pago e aplica a transição no pagamento e no estoque."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Sincronização concluída."),
+            @ApiResponse(responseCode = "404", description = "Pedido ou pagamento não encontrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "Pagamento inválido para sincronização Point ou estoque insuficiente.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "502", description = "Falha de comunicação com o Mercado Pago.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    public ResponseEntity<PedidoCaixaDetalheResponseDto> sincronizarCobrancaPoint(
+            @PathVariable("pedidoId") UUID pedidoId,
+            @PathVariable("pagamentoId") UUID pagamentoId
+    ) {
+        return ResponseEntity.ok(orquestradorPagamentoPointService.sincronizarCobrancaPoint(pedidoId, pagamentoId));
     }
 
     @PostMapping("/{id}/estorno")

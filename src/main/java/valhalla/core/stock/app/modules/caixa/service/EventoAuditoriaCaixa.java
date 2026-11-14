@@ -25,6 +25,12 @@ public final class EventoAuditoriaCaixa {
     public static final String DESCONTO_NEGADO = "DESCONTO_NEGADO";
     public static final String DESCONTO_REMOVIDO = "DESCONTO_REMOVIDO";
     public static final String PAGAMENTO_REGISTRADO = "PAGAMENTO_REGISTRADO";
+    public static final String PAGAMENTO_POINT_ENVIADO = "PAGAMENTO_POINT_ENVIADO";
+    public static final String PAGAMENTO_POINT_APROVADO = "PAGAMENTO_POINT_APROVADO";
+    public static final String PAGAMENTO_POINT_RECUSADO = "PAGAMENTO_POINT_RECUSADO";
+    public static final String PAGAMENTO_POINT_EXPIRADO = "PAGAMENTO_POINT_EXPIRADO";
+    public static final String PAGAMENTO_POINT_FALHOU = "PAGAMENTO_POINT_FALHOU";
+    public static final String PAGAMENTO_POINT_CANCELAMENTO_SOLICITADO = "PAGAMENTO_POINT_CANCELAMENTO_SOLICITADO";
     public static final String CONCILIACAO_MANUAL = "CONCILIACAO_MANUAL";
     public static final String PAGAMENTO_CANCELADO = "PAGAMENTO_CANCELADO";
     public static final String PAGAMENTO_ESTORNADO = "PAGAMENTO_ESTORNADO";

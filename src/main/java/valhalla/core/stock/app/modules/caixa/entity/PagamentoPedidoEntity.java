@@ -1,5 +1,6 @@
 package valhalla.core.stock.app.modules.caixa.entity;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -13,6 +14,8 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -67,6 +70,21 @@ public class PagamentoPedidoEntity {
     @Column(name = "provedor", nullable = false, length = 30)
     private String provedor = "INTERNO";
 
+    @Column(name = "metodo_pagamento", length = 40)
+    private String metodoPagamento;
+
+    @Column(name = "referencia_externa", length = 150)
+    private String referenciaExterna;
+
+    @Column(name = "order_externa_id", length = 100)
+    private String orderExternaId;
+
+    @Column(name = "payment_externo_id", length = 100)
+    private String paymentExternoId;
+
+    @Column(name = "status_detalhe", length = 100)
+    private String statusDetalhe;
+
     @Column(name = "valor", nullable = false, precision = 12, scale = 2)
     private BigDecimal valor;
 
@@ -94,6 +112,10 @@ public class PagamentoPedidoEntity {
 
     @Column(name = "comprovante_referencia", length = 255)
     private String comprovanteReferencia;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "comprovante_dados")
+    private JsonNode comprovanteDados;
 
     @Column(name = "motivo_cancelamento", columnDefinition = "TEXT")
     private String motivoCancelamento;

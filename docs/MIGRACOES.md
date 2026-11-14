@@ -191,6 +191,15 @@ Antes de aplicar a V13 em um banco existente, confira se há valores de `pedido.
 
 Antes de aplicar a V14, confira se as sessões `FECHADAS` têm `fechada_por_usuario_id` preenchido e referenciando um usuário existente. O `CHECK` já exige o preenchimento; a nova FK valida a referência.
 
+### V19 (Fase 2 — Integração Mercado Pago Point Smart 2)
+
+A V19 realiza os ajustes complementares de banco de dados para a operação completa da Fase 2:
+
+1. **Origem de movimentação de estoque:** amplia `ck_movimentacao_estoque_origem` em `movimentacao_estoque` para aceitar `'PEDIDO'` (baixas síncronas no fechamento do pedido), mantendo `'USUARIO'`, `'SISTEMA'` e `'WEBHOOK'`.
+2. **Índice de reconciliação ativa Point:** cria `idx_pagamento_point_reconciliacao` em `pagamento_pedido(provedor, status, solicitado_em)` para acelerar a consulta periódica do scheduler sobre cobranças `MERCADO_PAGO` pendentes.
+
+O `script.sql` foi mantido em paridade com a V19.
+
 ## Próximas alterações
 
 Não edite uma migração já executada em ambientes compartilhados. Crie um novo arquivo SQL com numeração crescente:

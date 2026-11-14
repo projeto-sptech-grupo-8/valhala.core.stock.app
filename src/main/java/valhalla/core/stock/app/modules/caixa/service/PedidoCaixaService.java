@@ -9,6 +9,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import valhalla.core.stock.app.modules.caixa.dto.CancelarPedidoCaixaRequestDto;
 import valhalla.core.stock.app.modules.caixa.dto.ConciliarPagamentoPedidoRequestDto;
 import valhalla.core.stock.app.modules.caixa.dto.DecisaoDescontoPedidoRequestDto;
@@ -23,6 +24,7 @@ import valhalla.core.stock.app.modules.caixa.dto.PedidoCaixaResumoResponseDto;
 import valhalla.core.stock.app.modules.caixa.dto.RegistrarPagamentoPedidoRequestDto;
 import valhalla.core.stock.app.modules.caixa.entity.CanalPedidoCaixa;
 import valhalla.core.stock.app.modules.caixa.entity.ConfiguracaoCaixaEntity;
+import valhalla.core.stock.app.modules.caixa.entity.FormaPagamentoCaixa;
 import valhalla.core.stock.app.modules.caixa.entity.ItemPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.entity.PagamentoPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.entity.PedidoEntity;
@@ -31,6 +33,7 @@ import valhalla.core.stock.app.modules.caixa.entity.SessaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.entity.StatusDescontoPedido;
 import valhalla.core.stock.app.modules.caixa.entity.StatusPagamentoPedido;
 import valhalla.core.stock.app.modules.caixa.entity.StatusPedidoCaixa;
+import valhalla.core.stock.app.modules.caixa.entity.StatusReservaEstoque;
 import valhalla.core.stock.app.modules.caixa.entity.StatusSessaoCaixa;
 import valhalla.core.stock.app.modules.caixa.entity.TipoDescontoPedido;
 import valhalla.core.stock.app.modules.caixa.exception.PedidoEstadoInvalidoException;
@@ -92,6 +95,9 @@ public class PedidoCaixaService {
     private final AuditoriaCaixaService auditoriaCaixaService;
     private final ContextoCaixa contextoCaixa;
     private final List<ProcessadorPagamento> processadoresPagamento;
+    private final OrquestradorPagamentoPointService orquestradorPagamentoPointService;
+    private final ReservaEstoqueService reservaEstoqueService;
+    private final TransactionTemplate transactionTemplate;
     private final BusinessEventLogger businessEventLogger;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -109,6 +115,9 @@ public class PedidoCaixaService {
             AuditoriaCaixaService auditoriaCaixaService,
             ContextoCaixa contextoCaixa,
             List<ProcessadorPagamento> processadoresPagamento,
+            OrquestradorPagamentoPointService orquestradorPagamentoPointService,
+            ReservaEstoqueService reservaEstoqueService,
+            TransactionTemplate transactionTemplate,
             BusinessEventLogger businessEventLogger
     ) {
         this.pedidoRepository = pedidoRepository;
@@ -124,6 +133,9 @@ public class PedidoCaixaService {
         this.auditoriaCaixaService = auditoriaCaixaService;
         this.contextoCaixa = contextoCaixa;
         this.processadoresPagamento = processadoresPagamento;
+        this.orquestradorPagamentoPointService = orquestradorPagamentoPointService;
+        this.reservaEstoqueService = reservaEstoqueService;
+        this.transactionTemplate = transactionTemplate;
         this.businessEventLogger = businessEventLogger;
     }
 
@@ -796,7 +808,6 @@ public class PedidoCaixaService {
         return montarDetalhe(pedidoSalvo, itens, pagamentos);
     }
 
-    @Transactional
     @PreAuthorize("""
             @permissionAuthorizationService.hasPermission(
                 'CAIXA_OPERAR',
@@ -804,6 +815,26 @@ public class PedidoCaixaService {
             )
             """)
     public PedidoCaixaDetalheResponseDto registrarPagamento(
+            UUID id,
+            RegistrarPagamentoPedidoRequestDto dto
+    ) {
+        if (deveUsarIntegracaoPoint(dto)) {
+            return orquestradorPagamentoPointService.iniciarPagamentoPoint(id, dto);
+        }
+        return transactionTemplate.execute(status -> registrarPagamentoSincrono(id, dto));
+    }
+
+    private boolean deveUsarIntegracaoPoint(RegistrarPagamentoPedidoRequestDto dto) {
+        if (dto.forma() == FormaPagamentoCaixa.DINHEIRO || Boolean.TRUE.equals(dto.contingenciaManual())) {
+            return false;
+        }
+        UUID estabelecimentoId = contextoCaixa.estabelecimentoId();
+        return configuracaoCaixaRepository.findByEstabelecimentoId(estabelecimentoId)
+                .map(ConfiguracaoCaixaEntity::isPointHabilitado)
+                .orElse(false);
+    }
+
+    private PedidoCaixaDetalheResponseDto registrarPagamentoSincrono(
             UUID id,
             RegistrarPagamentoPedidoRequestDto dto
     ) {
@@ -972,6 +1003,15 @@ public class PedidoCaixaService {
 
         PagamentoPedidoEntity pagamentoSalvo = pagamentoPedidoRepository.saveAndFlush(pagamento);
 
+        if (pagamentoSalvo.getStatus() == StatusPagamentoPedido.CANCELADO
+                && "MERCADO_PAGO".equals(pagamentoSalvo.getProvedor())) {
+            reservaEstoqueService.liberarReservasAtivasDoPedido(
+                    pedido.getId(),
+                    StatusReservaEstoque.LIBERADA,
+                    motivo
+            );
+        }
+
         auditoriaCaixaService.registrar(
                 estabelecimentoId,
                 usuarioId,
@@ -1107,7 +1147,7 @@ public class PedidoCaixaService {
         );
 
         if (totalAprovado.compareTo(pedido.getTotal()) >= 0 && pedido.getTotal().compareTo(ZERO) > 0) {
-            movimentacaoEstoqueService.baixarEstoquePedido(pedido, itens, operadorUsuarioId);
+            reservaEstoqueService.efetivarReservasOuBaixarEstoque(pedido, itens, operadorUsuarioId, "PEDIDO");
             pedido.setStatus(StatusPedidoCaixa.CONCLUIDO);
             pedido.setConcluidoEm(LocalDateTime.now());
             businessEventLogger.success("cash.order.completed", "cash_order", pedido.getId());

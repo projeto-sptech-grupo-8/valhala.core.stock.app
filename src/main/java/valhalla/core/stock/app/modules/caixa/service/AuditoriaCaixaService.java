@@ -91,6 +91,46 @@ public class AuditoriaCaixaService {
             JsonNode dadosAnteriores,
             JsonNode dadosNovos
     ) {
+        registrarComOrigem(
+                usuarioId == null ? OrigemAuditoriaCaixa.SISTEMA : OrigemAuditoriaCaixa.API,
+                estabelecimentoId,
+                usuarioId,
+                sessaoCaixaId,
+                tipoEvento,
+                entidade,
+                entidadeId,
+                descricao,
+                valor,
+                motivo,
+                pedidoId,
+                pedidoIdentificador,
+                pagamentoPedidoId,
+                autorizadoPorUsuarioId,
+                autorizadoPorNome,
+                dadosAnteriores,
+                dadosNovos
+        );
+    }
+
+    public void registrarComOrigem(
+            OrigemAuditoriaCaixa origem,
+            UUID estabelecimentoId,
+            UUID usuarioId,
+            UUID sessaoCaixaId,
+            String tipoEvento,
+            String entidade,
+            String entidadeId,
+            String descricao,
+            BigDecimal valor,
+            String motivo,
+            UUID pedidoId,
+            String pedidoIdentificador,
+            UUID pagamentoPedidoId,
+            UUID autorizadoPorUsuarioId,
+            String autorizadoPorNome,
+            JsonNode dadosAnteriores,
+            JsonNode dadosNovos
+    ) {
         AuditoriaCaixaEntity auditoria = new AuditoriaCaixaEntity();
         auditoria.setEstabelecimentoId(estabelecimentoId);
         auditoria.setUsuarioId(usuarioId);
@@ -107,7 +147,9 @@ public class AuditoriaCaixaService {
         auditoria.setAutorizadoPorNome(autorizadoPorNome);
         auditoria.setDadosAnteriores(dadosAnteriores);
         auditoria.setDadosNovos(dadosNovos);
-        auditoria.setOrigem(usuarioId == null ? OrigemAuditoriaCaixa.SISTEMA : OrigemAuditoriaCaixa.API);
+        auditoria.setOrigem(origem != null
+                ? origem
+                : (usuarioId == null ? OrigemAuditoriaCaixa.SISTEMA : OrigemAuditoriaCaixa.API));
 
         if (valor != null) {
             auditoria.setValor(valor.abs().setScale(2, RoundingMode.HALF_UP));

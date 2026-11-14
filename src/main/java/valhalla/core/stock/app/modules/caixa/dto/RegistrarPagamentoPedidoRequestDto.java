@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Size;
 import valhalla.core.stock.app.modules.caixa.entity.FormaPagamentoCaixa;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 public record RegistrarPagamentoPedidoRequestDto(
         @NotNull(message = "A forma de pagamento é obrigatória")
@@ -38,6 +39,22 @@ public record RegistrarPagamentoPedidoRequestDto(
 
         @Size(max = 255, message = "A referência do comprovante deve ter no máximo 255 caracteres")
         @Schema(description = "NSU, código de autorização ou referência do comprovante em pagamento manual", nullable = true)
-        String comprovanteReferencia
+        String comprovanteReferencia,
+
+        @Schema(description = "Identificador do terminal cadastrado no caixa (obrigatório para cobrança integrada na Point Smart 2)", nullable = true)
+        UUID terminalCaixaId,
+
+        @Schema(description = "Quando true e permitirPagamentoManual=true, força registro em contingência manual mesmo com a Point habilitada", nullable = true)
+        Boolean contingenciaManual
 ) {
+    public RegistrarPagamentoPedidoRequestDto(
+            FormaPagamentoCaixa forma,
+            BigDecimal valor,
+            Integer parcelas,
+            BigDecimal valorRecebido,
+            String chaveIdempotencia,
+            String comprovanteReferencia
+    ) {
+        this(forma, valor, parcelas, valorRecebido, chaveIdempotencia, comprovanteReferencia, null, null);
+    }
 }

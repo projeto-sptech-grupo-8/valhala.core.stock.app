@@ -160,3 +160,20 @@ JOIN produto d ON d.estabelecimento_id = e.id AND d.sku = r.drink
 JOIN produto i ON i.estabelecimento_id = e.id AND i.sku = r.ingrediente
 WHERE e.cnpj = '00000000000191'
 ON CONFLICT (drink_id, produto_id) DO NOTHING;
+
+-- ─── Taxas de referência ativas para simulação em ambiente dev ───
+INSERT INTO taxa_pagamento (estabelecimento_id, forma, parcelas, taxa_percentual, taxa_fixa, repassar_ao_cliente, ativo)
+SELECT e.id, t.forma, t.parcelas, t.taxa_percentual, 0.00, NULL, TRUE
+FROM estabelecimento e
+CROSS JOIN (VALUES
+    ('DEBITO',  1,  1.9900),
+    ('PIX',     1,  0.4900),
+    ('CREDITO', 1,  4.9800),
+    ('CREDITO', 2,  7.9000),
+    ('CREDITO', 3,  9.3000),
+    ('CREDITO', 4, 10.6500),
+    ('CREDITO', 5, 11.9500),
+    ('CREDITO', 6, 13.2000)
+) AS t(forma, parcelas, taxa_percentual)
+WHERE e.cnpj = '00000000000191'
+ON CONFLICT (estabelecimento_id, forma, parcelas) DO NOTHING;
