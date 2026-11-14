@@ -31,6 +31,9 @@ FROM perfil p
 JOIN estabelecimento e ON e.id = p.estabelecimento_id AND e.cnpj = '00000000000191'
 JOIN (VALUES
     ('Caixa',      'VISUALIZAR_ESTOQUE'),
+    ('Caixa',      'CAIXA_OPERAR'),
+    ('Caixa',      'CAIXA_FECHAR'),
+    ('Caixa',      'CAIXA_VISUALIZAR'),
     ('Estoquista', 'VISUALIZAR_ESTOQUE'),
     ('Estoquista', 'MOVIMENTAR_ESTOQUE'),
     ('Estoquista', 'GERENCIAR_ESTOQUE'),
@@ -116,7 +119,9 @@ ON CONFLICT (estabelecimento_id, sku) DO NOTHING;
 -- Só gera movimentação para estoques criados agora, preservando o histórico real em reexecuções.
 WITH novos AS (
     INSERT INTO estoque (produto_id, quantidade_atual, estoque_minimo)
-    SELECT pr.id, s.qtd, s.minimo
+    SELECT pr.id,
+           s.qtd * COALESCE(pr.volume_embalagem_ml, 1),
+           s.minimo * COALESCE(pr.volume_embalagem_ml, 1)
     FROM (VALUES
         ('BEB-001', 48, 24), ('BEB-002', 8, 36), ('BEB-003', 36, 24), ('BEB-004', 24, 12),
         ('BEB-005', 12, 6),  ('BEB-006', 18, 6), ('BEB-007', 4, 6),   ('BEB-008', 3, 6),
