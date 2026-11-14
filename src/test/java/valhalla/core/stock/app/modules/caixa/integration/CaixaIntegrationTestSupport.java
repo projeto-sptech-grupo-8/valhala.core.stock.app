@@ -14,23 +14,25 @@ import valhalla.core.stock.app.modules.accesscontrol.entity.FuncionalidadeEntity
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.repository.FuncionalidadeRepository;
 import valhalla.core.stock.app.modules.accesscontrol.repository.ProfileRepository;
-import valhalla.core.stock.app.modules.caixa.entity.AuditoriaCaixaEntity;
-import valhalla.core.stock.app.modules.caixa.entity.CaixaEntity;
-import valhalla.core.stock.app.modules.caixa.entity.ConfiguracaoCaixaEntity;
-import valhalla.core.stock.app.modules.caixa.entity.PagamentoPedidoEntity;
-import valhalla.core.stock.app.modules.caixa.entity.SessaoCaixaEntity;
-import valhalla.core.stock.app.modules.caixa.entity.TerminalCaixaEntity;
-import valhalla.core.stock.app.modules.caixa.repository.AuditoriaCaixaRepository;
-import valhalla.core.stock.app.modules.caixa.repository.CaixaRepository;
-import valhalla.core.stock.app.modules.caixa.repository.ConfiguracaoCaixaRepository;
-import valhalla.core.stock.app.modules.caixa.repository.ItemPedidoRepository;
-import valhalla.core.stock.app.modules.caixa.repository.MovimentacaoCaixaRepository;
-import valhalla.core.stock.app.modules.caixa.repository.PagamentoPedidoRepository;
-import valhalla.core.stock.app.modules.caixa.repository.PedidoRepository;
-import valhalla.core.stock.app.modules.caixa.repository.SequenciaDocumentoRepository;
-import valhalla.core.stock.app.modules.caixa.repository.SessaoCaixaRepository;
-import valhalla.core.stock.app.modules.caixa.repository.TaxaPagamentoRepository;
-import valhalla.core.stock.app.modules.caixa.repository.TerminalCaixaRepository;
+import valhalla.core.stock.app.modules.caixa.sessao.entity.AuditoriaCaixaEntity;
+import valhalla.core.stock.app.modules.caixa.configuracao.entity.CaixaEntity;
+import valhalla.core.stock.app.modules.caixa.configuracao.entity.ConfiguracaoCaixaEntity;
+import valhalla.core.stock.app.modules.caixa.configuracao.enums.FormaPagamentoCaixa;
+import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity;
+import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPagamentoPedido;
+import valhalla.core.stock.app.modules.caixa.sessao.entity.SessaoCaixaEntity;
+import valhalla.core.stock.app.modules.caixa.configuracao.entity.TerminalCaixaEntity;
+import valhalla.core.stock.app.modules.caixa.sessao.repository.AuditoriaCaixaRepository;
+import valhalla.core.stock.app.modules.caixa.configuracao.repository.CaixaRepository;
+import valhalla.core.stock.app.modules.caixa.configuracao.repository.ConfiguracaoCaixaRepository;
+import valhalla.core.stock.app.modules.caixa.pedido.repository.ItemPedidoRepository;
+import valhalla.core.stock.app.modules.caixa.sessao.repository.MovimentacaoCaixaRepository;
+import valhalla.core.stock.app.modules.caixa.pedido.repository.PagamentoPedidoRepository;
+import valhalla.core.stock.app.modules.caixa.pedido.repository.PedidoRepository;
+import valhalla.core.stock.app.modules.caixa.pedido.repository.SequenciaDocumentoRepository;
+import valhalla.core.stock.app.modules.caixa.sessao.repository.SessaoCaixaRepository;
+import valhalla.core.stock.app.modules.caixa.configuracao.repository.TaxaPagamentoRepository;
+import valhalla.core.stock.app.modules.caixa.configuracao.repository.TerminalCaixaRepository;
 import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
 import valhalla.core.stock.app.modules.estoque.entity.CategoriaEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ComposicaoDrinkEntity;
@@ -255,10 +257,8 @@ abstract class CaixaIntegrationTestSupport {
         pagamento.setId(UUID.randomUUID());
         pagamento.setPedidoId(UUID.randomUUID());
         pagamento.setSessaoCaixaId(sessaoCaixaId);
-        pagamento.setForma(valhalla.core.stock.app.modules.caixa.entity.FormaPagamentoCaixa
-                .valueOf(forma));
-        pagamento.setStatus(valhalla.core.stock.app.modules.caixa.entity.StatusPagamentoPedido
-                .valueOf(status));
+        pagamento.setForma(FormaPagamentoCaixa.valueOf(forma));
+        pagamento.setStatus(StatusPagamentoPedido.valueOf(status));
         pagamento.setValor(new BigDecimal(valor));
         return pagamentoPedidoRepository.saveAndFlush(pagamento);
     }

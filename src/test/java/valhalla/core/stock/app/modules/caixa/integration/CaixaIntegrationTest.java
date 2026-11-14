@@ -7,12 +7,12 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
-import valhalla.core.stock.app.modules.caixa.entity.AuditoriaCaixaEntity;
-import valhalla.core.stock.app.modules.caixa.entity.CaixaEntity;
-import valhalla.core.stock.app.modules.caixa.entity.ConfiguracaoCaixaEntity;
-import valhalla.core.stock.app.modules.caixa.entity.PagamentoPedidoEntity;
-import valhalla.core.stock.app.modules.caixa.entity.SessaoCaixaEntity;
-import valhalla.core.stock.app.modules.caixa.entity.StatusPagamentoPedido;
+import valhalla.core.stock.app.modules.caixa.sessao.entity.AuditoriaCaixaEntity;
+import valhalla.core.stock.app.modules.caixa.configuracao.entity.CaixaEntity;
+import valhalla.core.stock.app.modules.caixa.configuracao.entity.ConfiguracaoCaixaEntity;
+import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity;
+import valhalla.core.stock.app.modules.caixa.sessao.entity.SessaoCaixaEntity;
+import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPagamentoPedido;
 import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
 
 import java.util.List;
