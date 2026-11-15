@@ -6,7 +6,10 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.io.ClassPathResource;
 
 import javax.sql.DataSource;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,7 +42,13 @@ class DemoDataSeederTest {
     }
 
     @Test
-    void deveEmpacotarOScriptDeDemonstracao() {
-        assertTrue(new ClassPathResource("db/demo/dados_demonstracao.sql").exists());
+    void deveEmpacotarOScriptDeDemonstracao() throws IOException {
+        ClassPathResource resource = new ClassPathResource("db/demo/dados_demonstracao.sql");
+        assertTrue(resource.exists());
+
+        String sql = resource.getContentAsString(StandardCharsets.UTF_8);
+        assertFalse(sql.contains("codigo_barras"), "Não deve referenciar codigo_barras removido na V22");
+        assertTrue(sql.contains("INSERT INTO lote_estoque"), "Deve semear lotes e validades de demonstração");
+        assertTrue(sql.contains("INSERT INTO movimentacao_estoque_lote"), "Deve vincular lotes à movimentação inicial");
     }
 }
