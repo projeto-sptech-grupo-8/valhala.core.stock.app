@@ -67,7 +67,7 @@ public class ProdutoController {
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     public ResponseEntity<RespostaPaginadaDto<ProdutoResponseDto>> listarProdutos(
-            @Parameter(description = "Busca por nome, SKU ou código de barras", example = "absolut")
+            @Parameter(description = "Busca por nome ou SKU", example = "absolut")
             @RequestParam(required = false) String busca,
             @Parameter(description = "IDs das categorias", example = "1")
             @RequestParam(required = false) List<Integer> categoriaId,
@@ -101,7 +101,7 @@ public class ProdutoController {
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     public ResponseEntity<byte[]> exportarProdutos(
-            @Parameter(description = "Busca por nome, SKU ou código de barras", example = "absolut")
+            @Parameter(description = "Busca por nome ou SKU", example = "absolut")
             @RequestParam(required = false) String busca,
             @Parameter(description = "IDs das categorias", example = "1")
             @RequestParam(required = false) List<Integer> categoriaId,

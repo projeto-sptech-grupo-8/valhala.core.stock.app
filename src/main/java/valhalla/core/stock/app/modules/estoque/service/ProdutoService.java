@@ -168,8 +168,7 @@ public class ProdutoService {
         if (buscaNormalizada != null) {
             especificacao = especificacao.and((root, query, builder) -> builder.or(
                     builder.like(builder.lower(root.get("nome")), "%" + buscaNormalizada + "%"),
-                    builder.like(builder.lower(root.get("sku")), "%" + buscaNormalizada + "%"),
-                    builder.like(builder.lower(root.get("codigoBarras")), "%" + buscaNormalizada + "%")
+                    builder.like(builder.lower(root.get("sku")), "%" + buscaNormalizada + "%")
             ));
         }
         if (categoriaIds != null && !categoriaIds.isEmpty()) {
@@ -223,12 +222,10 @@ public class ProdutoService {
         produto.setCategoria(buscarCategoriaAtivaDoEstabelecimento(dto.categoriaId(), idEstabelecimento));
         produto.setSku(gerarSku(idEstabelecimento));
         produto.setNome(normalizarObrigatorio(dto.nome(), "O nome do produto não pode ficar vazio"));
-        produto.setDescricao(normalizarOpcional(dto.descricao()));
         produto.setTipo(tipo);
         produto.setUnidadeMedida(normalizarObrigatorio(dto.unidadeMedida(), "A unidade de medida não pode ficar vazia"));
         produto.setPrecoCusto(dto.precoCusto() == null ? ZERO : dto.precoCusto());
         produto.setPrecoVenda(dto.precoVenda());
-        produto.setCodigoBarras(normalizarOpcional(dto.codigoBarras()));
         produto.setFracionado(Boolean.TRUE.equals(dto.fracionado()));
         produto.setVolumeEmbalagemMl(dto.volumeEmbalagemMl());
         produto.setFardo(isFardo);

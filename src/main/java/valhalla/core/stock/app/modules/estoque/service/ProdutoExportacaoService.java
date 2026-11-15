@@ -32,8 +32,7 @@ public class ProdutoExportacaoService {
                     p -> p.tipo() == ProdutoTipo.DRINK ? null : p.precoCusto()),
             new ColunaExcel<>("Preço de Venda", FormatoCelulaExcel.MOEDA, ProdutoResponseDto::precoVenda),
             new ColunaExcel<>("Margem (%)", FormatoCelulaExcel.DECIMAL, ProdutoResponseDto::margemPercentual),
-            new ColunaExcel<>("Situação", FormatoCelulaExcel.TEXTO, p -> Boolean.TRUE.equals(p.ativo()) ? "Ativo" : "Inativo"),
-            new ColunaExcel<>("Código de Barras", FormatoCelulaExcel.TEXTO, p -> textoOuVazio(p.codigoBarras()))
+            new ColunaExcel<>("Situação", FormatoCelulaExcel.TEXTO, p -> Boolean.TRUE.equals(p.ativo()) ? "Ativo" : "Inativo")
     );
 
     private final ExportadorExcel exportadorExcel;

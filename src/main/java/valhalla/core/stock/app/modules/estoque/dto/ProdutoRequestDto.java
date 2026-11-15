@@ -41,13 +41,6 @@ public record ProdutoRequestDto(
         @Schema(description = "PADRAO quando omitido. DRINK terá a receita cadastrada em etapa posterior.", example = "PADRAO")
         ProdutoTipo tipo,
 
-        @Size(max = 45, message = "O código de barras deve ter no máximo 45 caracteres")
-        @Schema(example = "7891234567890")
-        String codigoBarras,
-
-        @Schema(example = "Vodka importada de 1 litro")
-        String descricao,
-
         @Schema(example = "false")
         Boolean fracionado,
 
@@ -87,15 +80,13 @@ public record ProdutoRequestDto(
             BigDecimal precoVenda,
             BigDecimal precoCusto,
             ProdutoTipo tipo,
-            String codigoBarras,
-            String descricao,
             Boolean fracionado,
             BigDecimal volumeEmbalagemMl,
             BigDecimal estoqueMinimo,
             BigDecimal quantidadeInicial
     ) {
-        this(nome, categoriaId, unidadeMedida, precoVenda, precoCusto, tipo, codigoBarras,
-                descricao, fracionado, volumeEmbalagemMl, estoqueMinimo, quantidadeInicial,
+        this(nome, categoriaId, unidadeMedida, precoVenda, precoCusto, tipo,
+                fracionado, volumeEmbalagemMl, estoqueMinimo, quantidadeInicial,
                 null, null, null, null, null);
     }
 
@@ -106,8 +97,6 @@ public record ProdutoRequestDto(
             BigDecimal precoVenda,
             BigDecimal precoCusto,
             ProdutoTipo tipo,
-            String codigoBarras,
-            String descricao,
             Boolean fracionado,
             BigDecimal volumeEmbalagemMl,
             BigDecimal estoqueMinimo,
@@ -116,8 +105,8 @@ public record ProdutoRequestDto(
             Integer unidadesPorFardo,
             Boolean quantidadeInicialEmFardos
     ) {
-        this(nome, categoriaId, unidadeMedida, precoVenda, precoCusto, tipo, codigoBarras,
-                descricao, fracionado, volumeEmbalagemMl, estoqueMinimo, quantidadeInicial,
+        this(nome, categoriaId, unidadeMedida, precoVenda, precoCusto, tipo,
+                fracionado, volumeEmbalagemMl, estoqueMinimo, quantidadeInicial,
                 fardo, unidadesPorFardo, quantidadeInicialEmFardos, null, null);
     }
 }

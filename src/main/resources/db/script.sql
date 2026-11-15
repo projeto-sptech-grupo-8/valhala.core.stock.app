@@ -208,9 +208,7 @@ CREATE TABLE produto (
     estabelecimento_id UUID NOT NULL,
     categoria_id INT NOT NULL,
     sku VARCHAR(45) NOT NULL,
-    codigo_barras VARCHAR(45),
     nome VARCHAR(150) NOT NULL,
-    descricao TEXT,
     tipo VARCHAR(15) NOT NULL DEFAULT 'PADRAO',
     unidade_medida VARCHAR(10) NOT NULL,
     preco_custo NUMERIC(12,2) NOT NULL DEFAULT 0,
@@ -1167,9 +1165,6 @@ CREATE INDEX idx_produto_estabelecimento
 
 CREATE INDEX idx_produto_categoria
     ON produto(categoria_id);
-
-CREATE INDEX idx_produto_codigo_barras
-    ON produto(codigo_barras);
 
 CREATE INDEX idx_composicao_drink_drink
     ON composicao_drink(drink_id);
