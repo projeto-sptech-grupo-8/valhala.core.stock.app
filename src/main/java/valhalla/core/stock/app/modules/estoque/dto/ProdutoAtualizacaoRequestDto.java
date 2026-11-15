@@ -21,9 +21,6 @@ public record ProdutoAtualizacaoRequestDto(
         BigDecimal precoVenda,
         @DecimalMin(value = "0.0", message = "O preço de custo não pode ser negativo")
         BigDecimal precoCusto,
-        @Size(max = 45, message = "O código de barras deve ter no máximo 45 caracteres")
-        String codigoBarras,
-        String descricao,
         Boolean fracionado,
         @Positive(message = "O volume da embalagem deve ser maior que zero")
         BigDecimal volumeEmbalagemMl,
@@ -40,22 +37,19 @@ public record ProdutoAtualizacaoRequestDto(
             String unidadeMedida,
             BigDecimal precoVenda,
             BigDecimal precoCusto,
-            String codigoBarras,
-            String descricao,
             Boolean fracionado,
             BigDecimal volumeEmbalagemMl,
             BigDecimal estoqueMinimo,
             Boolean ativo
     ) {
-        this(nome, categoriaId, unidadeMedida, precoVenda, precoCusto, codigoBarras,
-                descricao, fracionado, volumeEmbalagemMl, estoqueMinimo, null, null, ativo);
+        this(nome, categoriaId, unidadeMedida, precoVenda, precoCusto,
+                fracionado, volumeEmbalagemMl, estoqueMinimo, null, null, ativo);
     }
 
     @AssertTrue(message = "Informe ao menos um campo para atualização")
     public boolean isAtualizacaoValida() {
         return nome != null || categoriaId != null || unidadeMedida != null
-                || precoVenda != null || precoCusto != null || codigoBarras != null
-                || descricao != null || fracionado != null
+                || precoVenda != null || precoCusto != null || fracionado != null
                 || volumeEmbalagemMl != null || estoqueMinimo != null
                 || fardo != null || unidadesPorFardo != null || ativo != null;
     }

@@ -32,12 +32,10 @@ public final class ProdutoMapper {
                 produto.getId(),
                 produto.getSku(),
                 produto.getNome(),
-                produto.getDescricao(),
                 produto.getTipo(),
                 produto.getCategoria().getId(),
                 produto.getCategoria().getNome(),
                 produto.getUnidadeMedida(),
-                produto.getCodigoBarras(),
                 produto.getPrecoCusto(),
                 produto.getPrecoVenda(),
                 calcularMargem(produto),
@@ -77,12 +75,6 @@ public final class ProdutoMapper {
         if (atualizacao.precoCusto() != null) {
             produto.setPrecoCusto(atualizacao.precoCusto());
         }
-        if (atualizacao.codigoBarras() != null) {
-            produto.setCodigoBarras(normalizarOpcional(atualizacao.codigoBarras()));
-        }
-        if (atualizacao.descricao() != null) {
-            produto.setDescricao(normalizarOpcional(atualizacao.descricao()));
-        }
         if (atualizacao.fracionado() != null) {
             produto.setFracionado(atualizacao.fracionado());
         }
@@ -120,9 +112,5 @@ public final class ProdutoMapper {
             throw new IllegalArgumentException(mensagemErro);
         }
         return valor.trim();
-    }
-
-    private static String normalizarOpcional(String valor) {
-        return valor.isBlank() ? null : valor.trim();
     }
 }

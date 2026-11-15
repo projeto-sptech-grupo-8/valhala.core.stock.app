@@ -78,7 +78,7 @@ class ProdutoServiceTest {
 
         ProdutoResponseDto resposta = produtoService.criarProduto(new ProdutoRequestDto(
                 " Vodka Absolut 1L ", 1, "garrafa", new BigDecimal("129.90"),
-                new BigDecimal("89.90"), ProdutoTipo.PADRAO, " 7891234567890 ", null,
+                new BigDecimal("89.90"), ProdutoTipo.PADRAO,
                 true, new BigDecimal("1000"), new BigDecimal("6"), new BigDecimal("12")
         ));
 
@@ -110,7 +110,7 @@ class ProdutoServiceTest {
 
         produtoService.criarProduto(new ProdutoRequestDto(
                 "Água", 1, "un", new BigDecimal("5.00"), null, null,
-                null, null, null, null, null, null
+                null, null, null, null
         ));
 
         ArgumentCaptor<ProdutoEntity> produtoCaptor = ArgumentCaptor.forClass(ProdutoEntity.class);
@@ -126,7 +126,7 @@ class ProdutoServiceTest {
 
         assertThatThrownBy(() -> produtoService.criarProduto(new ProdutoRequestDto(
                 "Gin tônica", 1, "copo", new BigDecimal("30"), BigDecimal.ZERO,
-                ProdutoTipo.DRINK, null, null, null, null,
+                ProdutoTipo.DRINK, null, null,
                 new BigDecimal("3"), null
         )))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -140,7 +140,7 @@ class ProdutoServiceTest {
 
         assertThatThrownBy(() -> produtoService.criarProduto(new ProdutoRequestDto(
                 "Vodka Absolut", 1, "garrafa", new BigDecimal("120"), BigDecimal.ZERO,
-                ProdutoTipo.PADRAO, null, null, true, null, null, null
+                ProdutoTipo.PADRAO, true, null, null, null
         )))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Produto fracionado deve informar o volume da embalagem em mililitros");
@@ -156,7 +156,7 @@ class ProdutoServiceTest {
         when(estoqueRepository.findByProdutoId(produto.getId())).thenReturn(Optional.of(new EstoqueEntity()));
 
         assertThatThrownBy(() -> produtoService.atualizarProduto(produto.getId(), new ProdutoAtualizacaoRequestDto(
-                null, null, null, null, null, null, null, true, new BigDecimal("1000"), null, null
+                null, null, null, null, null, true, new BigDecimal("1000"), null, null
         )))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Não é permitido alterar fracionamento ou volume de produto que já possui estoque ou movimentações");
@@ -170,7 +170,6 @@ class ProdutoServiceTest {
         CategoriaEntity alimentos = categoria(estabelecimentoId, true);
         alimentos.setId(2);
         ProdutoEntity vodka = produto(estabelecimentoId, bebidas, "PRD-AAAA0001", "Vodka Absolut", ProdutoTipo.PADRAO, true);
-        vodka.setCodigoBarras("789123");
         ProdutoEntity drink = produto(estabelecimentoId, bebidas, "PRD-BBBB0002", "Moscow Mule", ProdutoTipo.DRINK, true);
         ProdutoEntity inativo = produto(estabelecimentoId, alimentos, "PRD-CCCC0003", "Amendoim", ProdutoTipo.PADRAO, false);
         autenticarNoEstabelecimento(estabelecimentoId);
@@ -287,7 +286,7 @@ class ProdutoServiceTest {
 
         ProdutoResponseDto resposta = produtoService.criarProduto(new ProdutoRequestDto(
                 "Brahma Lata 350ml", 1, "un", new BigDecimal("5.50"),
-                new BigDecimal("3.00"), ProdutoTipo.PADRAO, null, null,
+                new BigDecimal("3.00"), ProdutoTipo.PADRAO,
                 false, null, new BigDecimal("12"), new BigDecimal("2"),
                 true, 12, true
         ));
@@ -317,7 +316,7 @@ class ProdutoServiceTest {
 
         ProdutoResponseDto resposta = produtoService.criarProduto(new ProdutoRequestDto(
                 "Heineken 600ml", 1, "un", new BigDecimal("14.00"),
-                new BigDecimal("8.50"), ProdutoTipo.PADRAO, null, null,
+                new BigDecimal("8.50"), ProdutoTipo.PADRAO,
                 false, null, new BigDecimal("6"), new BigDecimal("24"),
                 false, null, false, " L2611A ", validade
         ));
@@ -338,7 +337,7 @@ class ProdutoServiceTest {
 
         assertThatThrownBy(() -> produtoService.criarProduto(new ProdutoRequestDto(
                 "Gin Tônica", 1, "copo", new BigDecimal("28.00"), BigDecimal.ZERO,
-                ProdutoTipo.DRINK, null, null, false, null, null, null,
+                ProdutoTipo.DRINK, false, null, null, null,
                 false, null, false, "LOTE-DRINK", LocalDate.of(2027, 1, 1)
         )))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -353,19 +352,19 @@ class ProdutoServiceTest {
 
         assertThatThrownBy(() -> produtoService.criarProduto(new ProdutoRequestDto(
                 "Cerveja", 1, "un", new BigDecimal("5.00"), null, ProdutoTipo.PADRAO,
-                null, null, false, null, null, null, true, null, false
+                false, null, null, null, true, null, false
         ))).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Um fardo deve possuir ao menos 2 unidades");
 
         assertThatThrownBy(() -> produtoService.criarProduto(new ProdutoRequestDto(
                 "Cerveja", 1, "un", new BigDecimal("5.00"), null, ProdutoTipo.PADRAO,
-                null, null, false, null, null, null, false, 12, false
+                false, null, null, null, false, 12, false
         ))).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Unidades por fardo só pode ser informado quando fardo estiver ativo");
 
         assertThatThrownBy(() -> produtoService.criarProduto(new ProdutoRequestDto(
                 "Gin Tônica", 1, "copo", new BigDecimal("25.00"), null, ProdutoTipo.DRINK,
-                null, null, false, null, null, null, true, 6, false
+                false, null, null, null, true, 6, false
         ))).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Drink não possui estoque próprio; informe esses dados nos produtos ingredientes");
 
@@ -377,7 +376,7 @@ class ProdutoServiceTest {
         when(estoqueRepository.findByProdutoId(produto.getId())).thenReturn(Optional.empty());
 
         ProdutoResponseDto atualizado = produtoService.atualizarProduto(produto.getId(), new ProdutoAtualizacaoRequestDto(
-                null, null, null, null, null, null, null, null, null, null, false, null, null
+                null, null, null, null, null, null, null, null, false, null, null
         ));
         assertThat(atualizado.fardo()).isFalse();
         assertThat(atualizado.unidadesPorFardo()).isNull();

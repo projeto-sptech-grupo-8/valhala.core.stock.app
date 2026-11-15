@@ -32,13 +32,8 @@ public class ProdutoEntity {
     @Column(nullable = false, length = 45)
     private String sku;
 
-    @Column(name = "codigo_barras", length = 45)
-    private String codigoBarras;
-
     @Column(nullable = false, length = 150)
     private String nome;
-
-    private String descricao;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 15)

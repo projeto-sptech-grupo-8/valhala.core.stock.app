@@ -13,12 +13,10 @@ public record ProdutoResponseDto(
         UUID id,
         String sku,
         String nome,
-        String descricao,
         ProdutoTipo tipo,
         Integer categoriaId,
         String categoriaNome,
         String unidadeMedida,
-        String codigoBarras,
         BigDecimal precoCusto,
         BigDecimal precoVenda,
         BigDecimal margemPercentual,
@@ -38,12 +36,10 @@ public record ProdutoResponseDto(
             UUID id,
             String sku,
             String nome,
-            String descricao,
             ProdutoTipo tipo,
             Integer categoriaId,
             String categoriaNome,
             String unidadeMedida,
-            String codigoBarras,
             BigDecimal precoCusto,
             BigDecimal precoVenda,
             BigDecimal margemPercentual,
@@ -57,8 +53,8 @@ public record ProdutoResponseDto(
             LocalDateTime criadoEm,
             LocalDateTime atualizadoEm
     ) {
-        this(id, sku, nome, descricao, tipo, categoriaId, categoriaNome, unidadeMedida,
-                codigoBarras, precoCusto, precoVenda, margemPercentual, fracionado,
+        this(id, sku, nome, tipo, categoriaId, categoriaNome, unidadeMedida,
+                precoCusto, precoVenda, margemPercentual, fracionado,
                 volumeEmbalagemMl, fardo, unidadesPorFardo, ativo, quantidadeEstoque,
                 estoqueMinimo, null, null, criadoEm, atualizadoEm);
     }

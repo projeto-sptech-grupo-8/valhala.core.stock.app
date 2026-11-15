@@ -25,20 +25,20 @@ class ProdutoExportacaoServiceTest {
     void geraPlanilhaExcelComProdutosPadraoFracionadoEDrink() throws Exception {
         LocalDateTime agora = LocalDateTime.now();
         ProdutoResponseDto lata = new ProdutoResponseDto(
-                UUID.randomUUID(), "PRD-0001", "Brahma Lata", null, ProdutoTipo.PADRAO,
-                1, "Cervejas", "un", "789111", new BigDecimal("2.50"), new BigDecimal("5.00"),
+                UUID.randomUUID(), "PRD-0001", "Brahma Lata", ProdutoTipo.PADRAO,
+                1, "Cervejas", "un", new BigDecimal("2.50"), new BigDecimal("5.00"),
                 new BigDecimal("50.00"), false, null, true, 12, true,
                 new BigDecimal("24"), new BigDecimal("12"), agora, agora
         );
         ProdutoResponseDto vodka = new ProdutoResponseDto(
-                UUID.randomUUID(), "PRD-0002", "Vodka Absolut", null, ProdutoTipo.PADRAO,
-                2, "Destilados", "garrafa", null, new BigDecimal("80.00"), new BigDecimal("120.00"),
+                UUID.randomUUID(), "PRD-0002", "Vodka Absolut", ProdutoTipo.PADRAO,
+                2, "Destilados", "garrafa", new BigDecimal("80.00"), new BigDecimal("120.00"),
                 new BigDecimal("33.33"), true, new BigDecimal("1000"), false, null, true,
                 new BigDecimal("2500"), new BigDecimal("1000"), agora, agora
         );
         ProdutoResponseDto drink = new ProdutoResponseDto(
-                UUID.randomUUID(), "PRD-0003", "Gin Tônica", null, ProdutoTipo.DRINK,
-                3, "Drinks", "copo", null, BigDecimal.ZERO, new BigDecimal("28.00"),
+                UUID.randomUUID(), "PRD-0003", "Gin Tônica", ProdutoTipo.DRINK,
+                3, "Drinks", "copo", BigDecimal.ZERO, new BigDecimal("28.00"),
                 null, false, null, false, null, true,
                 null, null, agora, agora
         );
