@@ -87,14 +87,31 @@ public class ControleLotesEstoque {
         return debitar(estoque, quantidade, politica == PoliticaLote.DEBITO_COM_VENCIDOS, codigoLote, loteId);
     }
 
-    /** Saldo inicial do cadastro: o estoque já nasce com a quantidade, que vai para o lote SEM-LOTE. */
+    /** Saldo inicial do cadastro: o estoque já nasce com a quantidade, que vai para o lote informado (ou SEM-LOTE). */
     public List<Alocacao> registrarSaldoInicial(EstoqueEntity estoque, BigDecimal quantidade) {
-        List<LoteEstoqueEntity> lotes = reconciliar(estoque);
-        return lotes.stream()
-                .filter(lote -> LoteEstoqueEntity.SEM_LOTE.equals(lote.getCodigo()))
-                .findFirst()
-                .map(lote -> List.of(new Alocacao(lote, quantidade)))
-                .orElse(List.of());
+        return registrarSaldoInicial(estoque, quantidade, null, null);
+    }
+
+    public List<Alocacao> registrarSaldoInicial(
+            EstoqueEntity estoque,
+            BigDecimal quantidade,
+            String codigoLote,
+            LocalDate validade
+    ) {
+        if (codigoLote == null && validade == null) {
+            List<LoteEstoqueEntity> lotes = reconciliar(estoque);
+            return lotes.stream()
+                    .filter(lote -> LoteEstoqueEntity.SEM_LOTE.equals(lote.getCodigo()))
+                    .findFirst()
+                    .map(lote -> List.of(new Alocacao(lote, quantidade)))
+                    .orElse(List.of());
+        }
+        String codigo = codigoLote != null ? codigoLote : "VAL-" + validade;
+        BigDecimal quantidadeInicial = quantidade == null ? BigDecimal.ZERO : quantidade;
+        LoteEstoqueEntity lote = novoLote(estoque, codigo, validade);
+        lote.setQuantidadeAtual(quantidadeInicial);
+        loteEstoqueRepository.save(lote);
+        return List.of(new Alocacao(lote, quantidadeInicial));
     }
 
     public void vincular(MovimentacaoEstoqueEntity movimentacao, List<Alocacao> alocacoes) {
