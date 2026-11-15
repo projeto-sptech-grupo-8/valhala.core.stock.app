@@ -31,6 +31,9 @@ FROM perfil p
 JOIN estabelecimento e ON e.id = p.estabelecimento_id AND e.cnpj = '00000000000191'
 JOIN (VALUES
     ('Caixa',      'VISUALIZAR_ESTOQUE'),
+    ('Caixa',      'CAIXA_OPERAR'),
+    ('Caixa',      'CAIXA_FECHAR'),
+    ('Caixa',      'CAIXA_VISUALIZAR'),
     ('Estoquista', 'VISUALIZAR_ESTOQUE'),
     ('Estoquista', 'MOVIMENTAR_ESTOQUE'),
     ('Estoquista', 'GERENCIAR_ESTOQUE'),
@@ -116,7 +119,9 @@ ON CONFLICT (estabelecimento_id, sku) DO NOTHING;
 -- Só gera movimentação para estoques criados agora, preservando o histórico real em reexecuções.
 WITH novos AS (
     INSERT INTO estoque (produto_id, quantidade_atual, estoque_minimo)
-    SELECT pr.id, s.qtd, s.minimo
+    SELECT pr.id,
+           s.qtd * COALESCE(pr.volume_embalagem_ml, 1),
+           s.minimo * COALESCE(pr.volume_embalagem_ml, 1)
     FROM (VALUES
         ('BEB-001', 48, 24), ('BEB-002', 8, 36), ('BEB-003', 36, 24), ('BEB-004', 24, 12),
         ('BEB-005', 12, 6),  ('BEB-006', 18, 6), ('BEB-007', 4, 6),   ('BEB-008', 3, 6),
@@ -160,3 +165,20 @@ JOIN produto d ON d.estabelecimento_id = e.id AND d.sku = r.drink
 JOIN produto i ON i.estabelecimento_id = e.id AND i.sku = r.ingrediente
 WHERE e.cnpj = '00000000000191'
 ON CONFLICT (drink_id, produto_id) DO NOTHING;
+
+-- ─── Taxas de referência ativas para simulação em ambiente dev ───
+INSERT INTO taxa_pagamento (estabelecimento_id, forma, parcelas, taxa_percentual, taxa_fixa, repassar_ao_cliente, ativo)
+SELECT e.id, t.forma, t.parcelas, t.taxa_percentual, 0.00, NULL, TRUE
+FROM estabelecimento e
+CROSS JOIN (VALUES
+    ('DEBITO',  1,  1.9900),
+    ('PIX',     1,  0.4900),
+    ('CREDITO', 1,  4.9800),
+    ('CREDITO', 2,  7.9000),
+    ('CREDITO', 3,  9.3000),
+    ('CREDITO', 4, 10.6500),
+    ('CREDITO', 5, 11.9500),
+    ('CREDITO', 6, 13.2000)
+) AS t(forma, parcelas, taxa_percentual)
+WHERE e.cnpj = '00000000000191'
+ON CONFLICT (estabelecimento_id, forma, parcelas) DO NOTHING;

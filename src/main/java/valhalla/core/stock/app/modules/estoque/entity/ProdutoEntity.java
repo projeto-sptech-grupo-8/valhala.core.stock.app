@@ -60,6 +60,12 @@ public class ProdutoEntity {
     private BigDecimal volumeEmbalagemMl;
 
     @Column(nullable = false)
+    private boolean fardo;
+
+    @Column(name = "unidades_por_fardo")
+    private Integer unidadesPorFardo;
+
+    @Column(nullable = false)
     private boolean ativo;
 
     @CreationTimestamp

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -14,6 +15,9 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import valhalla.core.stock.app.modules.caixa.pedido.entity.ItemPedidoEntity;
+import valhalla.core.stock.app.modules.caixa.pedido.entity.PedidoEntity;
+import valhalla.core.stock.app.modules.caixa.exception.EstoqueInsuficientePedidoException;
 import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoLoteResponseDto;
 import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoResponseDto;
@@ -42,9 +46,13 @@ import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
 import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -65,6 +73,9 @@ public class MovimentacaoEstoqueService {
             TipoMovimentacaoEstoque.AJUSTE_NEGATIVO,
             TipoMovimentacaoEstoque.PERDA
     );
+
+    public record ItemConsumoValidacao(UUID produtoId, BigDecimal quantidade) {
+    }
 
     private final ProdutoRepository produtoRepository;
     private final EstoqueRepository estoqueRepository;
@@ -119,6 +130,60 @@ public class MovimentacaoEstoqueService {
             String ordenarPor,
             DirecaoOrdenacao direcao
     ) {
+        Specification<MovimentacaoEstoqueEntity> especificacao = criarEspecificacaoMovimentacoes(
+                produtoId, tipo, usuarioId, dataInicial, dataFinal
+        );
+
+        Page<MovimentacaoEstoqueEntity> resultado = movimentacaoEstoqueRepository.findAll(
+                especificacao,
+                Paginacao.criar(pagina, tamanho, ordenarPor, direcao,
+                        Set.of("ocorridoEm", "tipo", "quantidade", "saldoPosterior"))
+        );
+        Map<UUID, String> nomesUsuarios = nomesUsuariosPorId(resultado.getContent());
+        Map<Long, List<MovimentacaoLoteResponseDto>> lotes = lotesPorMovimentacao(resultado.getContent());
+        return RespostaPaginadaDto.de(resultado,
+                movimentacao -> paraResposta(movimentacao,
+                        nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado"),
+                        lotes.getOrDefault(movimentacao.getId(), List.of())));
+    }
+
+    @Transactional(readOnly = true)
+    @PreAuthorize("@permissionAuthorizationService.hasPermission('VISUALIZAR_ESTOQUE', authentication)")
+    public List<MovimentacaoResponseDto> listarMovimentacoesParaExportacao(
+            UUID produtoId,
+            TipoMovimentacaoEstoque tipo,
+            UUID usuarioId,
+            LocalDate dataInicial,
+            LocalDate dataFinal,
+            String ordenarPor,
+            DirecaoOrdenacao direcao
+    ) {
+        Specification<MovimentacaoEstoqueEntity> especificacao = criarEspecificacaoMovimentacoes(
+                produtoId, tipo, usuarioId, dataInicial, dataFinal
+        );
+        Pageable paginacaoOrdenacao = Paginacao.criar(
+                0, 100, ordenarPor, direcao,
+                Set.of("ocorridoEm", "tipo", "quantidade", "saldoPosterior")
+        );
+        List<MovimentacaoEstoqueEntity> movimentacoes = movimentacaoEstoqueRepository.findAll(
+                especificacao, paginacaoOrdenacao.getSort()
+        );
+        Map<UUID, String> nomesUsuarios = nomesUsuariosPorId(movimentacoes);
+        Map<Long, List<MovimentacaoLoteResponseDto>> lotes = lotesPorMovimentacao(movimentacoes);
+        return movimentacoes.stream()
+                .map(movimentacao -> paraResposta(movimentacao,
+                        nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado"),
+                        lotes.getOrDefault(movimentacao.getId(), List.of())))
+                .toList();
+    }
+
+    private Specification<MovimentacaoEstoqueEntity> criarEspecificacaoMovimentacoes(
+            UUID produtoId,
+            TipoMovimentacaoEstoque tipo,
+            UUID usuarioId,
+            LocalDate dataInicial,
+            LocalDate dataFinal
+    ) {
         if (dataInicial != null && dataFinal != null && dataInicial.isAfter(dataFinal)) {
             throw new IllegalArgumentException("A data inicial não pode ser posterior à data final");
         }
@@ -146,18 +211,7 @@ public class MovimentacaoEstoqueService {
                     root.get("ocorridoEm"), dataFinal.plusDays(1).atStartOfDay()
             ));
         }
-
-        Page<MovimentacaoEstoqueEntity> resultado = movimentacaoEstoqueRepository.findAll(
-                especificacao,
-                Paginacao.criar(pagina, tamanho, ordenarPor, direcao,
-                        Set.of("ocorridoEm", "tipo", "quantidade", "saldoPosterior"))
-        );
-        Map<UUID, String> nomesUsuarios = nomesUsuariosPorId(resultado.getContent());
-        Map<Long, List<MovimentacaoLoteResponseDto>> lotes = lotesPorMovimentacao(resultado.getContent());
-        return RespostaPaginadaDto.de(resultado,
-                movimentacao -> paraResposta(movimentacao,
-                        nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado"),
-                        lotes.getOrDefault(movimentacao.getId(), List.of())));
+        return especificacao;
     }
 
     @Transactional
@@ -174,8 +228,10 @@ public class MovimentacaoEstoqueService {
 
         EstoqueEntity estoque = estoqueRepository.findByProdutoIdForUpdate(produto.getId())
                 .orElseThrow(() -> new EntityNotFoundException("Estoque do produto não encontrado"));
+        BigDecimal quantidadeBase = converterQuantidadeMovimentacao(produto, dto.quantidade(), Boolean.TRUE.equals(dto.emFardo()));
+        String motivo = comporMotivoMovimentacao(normalizar(dto.motivo()), dto.quantidade(), Boolean.TRUE.equals(dto.emFardo()));
         MovimentacaoCommand command = new MovimentacaoCommand(
-                dto.tipo(), dto.quantidade(), normalizar(dto.motivo()), normalizar(dto.lote()),
+                dto.tipo(), quantidadeBase, motivo, normalizar(dto.lote()),
                 normalizar(dto.numeroNotaFiscal()), null, null, dto.validade(), dto.loteId()
         );
         UUID usuarioId = obterIdUsuarioAutenticado();
@@ -263,6 +319,307 @@ public class MovimentacaoEstoqueService {
                 ControleLotesEstoque.descreverCodigos(alocacoes));
         controleLotes.vincular(movimento, alocacoes);
         businessEventLogger.success("stock.initial-entry.registered", "stock-movement", movimento.getId());
+    }
+
+    @Transactional(readOnly = true)
+    public BigDecimal calcularCustoUnitario(ProdutoEntity produto) {
+        if (produto.getTipo() != ProdutoTipo.DRINK) {
+            return produto.getPrecoCusto() == null
+                    ? ZERO.setScale(2, RoundingMode.HALF_UP)
+                    : produto.getPrecoCusto().setScale(2, RoundingMode.HALF_UP);
+        }
+
+        List<ComposicaoDrinkEntity> receita = composicaoDrinkRepository.findAllByDrinkIdOrderByIdAsc(produto.getId());
+        BigDecimal custoTotal = ZERO;
+        for (ComposicaoDrinkEntity item : receita) {
+            ProdutoEntity ingrediente = item.getProduto();
+            BigDecimal precoCustoIngrediente = ingrediente.getPrecoCusto() == null ? ZERO : ingrediente.getPrecoCusto();
+            BigDecimal custoItem;
+            if (ingrediente.isFracionado()
+                    && ingrediente.getVolumeEmbalagemMl() != null
+                    && ingrediente.getVolumeEmbalagemMl().compareTo(ZERO) > 0) {
+                custoItem = precoCustoIngrediente
+                        .multiply(item.getQuantidade())
+                        .divide(ingrediente.getVolumeEmbalagemMl(), 6, RoundingMode.HALF_UP);
+            } else {
+                custoItem = precoCustoIngrediente.multiply(item.getQuantidade());
+            }
+            custoTotal = custoTotal.add(custoItem);
+        }
+        return custoTotal.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    @Transactional(readOnly = true)
+    public void validarDisponibilidadeItens(UUID estabelecimentoId, List<ItemConsumoValidacao> itens) {
+        if (itens == null || itens.isEmpty()) {
+            return;
+        }
+        Map<UUID, BigDecimal> consumoPorProdutoPadrao = new LinkedHashMap<>();
+        Map<UUID, ProdutoEntity> produtosPadrao = new HashMap<>();
+
+        for (ItemConsumoValidacao item : itens) {
+            ProdutoEntity produto = buscarProdutoDoEstabelecimento(item.produtoId(), estabelecimentoId);
+            if (!produto.isAtivo()) {
+                throw new IllegalArgumentException("O produto " + produto.getNome() + " está inativo");
+            }
+            if (produto.getTipo() == ProdutoTipo.PADRAO) {
+                BigDecimal quantidadeConsumida = calcularQuantidadeEstoquePadrao(produto, item.quantidade());
+                consumoPorProdutoPadrao.merge(produto.getId(), quantidadeConsumida, BigDecimal::add);
+                produtosPadrao.put(produto.getId(), produto);
+            } else {
+                List<ComposicaoDrinkEntity> receita = composicaoDrinkRepository.findAllByDrinkIdOrderByIdAsc(produto.getId());
+                if (receita.isEmpty()) {
+                    throw new IllegalArgumentException("O drink " + produto.getNome() + " não possui ingredientes cadastrados");
+                }
+                validarReceitaParaSaida(receita, estabelecimentoId);
+                for (ComposicaoDrinkEntity ingrediente : receita) {
+                    ProdutoEntity produtoIngrediente = ingrediente.getProduto();
+                    BigDecimal quantidadeConsumida = ingrediente.getQuantidade().multiply(item.quantidade());
+                    consumoPorProdutoPadrao.merge(produtoIngrediente.getId(), quantidadeConsumida, BigDecimal::add);
+                    produtosPadrao.put(produtoIngrediente.getId(), produtoIngrediente);
+                }
+            }
+        }
+
+        if (consumoPorProdutoPadrao.isEmpty()) {
+            return;
+        }
+
+        Map<UUID, EstoqueEntity> estoques = estoqueRepository.findAllByProdutoIdIn(consumoPorProdutoPadrao.keySet())
+                .stream()
+                .collect(Collectors.toMap(e -> e.getProduto().getId(), Function.identity()));
+
+        for (Map.Entry<UUID, BigDecimal> entry : consumoPorProdutoPadrao.entrySet()) {
+            ProdutoEntity produto = produtosPadrao.get(entry.getKey());
+            EstoqueEntity estoque = estoques.get(entry.getKey());
+            if (estoque == null) {
+                throw new EntityNotFoundException("Estoque do produto " + produto.getNome() + " não encontrado");
+            }
+            BigDecimal reservado = estoque.getQuantidadeReservada() == null ? ZERO : estoque.getQuantidadeReservada();
+            BigDecimal disponivel = estoque.getQuantidadeAtual().subtract(reservado);
+            if (disponivel.compareTo(entry.getValue()) < 0) {
+                throw new EstoqueInsuficientePedidoException(
+                        "Estoque insuficiente para o produto " + produto.getNome(),
+                        produto.getNome(),
+                        disponivel
+                );
+            }
+        }
+    }
+
+    @Transactional
+    public void baixarEstoquePedido(
+            PedidoEntity pedido,
+            List<ItemPedidoEntity> itens,
+            UUID operadorUsuarioId
+    ) {
+        if (itens == null || itens.isEmpty()) {
+            return;
+        }
+        UUID estabelecimentoId = pedido.getEstabelecimentoId();
+        Map<UUID, ProdutoEntity> produtosDoPedido = new HashMap<>();
+        Map<UUID, List<ComposicaoDrinkEntity>> receitasPorDrink = new HashMap<>();
+        Map<UUID, BigDecimal> consumoTotalPorProduto = new LinkedHashMap<>();
+        Map<UUID, ProdutoEntity> produtosConsumidos = new HashMap<>();
+
+        for (ItemPedidoEntity item : itens) {
+            ProdutoEntity produto = buscarProdutoDoEstabelecimento(item.getProdutoId(), estabelecimentoId);
+            if (!produto.isAtivo()) {
+                throw new IllegalArgumentException("O produto " + produto.getNome() + " está inativo");
+            }
+            produtosDoPedido.put(produto.getId(), produto);
+
+            if (produto.getTipo() == ProdutoTipo.PADRAO) {
+                BigDecimal consumo = calcularQuantidadeEstoquePadrao(produto, item.getQuantidade());
+                consumoTotalPorProduto.merge(produto.getId(), consumo, BigDecimal::add);
+                produtosConsumidos.put(produto.getId(), produto);
+            } else {
+                List<ComposicaoDrinkEntity> receita = composicaoDrinkRepository.findAllByDrinkIdOrderByIdAsc(produto.getId());
+                if (receita.isEmpty()) {
+                    throw new IllegalArgumentException("O drink " + produto.getNome() + " não possui ingredientes cadastrados");
+                }
+                validarReceitaParaSaida(receita, estabelecimentoId);
+                receitasPorDrink.put(produto.getId(), receita);
+                for (ComposicaoDrinkEntity comp : receita) {
+                    ProdutoEntity ingrediente = comp.getProduto();
+                    BigDecimal consumo = comp.getQuantidade().multiply(item.getQuantidade());
+                    consumoTotalPorProduto.merge(ingrediente.getId(), consumo, BigDecimal::add);
+                    produtosConsumidos.put(ingrediente.getId(), ingrediente);
+                }
+            }
+        }
+
+        if (consumoTotalPorProduto.isEmpty()) {
+            return;
+        }
+
+        Map<UUID, EstoqueEntity> estoques = estoqueRepository.findAllByProdutoIdInForUpdate(consumoTotalPorProduto.keySet())
+                .stream()
+                .collect(Collectors.toMap(e -> e.getProduto().getId(), Function.identity()));
+
+        for (Map.Entry<UUID, BigDecimal> entry : consumoTotalPorProduto.entrySet()) {
+            ProdutoEntity produto = produtosConsumidos.get(entry.getKey());
+            EstoqueEntity estoque = estoques.get(entry.getKey());
+            if (estoque == null) {
+                throw new EntityNotFoundException("Estoque do produto " + produto.getNome() + " não encontrado");
+            }
+            BigDecimal reservado = estoque.getQuantidadeReservada() == null ? ZERO : estoque.getQuantidadeReservada();
+            BigDecimal disponivel = estoque.getQuantidadeAtual().subtract(reservado);
+            if (disponivel.compareTo(entry.getValue()) < 0) {
+                throw new EstoqueInsuficientePedidoException(
+                        "Estoque insuficiente para o produto " + produto.getNome(),
+                        produto.getNome(),
+                        disponivel
+                );
+            }
+        }
+
+        String motivoPadrao = "Venda concluída - Pedido #" + pedido.getNumero();
+        for (ItemPedidoEntity item : itens) {
+            ProdutoEntity produto = produtosDoPedido.get(item.getProdutoId());
+            if (produto.getTipo() == ProdutoTipo.PADRAO) {
+                EstoqueEntity estoque = estoques.get(produto.getId());
+                BigDecimal consumo = calcularQuantidadeEstoquePadrao(produto, item.getQuantidade());
+                MovimentacaoCommand command = new MovimentacaoCommand(
+                        TipoMovimentacaoEstoque.SAIDA,
+                        consumo,
+                        motivoPadrao,
+                        null,
+                        null,
+                        null,
+                        null
+                );
+                aplicarMovimentacaoPedido(estoque, command, operadorUsuarioId, item.getId());
+            } else {
+                List<ComposicaoDrinkEntity> receita = receitasPorDrink.get(produto.getId());
+                JsonNode snapshot = criarSnapshotReceita(produto, receita, item.getQuantidade());
+                for (ComposicaoDrinkEntity comp : receita) {
+                    EstoqueEntity estoqueIngrediente = estoques.get(comp.getProduto().getId());
+                    BigDecimal consumo = comp.getQuantidade().multiply(item.getQuantidade());
+                    MovimentacaoCommand command = new MovimentacaoCommand(
+                            TipoMovimentacaoEstoque.SAIDA_DRINK,
+                            consumo,
+                            motivoPadrao,
+                            null,
+                            null,
+                            produto.getId(),
+                            snapshot.deepCopy()
+                    );
+                    aplicarMovimentacaoPedido(estoqueIngrediente, command, operadorUsuarioId, item.getId());
+                }
+            }
+        }
+    }
+
+    @Transactional
+    public void estornarEstoquePedido(
+            PedidoEntity pedido,
+            List<ItemPedidoEntity> itens,
+            UUID usuarioId
+    ) {
+        if (itens == null || itens.isEmpty()) {
+            return;
+        }
+        List<Long> itemIds = itens.stream()
+                .map(ItemPedidoEntity::getId)
+                .filter(id -> id != null)
+                .toList();
+        if (itemIds.isEmpty()) {
+            return;
+        }
+
+        List<MovimentacaoEstoqueEntity> saidas = movimentacaoEstoqueRepository
+                .findAllByItemPedidoIdInAndTipoInOrderByIdAsc(
+                        itemIds,
+                        Set.of(TipoMovimentacaoEstoque.SAIDA, TipoMovimentacaoEstoque.SAIDA_DRINK)
+                );
+        if (saidas.isEmpty()) {
+            return;
+        }
+
+        Set<UUID> produtoIds = saidas.stream()
+                .map(m -> m.getEstoque().getProduto().getId())
+                .collect(Collectors.toSet());
+        Map<UUID, EstoqueEntity> estoques = estoqueRepository.findAllByProdutoIdInForUpdate(produtoIds)
+                .stream()
+                .collect(Collectors.toMap(e -> e.getProduto().getId(), Function.identity()));
+
+        String motivoEstorno = "Estorno do pedido #" + pedido.getNumero();
+        for (MovimentacaoEstoqueEntity saida : saidas) {
+            UUID produtoId = saida.getEstoque().getProduto().getId();
+            EstoqueEntity estoque = estoques.get(produtoId);
+            if (estoque == null) {
+                throw new EntityNotFoundException("Estoque do produto não encontrado para estorno");
+            }
+            MovimentacaoCommand command = new MovimentacaoCommand(
+                    TipoMovimentacaoEstoque.AJUSTE_POSITIVO,
+                    saida.getQuantidade(),
+                    motivoEstorno,
+                    null,
+                    null,
+                    null,
+                    null
+            );
+            aplicarMovimentacaoPedido(estoque, command, usuarioId, saida.getItemPedidoId());
+        }
+    }
+
+    private BigDecimal calcularQuantidadeEstoquePadrao(ProdutoEntity produto, BigDecimal quantidadeVendida) {
+        if (produto.isFracionado() && produto.getVolumeEmbalagemMl() != null) {
+            return quantidadeVendida.multiply(produto.getVolumeEmbalagemMl());
+        }
+        return quantidadeVendida;
+    }
+
+    private BigDecimal converterQuantidadeMovimentacao(
+            ProdutoEntity produto,
+            BigDecimal quantidade,
+            boolean emFardo
+    ) {
+        if (!emFardo) {
+            return quantidade;
+        }
+        if (!produto.isFardo() || produto.getUnidadesPorFardo() == null || produto.getUnidadesPorFardo() < 2) {
+            throw new IllegalArgumentException("O produto informado não possui configuração de fardo");
+        }
+        return quantidade.multiply(BigDecimal.valueOf(produto.getUnidadesPorFardo()));
+    }
+
+    private String comporMotivoMovimentacao(String motivo, BigDecimal quantidadeInformada, boolean emFardo) {
+        if (!emFardo) {
+            return motivo;
+        }
+        String sufixo = quantidadeInformada.stripTrailingZeros().toPlainString() + " fardo(s)";
+        return motivo == null ? sufixo : motivo + " (" + sufixo + ")";
+    }
+
+    private void aplicarMovimentacaoPedido(
+            EstoqueEntity estoque,
+            MovimentacaoCommand command,
+            UUID usuarioId,
+            Long itemPedidoId
+    ) {
+        EstrategiaMovimentacaoEstoque estrategia = estrategiaPara(command.tipo());
+        estrategia.validar(command);
+        BigDecimal saldoAnterior = estoque.getQuantidadeAtual();
+        BigDecimal saldoPosterior = estrategia.calcularSaldoPosterior(saldoAnterior, command.quantidade());
+        estoque.setQuantidadeAtual(saldoPosterior);
+        estoqueRepository.save(estoque);
+
+        MovimentacaoEstoqueEntity movimentacao = new MovimentacaoEstoqueEntity();
+        movimentacao.setEstoque(estoque);
+        movimentacao.setUsuarioId(usuarioId);
+        movimentacao.setOrigem("PEDIDO");
+        movimentacao.setItemPedidoId(itemPedidoId);
+        movimentacao.setTipo(command.tipo());
+        movimentacao.setQuantidade(command.quantidade());
+        movimentacao.setSaldoAnterior(saldoAnterior);
+        movimentacao.setSaldoPosterior(saldoPosterior);
+        movimentacao.setMotivo(command.motivo());
+        movimentacao.setOrigemDrinkId(command.origemDrinkId());
+        movimentacao.setReceitaAplicada(command.receitaAplicada());
+        movimentacao.setOcorridoEm(LocalDateTime.now());
+        movimentacaoEstoqueRepository.save(movimentacao);
     }
 
     private MovimentacaoResponseDto aplicarMovimentacao(

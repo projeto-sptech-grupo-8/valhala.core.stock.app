@@ -6,9 +6,12 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoEstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
 
+import java.util.Collection;
 import java.util.List;
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -21,6 +24,13 @@ public interface MovimentacaoEstoqueRepository extends JpaRepository<Movimentaca
     Page<MovimentacaoEstoqueEntity> findAll(
             Specification<MovimentacaoEstoqueEntity> specification,
             Pageable pageable
+    );
+
+    @Override
+    @EntityGraph(attributePaths = {"estoque", "estoque.produto"})
+    List<MovimentacaoEstoqueEntity> findAll(
+            Specification<MovimentacaoEstoqueEntity> specification,
+            Sort sort
     );
 
     @EntityGraph(attributePaths = {"estoque", "estoque.produto"})
@@ -59,8 +69,14 @@ public interface MovimentacaoEstoqueRepository extends JpaRepository<Movimentaca
             @Param("idEstabelecimento") UUID idEstabelecimento,
             @Param("inicio") LocalDateTime inicio,
             @Param("fimExclusivo") LocalDateTime fimExclusivo,
-            @Param("tiposEntrada") java.util.Collection<valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque> tiposEntrada,
-            @Param("tiposSaida") java.util.Collection<valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque> tiposSaida
+            @Param("tiposEntrada") Collection<TipoMovimentacaoEstoque> tiposEntrada,
+            @Param("tiposSaida") Collection<TipoMovimentacaoEstoque> tiposSaida
+    );
+
+    @EntityGraph(attributePaths = {"estoque", "estoque.produto"})
+    List<MovimentacaoEstoqueEntity> findAllByItemPedidoIdInAndTipoInOrderByIdAsc(
+            Collection<Long> itemPedidoIds,
+            Collection<TipoMovimentacaoEstoque> tipos
     );
 
     boolean existsByEstoqueProdutoId(UUID produtoId);

@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 
@@ -17,6 +18,10 @@ public interface ProdutoRepository extends JpaRepository<ProdutoEntity, UUID>, J
     @Override
     @EntityGraph(attributePaths = "categoria")
     Page<ProdutoEntity> findAll(Specification<ProdutoEntity> specification, Pageable pageable);
+
+    @Override
+    @EntityGraph(attributePaths = "categoria")
+    List<ProdutoEntity> findAll(Specification<ProdutoEntity> specification, Sort sort);
 
     @EntityGraph(attributePaths = "categoria")
     List<ProdutoEntity> findAllByEstabelecimentoIdOrderByNomeAsc(UUID idEstabelecimento);

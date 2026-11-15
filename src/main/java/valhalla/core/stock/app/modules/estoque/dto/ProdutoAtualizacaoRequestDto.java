@@ -3,6 +3,7 @@ package valhalla.core.stock.app.modules.estoque.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
@@ -28,13 +29,34 @@ public record ProdutoAtualizacaoRequestDto(
         BigDecimal volumeEmbalagemMl,
         @PositiveOrZero(message = "O estoque mínimo não pode ser negativo")
         BigDecimal estoqueMinimo,
+        Boolean fardo,
+        @Min(value = 2, message = "Um fardo deve possuir ao menos 2 unidades")
+        Integer unidadesPorFardo,
         Boolean ativo
 ) {
+    public ProdutoAtualizacaoRequestDto(
+            String nome,
+            Integer categoriaId,
+            String unidadeMedida,
+            BigDecimal precoVenda,
+            BigDecimal precoCusto,
+            String codigoBarras,
+            String descricao,
+            Boolean fracionado,
+            BigDecimal volumeEmbalagemMl,
+            BigDecimal estoqueMinimo,
+            Boolean ativo
+    ) {
+        this(nome, categoriaId, unidadeMedida, precoVenda, precoCusto, codigoBarras,
+                descricao, fracionado, volumeEmbalagemMl, estoqueMinimo, null, null, ativo);
+    }
+
     @AssertTrue(message = "Informe ao menos um campo para atualização")
     public boolean isAtualizacaoValida() {
         return nome != null || categoriaId != null || unidadeMedida != null
                 || precoVenda != null || precoCusto != null || codigoBarras != null
                 || descricao != null || fracionado != null
-                || volumeEmbalagemMl != null || estoqueMinimo != null || ativo != null;
+                || volumeEmbalagemMl != null || estoqueMinimo != null
+                || fardo != null || unidadesPorFardo != null || ativo != null;
     }
 }

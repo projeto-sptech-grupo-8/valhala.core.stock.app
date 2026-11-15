@@ -217,6 +217,8 @@ CREATE TABLE produto (
     preco_venda NUMERIC(12,2) NOT NULL,
     fracionado BOOLEAN NOT NULL DEFAULT FALSE,
     volume_embalagem_ml NUMERIC(12,3),
+    fardo BOOLEAN NOT NULL DEFAULT FALSE,
+    unidades_por_fardo INTEGER,
     ativo BOOLEAN NOT NULL DEFAULT TRUE,
     criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -235,6 +237,13 @@ CREATE TABLE produto (
 
     CONSTRAINT ck_produto_volume_embalagem
         CHECK (volume_embalagem_ml IS NULL OR volume_embalagem_ml > 0),
+
+    CONSTRAINT ck_produto_fardo_consistencia
+        CHECK ((fardo = FALSE AND unidades_por_fardo IS NULL)
+            OR (fardo = TRUE AND unidades_por_fardo >= 2)),
+
+    CONSTRAINT ck_produto_fardo_tipo
+        CHECK (fardo = FALSE OR tipo = 'PADRAO'),
 
     CONSTRAINT fk_produto_estabelecimento
         FOREIGN KEY (estabelecimento_id)
@@ -257,6 +266,9 @@ CREATE TABLE estoque (
 
     CONSTRAINT chk_estoque_quantidade_reservada
         CHECK (quantidade_reservada >= 0),
+
+    CONSTRAINT ck_estoque_reservada_limite
+        CHECK (quantidade_reservada <= quantidade_atual),
 
     CONSTRAINT chk_estoque_minimo
         CHECK (estoque_minimo >= 0),
@@ -288,8 +300,211 @@ CREATE TABLE composicao_drink (
 );
 
 -- ============================================================
--- 4. ORÇAMENTO E PEDIDO
+-- 4. CAIXA
 -- ============================================================
+
+CREATE TABLE configuracao_caixa (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    estabelecimento_id UUID NOT NULL,
+    terminal_id VARCHAR(100),
+    terminal_nome VARCHAR(100),
+    point_habilitado BOOLEAN NOT NULL DEFAULT FALSE,
+    dinheiro_habilitado BOOLEAN NOT NULL DEFAULT TRUE,
+    debito_habilitado BOOLEAN NOT NULL DEFAULT TRUE,
+    credito_habilitado BOOLEAN NOT NULL DEFAULT TRUE,
+    pix_habilitado BOOLEAN NOT NULL DEFAULT TRUE,
+    parcelamento_habilitado BOOLEAN NOT NULL DEFAULT FALSE,
+    parcelas_minimas INT NOT NULL DEFAULT 1,
+    parcelas_maximas INT NOT NULL DEFAULT 5,
+    valor_minimo_parcela NUMERIC(12,2),
+    politica_juros VARCHAR(30) NOT NULL DEFAULT 'ABSORVIDA_PELA_LOJA',
+    validade_cobranca_segundos INT NOT NULL DEFAULT 300,
+    limite_desconto_percentual NUMERIC(5,2) NOT NULL DEFAULT 0,
+    limite_desconto_valor NUMERIC(12,2) NOT NULL DEFAULT 0,
+    imprimir_comprovante BOOLEAN NOT NULL DEFAULT TRUE,
+    permitir_pagamento_manual BOOLEAN NOT NULL DEFAULT FALSE,
+    atualizado_por_usuario_id UUID,
+    criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT uq_configuracao_caixa_estabelecimento
+        UNIQUE (estabelecimento_id),
+
+    CONSTRAINT ck_configuracao_caixa_formas
+        CHECK (dinheiro_habilitado OR debito_habilitado OR credito_habilitado OR pix_habilitado),
+
+    CONSTRAINT ck_configuracao_caixa_point
+        CHECK (NOT point_habilitado OR terminal_id IS NOT NULL),
+
+    CONSTRAINT ck_configuracao_caixa_parcelamento
+        CHECK (NOT parcelamento_habilitado OR credito_habilitado),
+
+    CONSTRAINT ck_configuracao_caixa_parcelas
+        CHECK (parcelas_minimas >= 1 AND parcelas_maximas >= parcelas_minimas),
+
+    CONSTRAINT ck_configuracao_caixa_parcelas_maximas
+        CHECK (parcelas_maximas <= 12),
+
+    CONSTRAINT ck_configuracao_caixa_valor_minimo_parcela
+        CHECK (valor_minimo_parcela IS NULL OR valor_minimo_parcela > 0),
+
+    CONSTRAINT ck_configuracao_caixa_politica_juros
+        CHECK (politica_juros IN ('ABSORVIDA_PELA_LOJA', 'REPASSADA_AO_CLIENTE')),
+
+    CONSTRAINT ck_configuracao_caixa_validade_cobranca
+        CHECK (validade_cobranca_segundos BETWEEN 60 AND 900),
+
+    CONSTRAINT ck_configuracao_caixa_desconto_percentual
+        CHECK (limite_desconto_percentual >= 0 AND limite_desconto_percentual <= 100),
+
+    CONSTRAINT ck_configuracao_caixa_desconto_valor
+        CHECK (limite_desconto_valor >= 0),
+
+    CONSTRAINT fk_configuracao_caixa_estabelecimento
+        FOREIGN KEY (estabelecimento_id)
+        REFERENCES estabelecimento(id),
+
+    CONSTRAINT fk_configuracao_caixa_atualizado_por
+        FOREIGN KEY (atualizado_por_usuario_id)
+        REFERENCES usuario(id)
+        ON DELETE SET NULL
+);
+
+CREATE TABLE sessao_caixa (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    estabelecimento_id UUID NOT NULL,
+    terminal_id VARCHAR(100),
+    operador_usuario_id UUID NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'ABERTA',
+    fundo_troco NUMERIC(12,2) NOT NULL DEFAULT 0,
+    dinheiro_esperado NUMERIC(12,2),
+    dinheiro_contado NUMERIC(12,2),
+    diferenca NUMERIC(12,2),
+    resumo_fechamento JSONB,
+    observacao_abertura TEXT,
+    observacao_fechamento TEXT,
+    justificativa_divergencia TEXT,
+    aberta_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    fechada_em TIMESTAMP,
+    fechada_por_usuario_id UUID,
+    divergencia_resolvida_por_usuario_id UUID,
+    divergencia_resolvida_em TIMESTAMP,
+    atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    -- Permite que pedido valide a sessão e o estabelecimento na mesma FK.
+    CONSTRAINT uq_sessao_caixa_estabelecimento
+        UNIQUE (id, estabelecimento_id),
+
+    CONSTRAINT ck_sessao_caixa_status
+        CHECK (status IN ('ABERTA', 'EM_FECHAMENTO', 'FECHADA', 'CANCELADA')),
+
+    CONSTRAINT ck_sessao_caixa_fundo_troco
+        CHECK (fundo_troco >= 0),
+
+    CONSTRAINT ck_sessao_caixa_dinheiro_contado
+        CHECK (dinheiro_contado IS NULL OR dinheiro_contado >= 0),
+
+    CONSTRAINT ck_sessao_caixa_fechamento
+        CHECK (
+            status <> 'FECHADA'
+            OR (
+                fechada_em IS NOT NULL
+                AND fechada_por_usuario_id IS NOT NULL
+                AND dinheiro_esperado IS NOT NULL
+                AND dinheiro_contado IS NOT NULL
+                AND diferenca IS NOT NULL
+            )
+        ),
+
+    CONSTRAINT ck_sessao_caixa_em_fechamento
+        CHECK (status <> 'EM_FECHAMENTO' OR dinheiro_contado IS NOT NULL),
+
+    CONSTRAINT ck_sessao_caixa_diferenca
+        CHECK (
+            diferenca IS NULL
+            OR (
+                dinheiro_esperado IS NOT NULL
+                AND dinheiro_contado IS NOT NULL
+                AND diferenca = dinheiro_contado - dinheiro_esperado
+            )
+        ),
+
+    CONSTRAINT ck_sessao_caixa_justificativa
+        CHECK (
+            diferenca IS NULL
+            OR diferenca = 0
+            OR justificativa_divergencia IS NOT NULL
+        ),
+
+    CONSTRAINT fk_sessao_caixa_estabelecimento
+        FOREIGN KEY (estabelecimento_id)
+        REFERENCES estabelecimento(id),
+
+    CONSTRAINT fk_sessao_caixa_operador
+        FOREIGN KEY (operador_usuario_id)
+        REFERENCES usuario(id),
+
+    CONSTRAINT fk_sessao_caixa_fechada_por
+        FOREIGN KEY (fechada_por_usuario_id)
+        REFERENCES usuario(id),
+
+    CONSTRAINT fk_sessao_caixa_divergencia_resolvida_por
+        FOREIGN KEY (divergencia_resolvida_por_usuario_id)
+        REFERENCES usuario(id)
+);
+
+CREATE TABLE movimentacao_caixa (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    sessao_caixa_id UUID NOT NULL,
+    tipo VARCHAR(20) NOT NULL,
+    valor NUMERIC(12,2) NOT NULL,
+    motivo TEXT NOT NULL,
+    usuario_id UUID NOT NULL,
+    ocorrido_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT ck_movimentacao_caixa_tipo
+        CHECK (tipo IN ('SANGRIA', 'REFORCO')),
+
+    CONSTRAINT ck_movimentacao_caixa_valor
+        CHECK (valor > 0),
+
+    CONSTRAINT ck_movimentacao_caixa_motivo
+        CHECK (BTRIM(motivo) <> ''),
+
+    CONSTRAINT fk_movimentacao_caixa_sessao
+        FOREIGN KEY (sessao_caixa_id)
+        REFERENCES sessao_caixa(id),
+
+    CONSTRAINT fk_movimentacao_caixa_usuario
+        FOREIGN KEY (usuario_id)
+        REFERENCES usuario(id)
+);
+
+-- ============================================================
+-- 5. ORÇAMENTO E PEDIDO
+-- ============================================================
+
+-- Numeração concorrente por estabelecimento. O serviço deve usar
+-- UPDATE ... RETURNING para obter o próximo número com segurança.
+CREATE TABLE sequencia_documento (
+    estabelecimento_id UUID NOT NULL,
+    tipo VARCHAR(30) NOT NULL,
+    ultimo_numero BIGINT NOT NULL DEFAULT 0,
+    atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT pk_sequencia_documento
+        PRIMARY KEY (estabelecimento_id, tipo),
+
+    CONSTRAINT ck_sequencia_documento_tipo
+        CHECK (tipo IN ('PEDIDO', 'ORCAMENTO')),
+
+    CONSTRAINT ck_sequencia_documento_ultimo
+        CHECK (ultimo_numero >= 0),
+
+    CONSTRAINT fk_sequencia_documento_estabelecimento
+        FOREIGN KEY (estabelecimento_id)
+        REFERENCES estabelecimento(id)
+);
 
 CREATE TABLE orcamento (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -355,7 +570,10 @@ CREATE TABLE pedido (
     orcamento_id UUID,
     numero BIGINT NOT NULL,
     tipo VARCHAR(30) NOT NULL,
-    status VARCHAR(30) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'EM_ATENDIMENTO',
+    canal VARCHAR(30) NOT NULL DEFAULT 'BALCAO',
+    identificador_atendimento VARCHAR(60),
+    sessao_caixa_id UUID,
     nome_cliente VARCHAR(150),
     documento_cliente VARCHAR(20),
     subtotal NUMERIC(12,2) NOT NULL DEFAULT 0,
@@ -363,6 +581,7 @@ CREATE TABLE pedido (
     total NUMERIC(12,2) NOT NULL DEFAULT 0,
     observacao TEXT,
     criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     concluido_em TIMESTAMP,
     cancelado_em TIMESTAMP,
 
@@ -373,6 +592,30 @@ CREATE TABLE pedido (
     CONSTRAINT chk_pedido_desconto CHECK (desconto >= 0),
     CONSTRAINT chk_pedido_total CHECK (total >= 0),
 
+    CONSTRAINT ck_pedido_canal
+        CHECK (canal IN ('BALCAO', 'MESA', 'RETIRADA', 'DELIVERY')),
+
+    CONSTRAINT ck_pedido_status
+        CHECK (
+            status IN (
+                'EM_ATENDIMENTO',
+                'AGUARDANDO_MAQUINA',
+                'AGUARDANDO_PAGAMENTO',
+                'PAGAMENTO_PARCIAL',
+                'CONCLUIDO',
+                'CANCELADO'
+            )
+        ),
+
+    CONSTRAINT ck_pedido_canal_mesa
+        CHECK (canal <> 'MESA' OR identificador_atendimento IS NOT NULL),
+
+    CONSTRAINT ck_pedido_datas_status
+        CHECK (
+            (status <> 'CONCLUIDO' OR concluido_em IS NOT NULL)
+            AND (status <> 'CANCELADO' OR cancelado_em IS NOT NULL)
+        ),
+
     CONSTRAINT fk_pedido_estabelecimento
         FOREIGN KEY (estabelecimento_id)
         REFERENCES estabelecimento(id),
@@ -380,6 +623,10 @@ CREATE TABLE pedido (
     CONSTRAINT fk_pedido_operador
         FOREIGN KEY (operador_usuario_id)
         REFERENCES usuario(id),
+
+    CONSTRAINT fk_pedido_sessao_caixa
+        FOREIGN KEY (sessao_caixa_id, estabelecimento_id)
+        REFERENCES sessao_caixa(id, estabelecimento_id),
 
     CONSTRAINT fk_pedido_orcamento
         FOREIGN KEY (orcamento_id)
@@ -396,11 +643,18 @@ CREATE TABLE item_pedido (
     preco_unitario NUMERIC(12,2) NOT NULL,
     desconto NUMERIC(12,2) NOT NULL DEFAULT 0,
     subtotal NUMERIC(12,2) NOT NULL,
+    custo_unitario NUMERIC(12,2),
+    categoria_id INT,
+    categoria_nome VARCHAR(100),
+    quantidade_enviada_bar NUMERIC(12,3) NOT NULL DEFAULT 0,
+    enviado_bar_em TIMESTAMP,
 
     CONSTRAINT chk_item_pedido_quantidade CHECK (quantidade > 0),
     CONSTRAINT chk_item_pedido_preco CHECK (preco_unitario >= 0),
     CONSTRAINT chk_item_pedido_desconto CHECK (desconto >= 0),
     CONSTRAINT chk_item_pedido_subtotal CHECK (subtotal >= 0),
+    CONSTRAINT chk_item_pedido_custo CHECK (custo_unitario IS NULL OR custo_unitario >= 0),
+    CONSTRAINT chk_item_pedido_enviado_bar CHECK (quantidade_enviada_bar >= 0),
 
     CONSTRAINT fk_item_pedido_pedido
         FOREIGN KEY (pedido_id)
@@ -413,29 +667,170 @@ CREATE TABLE item_pedido (
 
     CONSTRAINT fk_item_pedido_item_orcamento
         FOREIGN KEY (item_orcamento_id)
-        REFERENCES item_orcamento(id)
+        REFERENCES item_orcamento(id),
+
+    CONSTRAINT fk_item_pedido_categoria
+        FOREIGN KEY (categoria_id)
+        REFERENCES categoria(id)
+        ON DELETE SET NULL
 );
 
 CREATE TABLE pagamento_pedido (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     pedido_id UUID NOT NULL,
+    sessao_caixa_id UUID,
     forma VARCHAR(30) NOT NULL,
-    status VARCHAR(30) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDENTE',
+    provedor VARCHAR(30) NOT NULL DEFAULT 'INTERNO',
+    metodo_pagamento VARCHAR(40),
     valor NUMERIC(12,2) NOT NULL,
+    valor_cobrado NUMERIC(12,2),
+    valor_recebido NUMERIC(12,2),
+    valor_troco NUMERIC(12,2) NOT NULL DEFAULT 0,
+    valor_estornado NUMERIC(12,2) NOT NULL DEFAULT 0,
+    parcelas INT NOT NULL DEFAULT 1,
+    politica_juros VARCHAR(30),
     referencia_externa VARCHAR(150),
+    order_externa_id VARCHAR(100),
+    payment_externo_id VARCHAR(100),
+    terminal_id VARCHAR(100),
+    chave_idempotencia VARCHAR(100),
+    status_detalhe VARCHAR(100),
+    comprovante_referencia VARCHAR(255),
+    comprovante_dados JSONB,
+    motivo_cancelamento TEXT,
+    motivo_estorno TEXT,
+    solicitado_em TIMESTAMP,
     pago_em TIMESTAMP,
+    cancelado_em TIMESTAMP,
+    estornado_em TIMESTAMP,
+    cancelado_por_usuario_id UUID,
+    estornado_por_usuario_id UUID,
     criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT chk_pagamento_valor CHECK (valor > 0),
+
+    CONSTRAINT ck_pagamento_forma
+        CHECK (forma IN ('DINHEIRO', 'DEBITO', 'CREDITO', 'PIX')),
+
+    CONSTRAINT ck_pagamento_status
+        CHECK (
+            status IN (
+                'PENDENTE',
+                'PENDENTE_NA_POINT',
+                'EM_TERMINAL',
+                'APROVADO',
+                'RECUSADO',
+                'EXPIRADO',
+                'CANCELAMENTO_SOLICITADO',
+                'CANCELADO',
+                'ACAO_NECESSARIA',
+                'PENDENTE_CONCILIACAO',
+                'ESTORNO_EM_ANDAMENTO',
+                'ESTORNADO'
+            )
+        ),
+
+    CONSTRAINT ck_pagamento_provedor
+        CHECK (provedor IN ('MERCADO_PAGO', 'INTERNO', 'MANUAL')),
+
+    CONSTRAINT ck_pagamento_politica_juros
+        CHECK (
+            politica_juros IS NULL
+            OR politica_juros IN ('ABSORVIDA_PELA_LOJA', 'REPASSADA_AO_CLIENTE')
+        ),
+
+    CONSTRAINT ck_pagamento_parcelas
+        CHECK (parcelas >= 1),
+
+    CONSTRAINT ck_pagamento_forma_parcelas
+        CHECK (forma = 'CREDITO' OR parcelas = 1),
+
+    CONSTRAINT ck_pagamento_valor_cobrado
+        CHECK (valor_cobrado IS NULL OR valor_cobrado >= valor),
+
+    CONSTRAINT ck_pagamento_valor_recebido
+        CHECK (valor_recebido IS NULL OR valor_recebido >= valor),
+
+    CONSTRAINT ck_pagamento_troco
+        CHECK (
+            (valor_recebido IS NULL AND valor_troco = 0)
+            OR (
+                valor_recebido IS NOT NULL
+                AND valor_troco = valor_recebido - valor
+                AND valor_troco >= 0
+            )
+        ),
+
+    CONSTRAINT ck_pagamento_dinheiro_valores
+        CHECK (
+            forma = 'DINHEIRO'
+            OR (valor_recebido IS NULL AND valor_troco = 0)
+        ),
+
+    CONSTRAINT ck_pagamento_dinheiro_cobrado
+        CHECK (forma <> 'DINHEIRO' OR valor_cobrado IS NULL),
+
+    CONSTRAINT ck_pagamento_dinheiro_aprovado
+        CHECK (
+            status <> 'APROVADO'
+            OR forma <> 'DINHEIRO'
+            OR valor_recebido IS NOT NULL
+        ),
+
+    CONSTRAINT ck_pagamento_valor_estornado
+        CHECK (
+            valor_estornado >= 0
+            AND valor_estornado <= COALESCE(valor_cobrado, valor)
+        ),
+
+    CONSTRAINT ck_pagamento_estornado_status
+        CHECK (status <> 'ESTORNADO' OR valor_estornado > 0),
+
+    CONSTRAINT ck_pagamento_forma_provedor
+        CHECK (
+            (forma = 'DINHEIRO' AND provedor IN ('INTERNO', 'MANUAL'))
+            OR (
+                forma IN ('DEBITO', 'CREDITO', 'PIX')
+                AND provedor IN ('MERCADO_PAGO', 'MANUAL')
+            )
+        ),
+
+    CONSTRAINT ck_pagamento_aprovado_pago_em
+        CHECK (status <> 'APROVADO' OR pago_em IS NOT NULL),
+
+    CONSTRAINT ck_pagamento_cancelado_em
+        CHECK (status <> 'CANCELADO' OR cancelado_em IS NOT NULL),
+
+    CONSTRAINT ck_pagamento_estornado_em
+        CHECK (status <> 'ESTORNADO' OR estornado_em IS NOT NULL),
+
+    CONSTRAINT ck_pagamento_dinheiro_sessao
+        CHECK (forma <> 'DINHEIRO' OR sessao_caixa_id IS NOT NULL),
 
     CONSTRAINT fk_pagamento_pedido
         FOREIGN KEY (pedido_id)
         REFERENCES pedido(id)
-        ON DELETE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_pagamento_sessao_caixa
+        FOREIGN KEY (sessao_caixa_id)
+        REFERENCES sessao_caixa(id),
+
+    CONSTRAINT fk_pagamento_cancelado_por
+        FOREIGN KEY (cancelado_por_usuario_id)
+        REFERENCES usuario(id)
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_pagamento_estornado_por
+        FOREIGN KEY (estornado_por_usuario_id)
+        REFERENCES usuario(id)
+        ON DELETE SET NULL
 );
 
 -- ============================================================
--- 5. FISCAL
+-- 6. FISCAL
 -- ============================================================
 
 CREATE TABLE nota_fiscal (
@@ -502,13 +897,14 @@ CREATE TABLE item_nota_fiscal (
 );
 
 -- ============================================================
--- 6. MOVIMENTAÇÃO DE ESTOQUE
+-- 7. MOVIMENTAÇÃO DE ESTOQUE
 -- ============================================================
 
 CREATE TABLE movimentacao_estoque (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     estoque_id INT NOT NULL,
-    usuario_id UUID NOT NULL,
+    usuario_id UUID,
+    origem VARCHAR(20) NOT NULL DEFAULT 'USUARIO',
     item_pedido_id BIGINT,
     item_nota_fiscal_id BIGINT,
     tipo VARCHAR(30) NOT NULL,
@@ -523,6 +919,12 @@ CREATE TABLE movimentacao_estoque (
     ocorrido_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT chk_movimentacao_quantidade CHECK (quantidade > 0),
+
+    CONSTRAINT ck_movimentacao_estoque_origem
+        CHECK (origem IN ('USUARIO', 'SISTEMA', 'WEBHOOK', 'PEDIDO')),
+
+    CONSTRAINT ck_movimentacao_estoque_usuario_origem
+        CHECK (origem <> 'USUARIO' OR usuario_id IS NOT NULL),
 
     CONSTRAINT ck_movimentacao_tipo CHECK (
         tipo IN (
@@ -563,6 +965,179 @@ CREATE TABLE movimentacao_estoque (
     CONSTRAINT fk_movimentacao_origem_drink
         FOREIGN KEY (origem_drink_id)
         REFERENCES produto(id)
+);
+
+-- ============================================================
+-- 8. RESERVAS, WEBHOOKS E AUDITORIA
+-- ============================================================
+
+CREATE TABLE reserva_estoque (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    pedido_id UUID NOT NULL,
+    item_pedido_id BIGINT NOT NULL,
+    pagamento_pedido_id UUID,
+    produto_id UUID NOT NULL,
+    estoque_id INT NOT NULL,
+    origem_drink_id UUID,
+    quantidade NUMERIC(12,3) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'ATIVA',
+    criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expira_em TIMESTAMP NOT NULL,
+    efetivada_em TIMESTAMP,
+    liberada_em TIMESTAMP,
+    motivo_liberacao VARCHAR(200),
+    movimentacao_estoque_id BIGINT,
+
+    CONSTRAINT ck_reserva_estoque_quantidade
+        CHECK (quantidade > 0),
+
+    CONSTRAINT ck_reserva_estoque_status
+        CHECK (status IN ('ATIVA', 'EFETIVADA', 'LIBERADA', 'EXPIRADA')),
+
+    CONSTRAINT ck_reserva_estoque_expiracao
+        CHECK (expira_em > criado_em),
+
+    CONSTRAINT ck_reserva_estoque_datas
+        CHECK (
+            status = 'ATIVA'
+            OR (status = 'EFETIVADA' AND efetivada_em IS NOT NULL)
+            OR (status IN ('LIBERADA', 'EXPIRADA') AND liberada_em IS NOT NULL)
+        ),
+
+    CONSTRAINT ck_reserva_estoque_movimentacao
+        CHECK (status <> 'EFETIVADA' OR movimentacao_estoque_id IS NOT NULL),
+
+    CONSTRAINT fk_reserva_estoque_pedido
+        FOREIGN KEY (pedido_id)
+        REFERENCES pedido(id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_reserva_estoque_item_pedido
+        FOREIGN KEY (item_pedido_id)
+        REFERENCES item_pedido(id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_reserva_estoque_pagamento
+        FOREIGN KEY (pagamento_pedido_id)
+        REFERENCES pagamento_pedido(id)
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_reserva_estoque_produto
+        FOREIGN KEY (produto_id)
+        REFERENCES produto(id),
+
+    CONSTRAINT fk_reserva_estoque_estoque
+        FOREIGN KEY (estoque_id)
+        REFERENCES estoque(id),
+
+    CONSTRAINT fk_reserva_estoque_origem_drink
+        FOREIGN KEY (origem_drink_id)
+        REFERENCES produto(id),
+
+    CONSTRAINT fk_reserva_estoque_movimentacao
+        FOREIGN KEY (movimentacao_estoque_id)
+        REFERENCES movimentacao_estoque(id)
+);
+
+CREATE TABLE evento_webhook_pagamento (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    provedor VARCHAR(30) NOT NULL DEFAULT 'MERCADO_PAGO',
+    evento_externo_id VARCHAR(100) NOT NULL,
+    tipo_evento VARCHAR(40),
+    acao VARCHAR(60),
+    recurso_tipo VARCHAR(30),
+    recurso_externo_id VARCHAR(100),
+    pagamento_pedido_id UUID,
+    request_id VARCHAR(100),
+    assinatura VARCHAR(255),
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status_processamento VARCHAR(20) NOT NULL DEFAULT 'RECEBIDO',
+    tentativas INT NOT NULL DEFAULT 0,
+    recebido_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    processado_em TIMESTAMP,
+    erro TEXT,
+
+    CONSTRAINT ck_evento_webhook_provedor
+        CHECK (provedor IN ('MERCADO_PAGO')),
+
+    CONSTRAINT ck_evento_webhook_evento
+        CHECK (BTRIM(evento_externo_id) <> ''),
+
+    CONSTRAINT ck_evento_webhook_status
+        CHECK (status_processamento IN ('RECEBIDO', 'PROCESSANDO', 'PROCESSADO', 'IGNORADO', 'ERRO')),
+
+    CONSTRAINT ck_evento_webhook_tentativas
+        CHECK (tentativas >= 0),
+
+    CONSTRAINT uq_evento_webhook_provedor_evento
+        UNIQUE (provedor, evento_externo_id),
+
+    CONSTRAINT fk_evento_webhook_pagamento
+        FOREIGN KEY (pagamento_pedido_id)
+        REFERENCES pagamento_pedido(id)
+        ON DELETE SET NULL
+);
+
+CREATE TABLE auditoria_caixa (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    estabelecimento_id UUID NOT NULL,
+    sessao_caixa_id UUID,
+    usuario_id UUID,
+    usuario_nome VARCHAR(150),
+    origem VARCHAR(20) NOT NULL DEFAULT 'API',
+    tipo_evento VARCHAR(60) NOT NULL,
+    entidade VARCHAR(40),
+    entidade_id VARCHAR(64),
+    pedido_id UUID,
+    pedido_identificador VARCHAR(60),
+    pagamento_pedido_id UUID,
+    valor NUMERIC(12,2),
+    motivo TEXT,
+    autorizado_por_usuario_id UUID,
+    autorizado_por_nome VARCHAR(150),
+    descricao TEXT,
+    dados_anteriores JSONB,
+    dados_novos JSONB,
+    ocorrido_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT ck_auditoria_caixa_origem
+        CHECK (origem IN ('API', 'WEBHOOK', 'SISTEMA')),
+
+    CONSTRAINT ck_auditoria_caixa_ator
+        CHECK (usuario_id IS NOT NULL OR origem IN ('WEBHOOK', 'SISTEMA')),
+
+    CONSTRAINT ck_auditoria_caixa_valor
+        CHECK (valor IS NULL OR valor >= 0),
+
+    CONSTRAINT fk_auditoria_caixa_estabelecimento
+        FOREIGN KEY (estabelecimento_id)
+        REFERENCES estabelecimento(id),
+
+    CONSTRAINT fk_auditoria_caixa_sessao
+        FOREIGN KEY (sessao_caixa_id)
+        REFERENCES sessao_caixa(id)
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_auditoria_caixa_usuario
+        FOREIGN KEY (usuario_id)
+        REFERENCES usuario(id),
+
+    CONSTRAINT fk_auditoria_caixa_autorizador
+        FOREIGN KEY (autorizado_por_usuario_id)
+        REFERENCES usuario(id)
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_auditoria_caixa_pedido
+        FOREIGN KEY (pedido_id)
+        REFERENCES pedido(id)
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_auditoria_caixa_pagamento
+        FOREIGN KEY (pagamento_pedido_id)
+        REFERENCES pagamento_pedido(id)
+        ON DELETE SET NULL
 );
 
 -- ============================================================
@@ -623,6 +1198,12 @@ CREATE INDEX idx_pedido_orcamento
 CREATE INDEX idx_item_pedido_pedido
     ON item_pedido(pedido_id);
 
+CREATE INDEX idx_item_pedido_produto
+    ON item_pedido(produto_id);
+
+CREATE INDEX idx_item_pedido_categoria
+    ON item_pedido(categoria_id);
+
 CREATE INDEX idx_pagamento_pedido
     ON pagamento_pedido(pedido_id);
 
@@ -650,6 +1231,179 @@ CREATE INDEX idx_movimentacao_estoque_ocorrido_em
 CREATE INDEX idx_movimentacao_origem_drink
     ON movimentacao_estoque(origem_drink_id)
     WHERE origem_drink_id IS NOT NULL;
+
+CREATE INDEX idx_movimentacao_item_pedido
+    ON movimentacao_estoque(item_pedido_id)
+    WHERE item_pedido_id IS NOT NULL;
+
+-- Caixa
+-- Uma sessão EM_FECHAMENTO aguarda aprovação gerencial, mas não bloqueia uma
+-- nova abertura no mesmo terminal durante a troca de turno.
+CREATE UNIQUE INDEX uq_sessao_caixa_aberta
+    ON sessao_caixa (estabelecimento_id, COALESCE(terminal_id, 'SEM_TERMINAL'))
+    WHERE status = 'ABERTA';
+
+COMMENT ON INDEX uq_sessao_caixa_aberta IS
+    'Garante uma única sessão ABERTA por estabelecimento e terminal. Sessões EM_FECHAMENTO aguardam aprovação sem bloquear o terminal.';
+
+CREATE UNIQUE INDEX uq_sessao_caixa_aberta_operador
+    ON sessao_caixa (estabelecimento_id, operador_usuario_id)
+    WHERE status = 'ABERTA';
+
+COMMENT ON INDEX uq_sessao_caixa_aberta_operador IS
+    'Garante uma única sessão ABERTA por operador no estabelecimento. Complementa uq_sessao_caixa_aberta, que limita uma por terminal.';
+
+CREATE INDEX idx_sessao_caixa_estabelecimento_status
+    ON sessao_caixa(estabelecimento_id, status);
+
+CREATE INDEX idx_sessao_caixa_operador
+    ON sessao_caixa(operador_usuario_id);
+
+CREATE INDEX idx_sessao_caixa_aberta_em
+    ON sessao_caixa(aberta_em DESC);
+
+CREATE INDEX idx_movimentacao_caixa_sessao
+    ON movimentacao_caixa(sessao_caixa_id, ocorrido_em DESC);
+
+CREATE INDEX idx_movimentacao_caixa_usuario
+    ON movimentacao_caixa(usuario_id);
+
+CREATE INDEX idx_auditoria_caixa_estabelecimento
+    ON auditoria_caixa(estabelecimento_id, ocorrido_em DESC);
+
+CREATE INDEX idx_auditoria_caixa_sessao
+    ON auditoria_caixa(sessao_caixa_id, ocorrido_em DESC);
+
+CREATE INDEX idx_auditoria_caixa_pedido
+    ON auditoria_caixa(pedido_id);
+
+CREATE INDEX idx_auditoria_caixa_pagamento
+    ON auditoria_caixa(pagamento_pedido_id);
+
+CREATE INDEX idx_auditoria_caixa_entidade
+    ON auditoria_caixa(entidade, entidade_id);
+
+CREATE INDEX idx_auditoria_caixa_tipo
+    ON auditoria_caixa(estabelecimento_id, tipo_evento, ocorrido_em DESC);
+
+CREATE INDEX idx_auditoria_caixa_operador
+    ON auditoria_caixa(estabelecimento_id, usuario_id, ocorrido_em DESC);
+
+CREATE INDEX idx_auditoria_caixa_autorizador
+    ON auditoria_caixa(autorizado_por_usuario_id);
+
+-- Pedido
+CREATE INDEX idx_pedido_sessao_caixa
+    ON pedido(sessao_caixa_id);
+
+CREATE INDEX idx_pedido_estabelecimento_status
+    ON pedido(estabelecimento_id, status);
+
+CREATE INDEX idx_pedido_criado_em
+    ON pedido(criado_em DESC);
+
+CREATE INDEX idx_pedido_concluido_em
+    ON pedido(estabelecimento_id, concluido_em DESC)
+    WHERE status = 'CONCLUIDO';
+
+CREATE INDEX idx_pedido_canal_concluido
+    ON pedido(estabelecimento_id, canal, concluido_em DESC)
+    WHERE status = 'CONCLUIDO';
+
+CREATE INDEX idx_pedido_em_atendimento
+    ON pedido(estabelecimento_id, atualizado_em DESC)
+    WHERE status IN (
+        'EM_ATENDIMENTO',
+        'AGUARDANDO_MAQUINA',
+        'AGUARDANDO_PAGAMENTO',
+        'PAGAMENTO_PARCIAL'
+    );
+
+-- Pagamento
+CREATE UNIQUE INDEX uq_pagamento_referencia_externa
+    ON pagamento_pedido(referencia_externa)
+    WHERE referencia_externa IS NOT NULL
+      AND BTRIM(referencia_externa) <> '';
+
+CREATE UNIQUE INDEX uq_pagamento_chave_idempotencia
+    ON pagamento_pedido(chave_idempotencia)
+    WHERE chave_idempotencia IS NOT NULL
+      AND BTRIM(chave_idempotencia) <> '';
+
+CREATE UNIQUE INDEX uq_pagamento_order_externa
+    ON pagamento_pedido(provedor, order_externa_id)
+    WHERE order_externa_id IS NOT NULL
+      AND BTRIM(order_externa_id) <> '';
+
+CREATE UNIQUE INDEX uq_pagamento_payment_externo
+    ON pagamento_pedido(provedor, payment_externo_id)
+    WHERE payment_externo_id IS NOT NULL
+      AND BTRIM(payment_externo_id) <> '';
+
+CREATE UNIQUE INDEX uq_pagamento_point_ativo_terminal
+    ON pagamento_pedido(terminal_id)
+    WHERE terminal_id IS NOT NULL
+      AND status IN (
+          'PENDENTE_NA_POINT',
+          'EM_TERMINAL',
+          'CANCELAMENTO_SOLICITADO',
+          'ACAO_NECESSARIA',
+          'PENDENTE_CONCILIACAO'
+      );
+
+COMMENT ON INDEX uq_pagamento_point_ativo_terminal IS
+    'Uma cobrança eletrônica ativa por terminal. O escopo é global porque terminal_id identifica o dispositivo físico, não o estabelecimento.';
+
+CREATE INDEX idx_pagamento_sessao_caixa
+    ON pagamento_pedido(sessao_caixa_id);
+
+CREATE INDEX idx_pagamento_sessao_status
+    ON pagamento_pedido(sessao_caixa_id, status);
+
+CREATE INDEX idx_pagamento_status
+    ON pagamento_pedido(status);
+
+CREATE INDEX idx_pagamento_point_reconciliacao
+    ON pagamento_pedido(provedor, status, solicitado_em);
+
+CREATE INDEX idx_pagamento_pedido_status
+    ON pagamento_pedido(pedido_id, status);
+
+-- Reserva de estoque
+CREATE UNIQUE INDEX uq_reserva_estoque_ativa_item
+    ON reserva_estoque(item_pedido_id, produto_id)
+    WHERE status = 'ATIVA';
+
+CREATE INDEX idx_reserva_estoque_pedido
+    ON reserva_estoque(pedido_id);
+
+CREATE INDEX idx_reserva_estoque_pagamento
+    ON reserva_estoque(pagamento_pedido_id);
+
+CREATE INDEX idx_reserva_estoque_produto_status
+    ON reserva_estoque(produto_id, status);
+
+CREATE INDEX idx_reserva_estoque_estoque
+    ON reserva_estoque(estoque_id);
+
+CREATE INDEX idx_reserva_estoque_status_expiracao
+    ON reserva_estoque(expira_em)
+    WHERE status = 'ATIVA';
+
+-- Webhook
+CREATE UNIQUE INDEX uq_evento_webhook_provedor_request
+    ON evento_webhook_pagamento(provedor, request_id)
+    WHERE request_id IS NOT NULL
+      AND BTRIM(request_id) <> '';
+
+CREATE INDEX idx_evento_webhook_pendente
+    ON evento_webhook_pagamento(status_processamento, recebido_em);
+
+CREATE INDEX idx_evento_webhook_recurso
+    ON evento_webhook_pagamento(recurso_externo_id);
+
+CREATE INDEX idx_evento_webhook_pagamento
+    ON evento_webhook_pagamento(pagamento_pedido_id);
 
 -- ============================================================
 -- DOCUMENTAÇÃO DA ESTRATÉGIA DE IDS
@@ -702,3 +1456,150 @@ COMMENT ON COLUMN item_nota_fiscal.id IS
 
 COMMENT ON COLUMN movimentacao_estoque.id IS
     'BIGINT - tabela de alto volume e histórico de estoque';
+
+COMMENT ON COLUMN configuracao_caixa.id IS
+    'UUID - configuração exposta pela API e isolada por estabelecimento';
+
+COMMENT ON COLUMN sessao_caixa.id IS
+    'UUID - sessão operacional exposta em APIs e relatórios';
+
+COMMENT ON COLUMN movimentacao_caixa.id IS
+    'BIGINT - histórico de alto volume e escopo interno à sessão';
+
+COMMENT ON COLUMN reserva_estoque.id IS
+    'BIGINT - detalhe transitório de alto volume e escopo interno ao pedido';
+
+COMMENT ON COLUMN evento_webhook_pagamento.id IS
+    'BIGINT - log idempotente de alto volume';
+
+COMMENT ON COLUMN auditoria_caixa.id IS
+    'BIGINT - trilha de auditoria de alto volume';
+
+COMMENT ON COLUMN configuracao_caixa.terminal_id IS
+    'Identificador do terminal Mercado Pago Point (config.point.terminal_id)';
+
+COMMENT ON COLUMN sessao_caixa.terminal_id IS
+    'Terminal utilizado na sessão; nulo enquanto a Point não estiver configurada';
+
+COMMENT ON COLUMN sessao_caixa.resumo_fechamento IS
+    'Resumo congelado no fechamento: totais por forma, sangrias, reforços e conferência';
+
+COMMENT ON COLUMN sessao_caixa.fechada_por_usuario_id IS
+    'Usuário que fechou a sessão; a exclusão física é bloqueada para preservar o histórico';
+
+COMMENT ON COLUMN sessao_caixa.divergencia_resolvida_por_usuario_id IS
+    'Usuário que resolveu a divergência de caixa; a exclusão física é bloqueada para preservar o histórico';
+
+COMMENT ON COLUMN pedido.canal IS
+    'Canal do atendimento: BALCAO, MESA, RETIRADA ou DELIVERY';
+
+COMMENT ON COLUMN pedido.identificador_atendimento IS
+    'Rótulo livre para distinguir pedidos simultâneos, como "Mesa 3" ou "Balcão 2"';
+
+COMMENT ON COLUMN pedido.sessao_caixa_id IS
+    'Sessão em que o pedido foi aberto; o recebimento pode ocorrer em outra sessão';
+
+COMMENT ON COLUMN pedido.atualizado_em IS
+    'Última alteração do pedido, usada para ordenar os atendimentos em aberto';
+
+COMMENT ON COLUMN pagamento_pedido.sessao_caixa_id IS
+    'Sessão que recebeu efetivamente o pagamento; pode diferir da sessão de abertura do pedido';
+
+COMMENT ON COLUMN pagamento_pedido.provedor IS
+    'MERCADO_PAGO para cobranças na Point, INTERNO para dinheiro e MANUAL para contingência autorizada';
+
+COMMENT ON COLUMN pagamento_pedido.valor IS
+    'Valor aplicado à venda, já líquido de troco';
+
+COMMENT ON COLUMN pagamento_pedido.valor_cobrado IS
+    'Valor bruto enviado ao provedor; pode ser maior que valor quando os juros são repassados ao cliente';
+
+COMMENT ON COLUMN pagamento_pedido.valor_recebido IS
+    'Valor físico recebido em dinheiro; nulo enquanto o pagamento não foi confirmado';
+
+COMMENT ON COLUMN pagamento_pedido.valor_troco IS
+    'Troco entregue ao cliente; sempre zero para pagamentos eletrônicos';
+
+COMMENT ON COLUMN pagamento_pedido.referencia_externa IS
+    'external_reference da order do Mercado Pago, única por tentativa';
+
+COMMENT ON COLUMN pagamento_pedido.chave_idempotencia IS
+    'X-Idempotency-Key persistida para repetição segura da operação externa';
+
+COMMENT ON COLUMN pagamento_pedido.order_externa_id IS
+    'Identificador da order no Mercado Pago';
+
+COMMENT ON COLUMN pagamento_pedido.payment_externo_id IS
+    'Identificador da transação/pagamento no provedor';
+
+COMMENT ON COLUMN pagamento_pedido.terminal_id IS
+    'Terminal Point que processou a cobrança; snapshot no momento da order';
+
+COMMENT ON COLUMN pagamento_pedido.pago_em IS
+    'Momento em que o pagamento foi aprovado ou confirmado';
+
+COMMENT ON COLUMN movimentacao_estoque.origem IS
+    'USUARIO para ação autenticada, SISTEMA para rotina interna e WEBHOOK para confirmação assíncrona';
+
+COMMENT ON COLUMN reserva_estoque.origem_drink_id IS
+    'Produto DRINK que originou o consumo do ingrediente; nulo para produto vendido diretamente';
+
+COMMENT ON COLUMN reserva_estoque.quantidade IS
+    'Quantidade reservada na unidade de estoque do produto';
+
+COMMENT ON COLUMN reserva_estoque.movimentacao_estoque_id IS
+    'Movimentação de saída criada na efetivação; garante rastreabilidade e idempotência';
+
+COMMENT ON COLUMN evento_webhook_pagamento.evento_externo_id IS
+    'Identificador da notificação (id do evento), não o id do recurso';
+
+COMMENT ON COLUMN evento_webhook_pagamento.recurso_externo_id IS
+    'Identificador do recurso notificado (data.id: order ou payment)';
+
+COMMENT ON COLUMN evento_webhook_pagamento.request_id IS
+    'Header x-request-id da entrega, usado como idempotência complementar';
+
+COMMENT ON COLUMN evento_webhook_pagamento.assinatura IS
+    'Header x-signature recebido, preservado para auditoria da validação';
+
+COMMENT ON COLUMN auditoria_caixa.entidade_id IS
+    'Identificador textual da entidade auditada, inclusive IDs compostos ou externos';
+
+COMMENT ON COLUMN item_pedido.custo_unitario IS
+    'Custo unitário congelado no momento da venda; nulo apenas em registros legados';
+
+COMMENT ON COLUMN item_pedido.categoria_id IS
+    'Categoria do produto no momento da venda, preservada para relatórios históricos';
+
+COMMENT ON COLUMN item_pedido.categoria_nome IS
+    'Snapshot do nome da categoria; mantém o relatório estável se a categoria for renomeada';
+
+COMMENT ON COLUMN item_pedido.quantidade_enviada_bar IS
+    'Quantidade do item já enviada à comanda do bar; não altera a quantidade vendida';
+
+COMMENT ON COLUMN item_pedido.enviado_bar_em IS
+    'Último envio deste item à comanda do bar';
+
+COMMENT ON COLUMN auditoria_caixa.usuario_nome IS
+    'Snapshot do nome do operador no momento do evento';
+
+COMMENT ON COLUMN auditoria_caixa.valor IS
+    'Valor financeiro do evento (desconto, cancelamento ou item removido); nulo para eventos não financeiros';
+
+COMMENT ON COLUMN auditoria_caixa.motivo IS
+    'Motivo informado pelo operador ou pelo autorizador';
+
+COMMENT ON COLUMN auditoria_caixa.autorizado_por_usuario_id IS
+    'Gerente que autorizou a ação; nulo quando não houve autorização';
+
+COMMENT ON COLUMN auditoria_caixa.autorizado_por_nome IS
+    'Snapshot do nome do autorizador';
+
+COMMENT ON COLUMN auditoria_caixa.pedido_identificador IS
+    'Snapshot do rótulo do pedido, como "Mesa 3" ou "Balcão 2"';
+
+COMMENT ON COLUMN auditoria_caixa.descricao IS
+    'Detalhe textual do evento; na tela de auditoria corresponde ao campo detalhe';
+
+COMMENT ON COLUMN auditoria_caixa.tipo_evento IS
+    'Código do evento: DESCONTO_CONCEDIDO, DESCONTO_ACIMA_DO_LIMITE, PEDIDO_CANCELADO, ITEM_REMOVIDO, SANGRIA, REFORCO, ABERTURA_CAIXA, FECHAMENTO_CAIXA, DIVERGENCIA_CAIXA, PAGAMENTO_CANCELADO, PAGAMENTO_ESTORNADO, CONFIGURACAO_CAIXA_ALTERADA';

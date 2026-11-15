@@ -38,8 +38,24 @@ class OpenApiExportIntegrationTest {
                 .contains("/lotes:")
                 .contains("/lotes/resumo:")
                 .contains("/dashboard/resumo:")
+                .contains("/caixa/configuracao:")
+                .contains("/caixa/caixas:")
+                .contains("/caixa/caixas/{caixaId}/terminais:")
+                .contains("/caixa/taxas:")
+                .contains("/caixa/sessoes:")
+                .contains("/caixa/sessoes/atual:")
+                .contains("/caixa/sessoes/{id}/movimentacoes:")
+                .contains("/caixa/sessoes/{id}/fechamento:")
+                .contains("/caixa/sessoes/{id}/resolucao-divergencia:")
+                .contains("/caixa/auditoria:")
+                .contains("/caixa/terminais/mercado-pago:")
+                .contains("/caixa/terminais/{id}/modo-operacao:")
+                .contains("/caixa/pedidos/{pedidoId}/pagamentos/{pagamentoId}/cancelamento-point:")
+                .contains("/caixa/pedidos/{pedidoId}/pagamentos/{pagamentoId}/sincronizar:")
+                .contains("/webhooks/mercado-pago/point:")
                 .contains("/auth/csrf:")
-                .contains("csrfTokenHeader:");
+                .contains("csrfTokenHeader:")
+                .doesNotContain("/dev/mercado-pago/point/");
 
         String caminhoDeExportacao = System.getProperty("openapi.export.path");
         if (caminhoDeExportacao != null && !caminhoDeExportacao.isBlank()) {

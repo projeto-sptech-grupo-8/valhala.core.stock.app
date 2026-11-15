@@ -33,6 +33,9 @@ public record MovimentacaoRequestDto(
         @Size(max = 50, message = "O número da nota fiscal deve ter no máximo 50 caracteres")
         String numeroNotaFiscal,
 
+        @Schema(description = "Quando true, a quantidade informada está em fardos e será convertida automaticamente para unidades.", example = "false")
+        Boolean emFardo,
+
         @Schema(description = "Validade do lote, em yyyy-MM-dd. Só em ENTRADA e AJUSTE_POSITIVO.", example = "2027-03-31")
         LocalDate validade,
 
@@ -48,6 +51,18 @@ public record MovimentacaoRequestDto(
             String lote,
             String numeroNotaFiscal
     ) {
-        this(produtoId, tipo, quantidade, motivo, lote, numeroNotaFiscal, null, null);
+        this(produtoId, tipo, quantidade, motivo, lote, numeroNotaFiscal, null, null, null);
+    }
+
+    public MovimentacaoRequestDto(
+            UUID produtoId,
+            TipoMovimentacaoEstoque tipo,
+            BigDecimal quantidade,
+            String motivo,
+            String lote,
+            String numeroNotaFiscal,
+            Boolean emFardo
+    ) {
+        this(produtoId, tipo, quantidade, motivo, lote, numeroNotaFiscal, emFardo, null, null);
     }
 }
