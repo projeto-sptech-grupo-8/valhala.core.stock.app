@@ -33,6 +33,8 @@ public final class ProdutoMapper {
                 calcularMargem(produto),
                 produto.isFracionado(),
                 produto.getVolumeEmbalagemMl(),
+                produto.isFardo(),
+                produto.getUnidadesPorFardo(),
                 produto.isAtivo(),
                 quantidadeEstoque,
                 estoqueMinimo,
@@ -74,6 +76,15 @@ public final class ProdutoMapper {
         }
         if (atualizacao.volumeEmbalagemMl() != null) {
             produto.setVolumeEmbalagemMl(atualizacao.volumeEmbalagemMl());
+        }
+        if (atualizacao.fardo() != null) {
+            produto.setFardo(atualizacao.fardo());
+            if (!atualizacao.fardo()) {
+                produto.setUnidadesPorFardo(null);
+            }
+        }
+        if (atualizacao.unidadesPorFardo() != null && produto.isFardo()) {
+            produto.setUnidadesPorFardo(atualizacao.unidadesPorFardo());
         }
         if (atualizacao.ativo() != null) {
             produto.setAtivo(atualizacao.ativo());

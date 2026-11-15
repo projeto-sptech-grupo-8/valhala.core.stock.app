@@ -28,6 +28,19 @@ public record MovimentacaoRequestDto(
         String lote,
 
         @Size(max = 50, message = "O número da nota fiscal deve ter no máximo 50 caracteres")
-        String numeroNotaFiscal
+        String numeroNotaFiscal,
+
+        @Schema(description = "Quando true, a quantidade informada está em fardos e será convertida automaticamente para unidades.", example = "false")
+        Boolean emFardo
 ) {
+    public MovimentacaoRequestDto(
+            UUID produtoId,
+            TipoMovimentacaoEstoque tipo,
+            BigDecimal quantidade,
+            String motivo,
+            String lote,
+            String numeroNotaFiscal
+    ) {
+        this(produtoId, tipo, quantidade, motivo, lote, numeroNotaFiscal, null);
+    }
 }

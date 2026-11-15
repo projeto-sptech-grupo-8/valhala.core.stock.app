@@ -3,6 +3,7 @@ package valhalla.core.stock.app.modules.estoque.service;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -83,7 +84,82 @@ public class ProdutoService {
             String ordenarPor,
             DirecaoOrdenacao direcao
     ) {
+        List<Integer> categoriaIds = categoriaId == null ? null : List.of(categoriaId);
+        return listarProdutos(busca, categoriaIds, tipo, ativo, pagina, tamanho, ordenarPor, direcao);
+    }
+
+    @Transactional(readOnly = true)
+    @PreAuthorize("""
+            @permissionAuthorizationService.hasPermission(
+                'VISUALIZAR_ESTOQUE',
+                authentication
+            )
+            """)
+    public RespostaPaginadaDto<ProdutoResponseDto> listarProdutos(
+            String busca,
+            List<Integer> categoriaIds,
+            ProdutoTipo tipo,
+            Boolean ativo,
+            int pagina,
+            int tamanho,
+            String ordenarPor,
+            DirecaoOrdenacao direcao
+    ) {
         UUID idEstabelecimento = obterIdEstabelecimentoAutenticado();
+        Specification<ProdutoEntity> especificacao = criarEspecificacaoProdutos(
+                idEstabelecimento, busca, categoriaIds, tipo, ativo, null
+        );
+
+        Page<ProdutoEntity> resultado = produtoRepository.findAll(
+                especificacao,
+                Paginacao.criar(pagina, tamanho, ordenarPor, direcao,
+                        Set.of("nome", "sku", "precoVenda", "precoCusto", "criadoEm", "atualizadoEm"))
+        );
+        List<ProdutoEntity> produtos = resultado.getContent();
+        Map<UUID, EstoqueEntity> estoques = estoquesPorProduto(produtos);
+        return RespostaPaginadaDto.de(resultado,
+                produto -> ProdutoMapper.paraResposta(produto, estoques.get(produto.getId())));
+    }
+
+    @Transactional(readOnly = true)
+    @PreAuthorize("""
+            @permissionAuthorizationService.hasPermission(
+                'VISUALIZAR_ESTOQUE',
+                authentication
+            )
+            """)
+    public List<ProdutoResponseDto> listarProdutosParaExportacao(
+            String busca,
+            List<Integer> categoriaIds,
+            ProdutoTipo tipo,
+            Boolean ativo,
+            List<UUID> ids,
+            String ordenarPor,
+            DirecaoOrdenacao direcao
+    ) {
+        UUID idEstabelecimento = obterIdEstabelecimentoAutenticado();
+        Specification<ProdutoEntity> especificacao = criarEspecificacaoProdutos(
+                idEstabelecimento, busca, categoriaIds, tipo, ativo, ids
+        );
+        Pageable paginacaoOrdenacao = Paginacao.criar(
+                0, 100, ordenarPor, direcao,
+                Set.of("nome", "sku", "precoVenda", "precoCusto", "criadoEm", "atualizadoEm")
+        );
+        List<ProdutoEntity> produtos = produtoRepository.findAll(especificacao, paginacaoOrdenacao.getSort());
+        Map<UUID, EstoqueEntity> estoques = estoquesPorProduto(produtos);
+        return produtos.stream()
+                .map(produto -> ProdutoMapper.paraResposta(produto, estoques.get(produto.getId())))
+                .toList();
+    }
+
+    private Specification<ProdutoEntity> criarEspecificacaoProdutos(
+            UUID idEstabelecimento,
+            String busca,
+            List<Integer> categoriaIds,
+            ProdutoTipo tipo,
+            Boolean ativo,
+            List<UUID> ids
+    ) {
         Specification<ProdutoEntity> especificacao = (root, query, builder) ->
                 builder.equal(root.get("estabelecimentoId"), idEstabelecimento);
         String buscaNormalizada = normalizarBusca(busca);
@@ -95,9 +171,9 @@ public class ProdutoService {
                     builder.like(builder.lower(root.get("codigoBarras")), "%" + buscaNormalizada + "%")
             ));
         }
-        if (categoriaId != null) {
+        if (categoriaIds != null && !categoriaIds.isEmpty()) {
             especificacao = especificacao.and((root, query, builder) ->
-                    builder.equal(root.get("categoria").get("id"), categoriaId));
+                    root.get("categoria").get("id").in(categoriaIds));
         }
         if (tipo != null) {
             especificacao = especificacao.and((root, query, builder) -> builder.equal(root.get("tipo"), tipo));
@@ -105,16 +181,10 @@ public class ProdutoService {
         if (ativo != null) {
             especificacao = especificacao.and((root, query, builder) -> builder.equal(root.get("ativo"), ativo));
         }
-
-        Page<ProdutoEntity> resultado = produtoRepository.findAll(
-                especificacao,
-                Paginacao.criar(pagina, tamanho, ordenarPor, direcao,
-                        Set.of("nome", "sku", "precoVenda", "precoCusto", "criadoEm", "atualizadoEm"))
-        );
-        List<ProdutoEntity> produtos = resultado.getContent();
-        Map<UUID, EstoqueEntity> estoques = estoquesPorProduto(produtos);
-        return RespostaPaginadaDto.de(resultado,
-                produto -> ProdutoMapper.paraResposta(produto, estoques.get(produto.getId())));
+        if (ids != null && !ids.isEmpty()) {
+            especificacao = especificacao.and((root, query, builder) -> root.get("id").in(ids));
+        }
+        return especificacao;
     }
 
     @Transactional(readOnly = true)
@@ -139,8 +209,10 @@ public class ProdutoService {
             """)
     public ProdutoResponseDto criarProduto(ProdutoRequestDto dto) {
         ProdutoTipo tipo = dto.tipo() == null ? ProdutoTipo.PADRAO : dto.tipo();
+        boolean isFardo = Boolean.TRUE.equals(dto.fardo());
         validarCamposEspecificosDoTipo(tipo, Boolean.TRUE.equals(dto.fracionado()),
-                dto.volumeEmbalagemMl(), dto.estoqueMinimo(), dto.quantidadeInicial());
+                dto.volumeEmbalagemMl(), dto.estoqueMinimo(), dto.quantidadeInicial(),
+                isFardo, dto.unidadesPorFardo(), Boolean.TRUE.equals(dto.quantidadeInicialEmFardos()));
 
         UUID idEstabelecimento = obterIdEstabelecimentoAutenticado();
         ProdutoEntity produto = new ProdutoEntity();
@@ -156,11 +228,18 @@ public class ProdutoService {
         produto.setCodigoBarras(normalizarOpcional(dto.codigoBarras()));
         produto.setFracionado(Boolean.TRUE.equals(dto.fracionado()));
         produto.setVolumeEmbalagemMl(dto.volumeEmbalagemMl());
+        produto.setFardo(isFardo);
+        produto.setUnidadesPorFardo(isFardo ? dto.unidadesPorFardo() : null);
         produto.setAtivo(true);
 
         ProdutoEntity produtoSalvo = produtoRepository.saveAndFlush(produto);
+        BigDecimal quantidadeInicialBase = converterQuantidadeInicial(
+                dto.quantidadeInicial(),
+                Boolean.TRUE.equals(dto.quantidadeInicialEmFardos()),
+                dto.unidadesPorFardo()
+        );
         EstoqueEntity estoque = tipo == ProdutoTipo.PADRAO
-                ? criarEstoqueInicial(produtoSalvo, dto.quantidadeInicial(), dto.estoqueMinimo())
+                ? criarEstoqueInicial(produtoSalvo, quantidadeInicialBase, dto.estoqueMinimo())
                 : null;
         if (estoque != null) {
             movimentacaoEstoqueService.registrarEntradaInicial(estoque, estoque.getQuantidadeAtual());
@@ -180,6 +259,7 @@ public class ProdutoService {
     public ProdutoResponseDto atualizarProduto(UUID idProduto, ProdutoAtualizacaoRequestDto dto) {
         ProdutoEntity produto = buscarProdutoDoEstabelecimentoAtual(idProduto);
         validarAlteracaoDeFracionamento(produto, dto);
+        validarAlteracaoDeFardo(produto, dto);
         if (dto.volumeEmbalagemMl() != null) {
             validarVolumeParaTipo(produto.getTipo(), dto.volumeEmbalagemMl());
         }
@@ -290,7 +370,10 @@ public class ProdutoService {
             boolean fracionado,
             BigDecimal volumeEmbalagemMl,
             BigDecimal estoqueMinimo,
-            BigDecimal quantidadeInicial
+            BigDecimal quantidadeInicial,
+            boolean fardo,
+            Integer unidadesPorFardo,
+            boolean quantidadeInicialEmFardos
     ) {
         if (tipo != ProdutoTipo.DRINK) {
             if (fracionado && volumeEmbalagemMl == null) {
@@ -298,12 +381,63 @@ public class ProdutoService {
                         "Produto fracionado deve informar o volume da embalagem em mililitros"
                 );
             }
+            if (!fardo && unidadesPorFardo != null) {
+                throw new IllegalArgumentException(
+                        "Unidades por fardo só pode ser informado quando fardo estiver ativo"
+                );
+            }
+            if (fardo && (unidadesPorFardo == null || unidadesPorFardo < 2)) {
+                throw new IllegalArgumentException(
+                        "Um fardo deve possuir ao menos 2 unidades"
+                );
+            }
+            if (quantidadeInicialEmFardos && !fardo) {
+                throw new IllegalArgumentException(
+                        "Quantidade inicial em fardos exige que o produto possua configuração de fardo"
+                );
+            }
             return;
         }
-        if (fracionado || volumeEmbalagemMl != null || estoqueMinimo != null || quantidadeInicial != null) {
+        if (fracionado || volumeEmbalagemMl != null || estoqueMinimo != null || quantidadeInicial != null
+                || fardo || unidadesPorFardo != null || quantidadeInicialEmFardos) {
             throw new IllegalArgumentException(
                     "Drink não possui estoque próprio; informe esses dados nos produtos ingredientes"
             );
+        }
+    }
+
+    private BigDecimal converterQuantidadeInicial(
+            BigDecimal quantidadeInicial,
+            boolean emFardos,
+            Integer unidadesPorFardo
+    ) {
+        if (quantidadeInicial == null || !emFardos) {
+            return quantidadeInicial;
+        }
+        return quantidadeInicial.multiply(BigDecimal.valueOf(unidadesPorFardo));
+    }
+
+    private void validarAlteracaoDeFardo(
+            ProdutoEntity produto,
+            ProdutoAtualizacaoRequestDto dto
+    ) {
+        if (dto.fardo() == null && dto.unidadesPorFardo() == null) {
+            return;
+        }
+        if (produto.getTipo() == ProdutoTipo.DRINK) {
+            throw new IllegalArgumentException("Drink não possui configuração de fardo");
+        }
+        boolean seraFardo = dto.fardo() == null ? produto.isFardo() : dto.fardo();
+        if (!seraFardo && dto.unidadesPorFardo() != null) {
+            throw new IllegalArgumentException(
+                    "Unidades por fardo só pode ser informado quando fardo estiver ativo"
+            );
+        }
+        Integer unidadesFinais = dto.unidadesPorFardo() != null
+                ? dto.unidadesPorFardo()
+                : (seraFardo ? produto.getUnidadesPorFardo() : null);
+        if (seraFardo && (unidadesFinais == null || unidadesFinais < 2)) {
+            throw new IllegalArgumentException("Um fardo deve possuir ao menos 2 unidades");
         }
     }
 

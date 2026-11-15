@@ -77,6 +77,66 @@ class ProdutoIntegrationTest extends EstoqueIntegrationTestSupport {
                 .andExpect(jsonPath("$.fieldErrors.precoVenda").exists());
     }
 
+    @Test
+    void filtraPorCategoriasExportaExcelEConverteFardo() throws Exception {
+        CategoriaEntity bebidas = categoria("Bebidas");
+        CategoriaEntity destilados = categoria("Destilados");
+        Cookie semPermissao = autenticarComPermissoes("sem-export@meraki.com");
+        Cookie gerente = autenticarGerente("gerente-export@meraki.com");
+
+        mockMvc.perform(get("/produtos/exportar").cookie(semPermissao))
+                .andExpect(status().isForbidden());
+
+        MvcResult criado = mockMvc.perform(post("/produtos").cookie(gerente).with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nome":"Brahma Lata","categoriaId":%d,"unidadeMedida":"un",
+                                 "precoVenda":5.50,"precoCusto":3.00,"tipo":"PADRAO",
+                                 "fardo":true,"unidadesPorFardo":12,"quantidadeInicial":2,"quantidadeInicialEmFardos":true}
+                                """.formatted(bebidas.getId())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.fardo").value(true))
+                .andExpect(jsonPath("$.unidadesPorFardo").value(12))
+                .andExpect(jsonPath("$.quantidadeEstoque").value(24))
+                .andReturn();
+        String idBrahma = com.jayway.jsonpath.JsonPath.read(criado.getResponse().getContentAsString(), "$.id").toString();
+
+        mockMvc.perform(post("/produtos").cookie(gerente).with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(novoProduto(destilados.getId())))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/produtos")
+                        .param("categoriaId", String.valueOf(bebidas.getId()))
+                        .cookie(gerente))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItens").value(1))
+                .andExpect(jsonPath("$.itens[0].nome").value("Brahma Lata"));
+
+        mockMvc.perform(get("/produtos")
+                        .param("categoriaId", String.valueOf(bebidas.getId()), String.valueOf(destilados.getId()))
+                        .cookie(gerente))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItens").value(2));
+
+        MvcResult exportado = mockMvc.perform(get("/produtos/exportar")
+                        .param("ids", idBrahma)
+                        .cookie(gerente))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .andExpect(header().string("Content-Disposition",
+                        org.hamcrest.Matchers.containsString(".xlsx")))
+                .andReturn();
+
+        try (var wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(
+                new java.io.ByteArrayInputStream(exportado.getResponse().getContentAsByteArray()))) {
+            var sheet = wb.getSheet("Produtos");
+            org.assertj.core.api.Assertions.assertThat(sheet.getPhysicalNumberOfRows()).isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(sheet.getRow(1).getCell(1).getStringCellValue()).isEqualTo("Brahma Lata");
+        }
+    }
+
     private String novoProduto(int categoriaId) {
         return """
                 {"nome":"Vodka Absolut","categoriaId":%d,"unidadeMedida":"garrafa",

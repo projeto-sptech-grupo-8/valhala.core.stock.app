@@ -23,6 +23,8 @@ public record ProdutoResponseDto(
         BigDecimal margemPercentual,
         Boolean fracionado,
         BigDecimal volumeEmbalagemMl,
+        Boolean fardo,
+        Integer unidadesPorFardo,
         Boolean ativo,
         BigDecimal quantidadeEstoque,
         BigDecimal estoqueMinimo,

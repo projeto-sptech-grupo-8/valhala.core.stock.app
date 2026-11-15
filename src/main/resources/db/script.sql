@@ -217,6 +217,8 @@ CREATE TABLE produto (
     preco_venda NUMERIC(12,2) NOT NULL,
     fracionado BOOLEAN NOT NULL DEFAULT FALSE,
     volume_embalagem_ml NUMERIC(12,3),
+    fardo BOOLEAN NOT NULL DEFAULT FALSE,
+    unidades_por_fardo INTEGER,
     ativo BOOLEAN NOT NULL DEFAULT TRUE,
     criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -235,6 +237,13 @@ CREATE TABLE produto (
 
     CONSTRAINT ck_produto_volume_embalagem
         CHECK (volume_embalagem_ml IS NULL OR volume_embalagem_ml > 0),
+
+    CONSTRAINT ck_produto_fardo_consistencia
+        CHECK ((fardo = FALSE AND unidades_por_fardo IS NULL)
+            OR (fardo = TRUE AND unidades_por_fardo >= 2)),
+
+    CONSTRAINT ck_produto_fardo_tipo
+        CHECK (fardo = FALSE OR tipo = 'PADRAO'),
 
     CONSTRAINT fk_produto_estabelecimento
         FOREIGN KEY (estabelecimento_id)

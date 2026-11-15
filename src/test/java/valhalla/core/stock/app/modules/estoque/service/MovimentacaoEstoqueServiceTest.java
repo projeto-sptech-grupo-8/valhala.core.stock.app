@@ -411,6 +411,59 @@ class MovimentacaoEstoqueServiceTest {
         assertThat(custoDrink).isEqualByComparingTo("13.00");
     }
 
+    @Test
+    void converteEntradaEmFardoParaUnidades() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        autenticar(estabelecimentoId);
+        ProdutoEntity cerveja = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Skol Lata");
+        cerveja.setFardo(true);
+        cerveja.setUnidadesPorFardo(12);
+        EstoqueEntity estoque = estoque(cerveja, "10");
+
+        when(produtoRepository.findById(cerveja.getId())).thenReturn(Optional.of(cerveja));
+        when(estoqueRepository.findByProdutoIdForUpdate(cerveja.getId())).thenReturn(Optional.of(estoque));
+
+        MovimentacaoResponseDto resposta = movimentacaoEstoqueService.registrarMovimentacao(
+                new MovimentacaoRequestDto(
+                        cerveja.getId(),
+                        TipoMovimentacaoEstoque.ENTRADA,
+                        new BigDecimal("2"),
+                        "Reposição",
+                        null,
+                        null,
+                        true
+                )
+        );
+
+        assertThat(estoque.getQuantidadeAtual()).isEqualByComparingTo("34");
+        assertThat(resposta.quantidade()).isEqualByComparingTo("24");
+        assertThat(resposta.motivo()).isEqualTo("Reposição (2 fardo(s))");
+    }
+
+    @Test
+    void rejeitaMovimentacaoEmFardoQuandoProdutoNaoPossuiConfiguracaoDeFardo() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        autenticar(estabelecimentoId);
+        ProdutoEntity agua = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Água");
+        EstoqueEntity estoque = estoque(agua, "10");
+
+        when(produtoRepository.findById(agua.getId())).thenReturn(Optional.of(agua));
+        when(estoqueRepository.findByProdutoIdForUpdate(agua.getId())).thenReturn(Optional.of(estoque));
+
+        assertThatThrownBy(() -> movimentacaoEstoqueService.registrarMovimentacao(
+                new MovimentacaoRequestDto(
+                        agua.getId(),
+                        TipoMovimentacaoEstoque.ENTRADA,
+                        new BigDecimal("1"),
+                        null,
+                        null,
+                        null,
+                        true
+                )
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("O produto informado não possui configuração de fardo");
+    }
+
     private ProdutoEntity produto(UUID estabelecimentoId, ProdutoTipo tipo, boolean fracionado, String nome) {
         ProdutoEntity produto = new ProdutoEntity();
         produto.setId(UUID.randomUUID());

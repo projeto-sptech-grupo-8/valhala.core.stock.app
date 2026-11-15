@@ -11,8 +11,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import org.springframework.validation.annotation.Validated;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -26,12 +29,16 @@ import valhalla.core.stock.app.modules.estoque.dto.ProdutoAtualizacaoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoResponseDto;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
+import valhalla.core.stock.app.modules.estoque.service.ProdutoExportacaoService;
 import valhalla.core.stock.app.modules.estoque.service.ProdutoService;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
 
 import java.net.URI;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -41,10 +48,20 @@ import java.util.UUID;
 @SecurityRequirement(name = "accessTokenCookie")
 public class ProdutoController {
 
-    private final ProdutoService produtoService;
+    private static final MediaType MEDIA_TYPE_EXCEL = MediaType.parseMediaType(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    private static final DateTimeFormatter EXPORT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm");
 
-    public ProdutoController(ProdutoService produtoService) {
+    private final ProdutoService produtoService;
+    private final ProdutoExportacaoService produtoExportacaoService;
+
+    public ProdutoController(
+            ProdutoService produtoService,
+            ProdutoExportacaoService produtoExportacaoService
+    ) {
         this.produtoService = produtoService;
+        this.produtoExportacaoService = produtoExportacaoService;
     }
 
     @GetMapping
@@ -61,8 +78,8 @@ public class ProdutoController {
     public ResponseEntity<RespostaPaginadaDto<ProdutoResponseDto>> listarProdutos(
             @Parameter(description = "Busca por nome, SKU ou código de barras", example = "absolut")
             @RequestParam(required = false) String busca,
-            @Parameter(description = "ID da categoria", example = "1")
-            @RequestParam(required = false) Integer categoriaId,
+            @Parameter(description = "IDs das categorias", example = "1")
+            @RequestParam(required = false) List<Integer> categoriaId,
             @Parameter(description = "Tipo do produto: PADRAO ou DRINK. Omitido: ambos.", example = "PADRAO")
             @RequestParam(required = false) ProdutoTipo tipo,
             @Parameter(description = "Situação do produto. Omitido: ativos e inativos.", example = "true")
@@ -79,6 +96,44 @@ public class ProdutoController {
         return ResponseEntity.ok(produtoService.listarProdutos(
                 busca, categoriaId, tipo, ativo, pagina, tamanho, ordenarPor, direcao
         ));
+    }
+
+    @GetMapping("/exportar")
+    @Operation(summary = "Exportar produtos em planilha Excel (.xlsx) aplicando os filtros informados")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Planilha Excel gerada."),
+            @ApiResponse(responseCode = "400", description = "Parâmetros de consulta inválidos.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Usuário sem permissão para visualizar estoque.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    public ResponseEntity<byte[]> exportarProdutos(
+            @Parameter(description = "Busca por nome, SKU ou código de barras", example = "absolut")
+            @RequestParam(required = false) String busca,
+            @Parameter(description = "IDs das categorias", example = "1")
+            @RequestParam(required = false) List<Integer> categoriaId,
+            @Parameter(description = "Tipo do produto: PADRAO ou DRINK. Omitido: ambos.", example = "PADRAO")
+            @RequestParam(required = false) ProdutoTipo tipo,
+            @Parameter(description = "Situação do produto. Omitido: ativos e inativos.", example = "true")
+            @RequestParam(required = false) Boolean ativo,
+            @Parameter(description = "Lista opcional de IDs específicos para exportar")
+            @RequestParam(required = false) List<UUID> ids,
+            @Parameter(description = "Campo de ordenação: nome, sku, precoVenda, precoCusto, criadoEm ou atualizadoEm. Padrão: nome.", schema = @Schema(defaultValue = "nome"))
+            @RequestParam(defaultValue = "nome") String ordenarPor,
+            @Parameter(description = "Direção da ordenação: ASC ou DESC. Padrão: ASC.", schema = @Schema(defaultValue = "ASC"))
+            @RequestParam(defaultValue = "ASC") DirecaoOrdenacao direcao
+    ) {
+        List<ProdutoResponseDto> produtos = produtoService.listarProdutosParaExportacao(
+                busca, categoriaId, tipo, ativo, ids, ordenarPor, direcao
+        );
+        byte[] arquivo = produtoExportacaoService.gerarPlanilhaExcel(produtos);
+        String nomeArquivo = "produtos-" + LocalDateTime.now().format(EXPORT_FORMATTER) + ".xlsx";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MEDIA_TYPE_EXCEL);
+        headers.setContentDisposition(ContentDisposition.attachment().filename(nomeArquivo).build());
+        return ResponseEntity.ok().headers(headers).body(arquivo);
     }
 
     @PostMapping

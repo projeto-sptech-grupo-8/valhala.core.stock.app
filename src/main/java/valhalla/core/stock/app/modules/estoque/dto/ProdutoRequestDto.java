@@ -2,6 +2,7 @@ package valhalla.core.stock.app.modules.estoque.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -59,6 +60,34 @@ public record ProdutoRequestDto(
 
         @PositiveOrZero(message = "A quantidade inicial não pode ser negativa")
         @Schema(description = "Aplicável a produtos PADRAO. Quando omitida, inicia em zero.", example = "12")
-        BigDecimal quantidadeInicial
+        BigDecimal quantidadeInicial,
+
+        @Schema(description = "Indica se o produto possui configuração de fardo.", example = "true")
+        Boolean fardo,
+
+        @Min(value = 2, message = "Um fardo deve possuir ao menos 2 unidades")
+        @Schema(description = "Quantidade de unidades contidas em um fardo. Obrigatório quando fardo=true.", example = "12")
+        Integer unidadesPorFardo,
+
+        @Schema(description = "Quando true, a quantidade inicial informada é multiplicada por unidadesPorFardo.", example = "false")
+        Boolean quantidadeInicialEmFardos
 ) {
+    public ProdutoRequestDto(
+            String nome,
+            Integer categoriaId,
+            String unidadeMedida,
+            BigDecimal precoVenda,
+            BigDecimal precoCusto,
+            ProdutoTipo tipo,
+            String codigoBarras,
+            String descricao,
+            Boolean fracionado,
+            BigDecimal volumeEmbalagemMl,
+            BigDecimal estoqueMinimo,
+            BigDecimal quantidadeInicial
+    ) {
+        this(nome, categoriaId, unidadeMedida, precoVenda, precoCusto, tipo, codigoBarras,
+                descricao, fracionado, volumeEmbalagemMl, estoqueMinimo, quantidadeInicial,
+                null, null, null);
+    }
 }

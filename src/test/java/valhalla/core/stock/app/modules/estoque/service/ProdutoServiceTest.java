@@ -270,6 +270,73 @@ class ProdutoServiceTest {
                 .hasMessage("Produto não pode ser excluído porque possui movimentações ou vínculos registrados");
     }
 
+    @Test
+    void criaProdutoComFardoEConverteQuantidadeInicial() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        CategoriaEntity categoria = categoria(estabelecimentoId, true);
+        autenticarNoEstabelecimento(estabelecimentoId);
+        when(categoriaRepository.findById(1)).thenReturn(Optional.of(categoria));
+        when(produtoRepository.existsByEstabelecimentoIdAndSku(any(), anyString())).thenReturn(false);
+        when(produtoRepository.saveAndFlush(any(ProdutoEntity.class))).thenAnswer(invocation -> {
+            ProdutoEntity produto = invocation.getArgument(0);
+            produto.setId(UUID.randomUUID());
+            return produto;
+        });
+        when(estoqueRepository.saveAndFlush(any(EstoqueEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProdutoResponseDto resposta = produtoService.criarProduto(new ProdutoRequestDto(
+                "Brahma Lata 350ml", 1, "un", new BigDecimal("5.50"),
+                new BigDecimal("3.00"), ProdutoTipo.PADRAO, null, null,
+                false, null, new BigDecimal("12"), new BigDecimal("2"),
+                true, 12, true
+        ));
+
+        ArgumentCaptor<EstoqueEntity> estoqueCaptor = ArgumentCaptor.forClass(EstoqueEntity.class);
+        verify(estoqueRepository).saveAndFlush(estoqueCaptor.capture());
+
+        assertThat(estoqueCaptor.getValue().getQuantidadeAtual()).isEqualByComparingTo("24");
+        assertThat(resposta.fardo()).isTrue();
+        assertThat(resposta.unidadesPorFardo()).isEqualTo(12);
+    }
+
+    @Test
+    void rejeitaConfiguracaoInvalidaDeFardoNaCriacaoEAtualizacao() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        CategoriaEntity categoria = categoria(estabelecimentoId, true);
+        autenticarNoEstabelecimento(estabelecimentoId);
+
+        assertThatThrownBy(() -> produtoService.criarProduto(new ProdutoRequestDto(
+                "Cerveja", 1, "un", new BigDecimal("5.00"), null, ProdutoTipo.PADRAO,
+                null, null, false, null, null, null, true, null, false
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Um fardo deve possuir ao menos 2 unidades");
+
+        assertThatThrownBy(() -> produtoService.criarProduto(new ProdutoRequestDto(
+                "Cerveja", 1, "un", new BigDecimal("5.00"), null, ProdutoTipo.PADRAO,
+                null, null, false, null, null, null, false, 12, false
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Unidades por fardo só pode ser informado quando fardo estiver ativo");
+
+        assertThatThrownBy(() -> produtoService.criarProduto(new ProdutoRequestDto(
+                "Gin Tônica", 1, "copo", new BigDecimal("25.00"), null, ProdutoTipo.DRINK,
+                null, null, false, null, null, null, true, 6, false
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Drink não possui estoque próprio; informe esses dados nos produtos ingredientes");
+
+        ProdutoEntity produto = produto(estabelecimentoId, categoria, "PRD-AAAA0001", "Cerveja", ProdutoTipo.PADRAO, true);
+        produto.setFardo(true);
+        produto.setUnidadesPorFardo(12);
+        when(produtoRepository.findById(produto.getId())).thenReturn(Optional.of(produto));
+        when(produtoRepository.saveAndFlush(any(ProdutoEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(estoqueRepository.findByProdutoId(produto.getId())).thenReturn(Optional.empty());
+
+        ProdutoResponseDto atualizado = produtoService.atualizarProduto(produto.getId(), new ProdutoAtualizacaoRequestDto(
+                null, null, null, null, null, null, null, null, null, null, false, null, null
+        ));
+        assertThat(atualizado.fardo()).isFalse();
+        assertThat(atualizado.unidadesPorFardo()).isNull();
+    }
+
     private CategoriaEntity categoria(UUID estabelecimentoId, boolean ativa) {
         CategoriaEntity categoria = new CategoriaEntity();
         categoria.setId(1);

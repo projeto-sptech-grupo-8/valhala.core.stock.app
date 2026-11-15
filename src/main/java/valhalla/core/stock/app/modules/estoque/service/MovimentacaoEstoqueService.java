@@ -172,8 +172,10 @@ public class MovimentacaoEstoqueService {
 
         EstoqueEntity estoque = estoqueRepository.findByProdutoIdForUpdate(produto.getId())
                 .orElseThrow(() -> new EntityNotFoundException("Estoque do produto não encontrado"));
+        BigDecimal quantidadeBase = converterQuantidadeMovimentacao(produto, dto.quantidade(), Boolean.TRUE.equals(dto.emFardo()));
+        String motivo = comporMotivoMovimentacao(normalizar(dto.motivo()), dto.quantidade(), Boolean.TRUE.equals(dto.emFardo()));
         MovimentacaoCommand command = new MovimentacaoCommand(
-                dto.tipo(), dto.quantidade(), normalizar(dto.motivo()), normalizar(dto.lote()),
+                dto.tipo(), quantidadeBase, motivo, normalizar(dto.lote()),
                 normalizar(dto.numeroNotaFiscal()), null, null
         );
         UUID usuarioId = obterIdUsuarioAutenticado();
@@ -508,6 +510,28 @@ public class MovimentacaoEstoqueService {
             return quantidadeVendida.multiply(produto.getVolumeEmbalagemMl());
         }
         return quantidadeVendida;
+    }
+
+    private BigDecimal converterQuantidadeMovimentacao(
+            ProdutoEntity produto,
+            BigDecimal quantidade,
+            boolean emFardo
+    ) {
+        if (!emFardo) {
+            return quantidade;
+        }
+        if (!produto.isFardo() || produto.getUnidadesPorFardo() == null || produto.getUnidadesPorFardo() < 2) {
+            throw new IllegalArgumentException("O produto informado não possui configuração de fardo");
+        }
+        return quantidade.multiply(BigDecimal.valueOf(produto.getUnidadesPorFardo()));
+    }
+
+    private String comporMotivoMovimentacao(String motivo, BigDecimal quantidadeInformada, boolean emFardo) {
+        if (!emFardo) {
+            return motivo;
+        }
+        String sufixo = quantidadeInformada.stripTrailingZeros().toPlainString() + " fardo(s)";
+        return motivo == null ? sufixo : motivo + " (" + sufixo + ")";
     }
 
     private void aplicarMovimentacaoPedido(
