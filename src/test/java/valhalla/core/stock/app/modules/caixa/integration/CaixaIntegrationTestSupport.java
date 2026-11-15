@@ -37,19 +37,23 @@ import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity
 import valhalla.core.stock.app.modules.estoque.entity.CategoriaEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ComposicaoDrinkEntity;
 import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.LoteEstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
 import valhalla.core.stock.app.modules.estoque.entity.UnidadeConsumoDrink;
 import valhalla.core.stock.app.modules.estoque.repository.CategoriaRepository;
 import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkRepository;
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
+import valhalla.core.stock.app.modules.estoque.repository.LoteEstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRepository;
+import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoLoteRepository;
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.entity.UserStatus;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -88,6 +92,8 @@ abstract class CaixaIntegrationTestSupport {
     @Autowired protected EstoqueRepository estoqueRepository;
     @Autowired protected ComposicaoDrinkRepository composicaoDrinkRepository;
     @Autowired protected MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
+    @Autowired protected LoteEstoqueRepository loteEstoqueRepository;
+    @Autowired protected MovimentacaoLoteRepository movimentacaoLoteRepository;
 
     protected EstablishmentEntity estabelecimento;
     private final Map<String, String> tokensCsrf = new HashMap<>();
@@ -332,6 +338,26 @@ abstract class CaixaIntegrationTestSupport {
         composicaoDrinkRepository.saveAndFlush(comp);
 
         return drink;
+    }
+
+    protected LoteEstoqueEntity lote(
+            ProdutoEntity produto,
+            String codigo,
+            LocalDate validade,
+            String quantidade
+    ) {
+        EstoqueEntity estoque = estoqueRepository.findByProdutoId(produto.getId()).orElseThrow();
+        BigDecimal qtd = new BigDecimal(quantidade);
+        LoteEstoqueEntity lote = new LoteEstoqueEntity();
+        lote.setEstoque(estoque);
+        lote.setCodigo(codigo);
+        lote.setValidade(validade);
+        lote.setQuantidadeAtual(qtd);
+        lote = loteEstoqueRepository.saveAndFlush(lote);
+
+        estoque.setQuantidadeAtual(estoque.getQuantidadeAtual().add(qtd));
+        estoqueRepository.saveAndFlush(estoque);
+        return lote;
     }
 
     protected List<AuditoriaCaixaEntity> auditorias() {

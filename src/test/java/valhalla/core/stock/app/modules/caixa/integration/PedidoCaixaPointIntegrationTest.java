@@ -32,7 +32,9 @@ import valhalla.core.stock.app.modules.caixa.point.service.TransicaoPagamentoPoi
 import valhalla.core.stock.app.modules.caixa.point.service.ValidadorAssinaturaWebhookMercadoPago;
 import valhalla.core.stock.app.modules.estoque.entity.CategoriaEntity;
 import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.LoteEstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoEstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoLoteEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.UnidadeConsumoDrink;
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
@@ -40,6 +42,7 @@ import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRep
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -866,5 +869,169 @@ class PedidoCaixaPointIntegrationTest extends CaixaIntegrationTestSupport {
                 .andExpect(status().isCreated())
                 .andReturn();
         return JsonPath.read(res.getResponse().getContentAsString(), "$.id");
+    }
+
+    @Test
+    void fluxoPointBloqueiaSaldoVencidoNaReservaConsomeFefoNoWebhookELiberaSemAlterarLotesQuandoRecusado()
+            throws Exception {
+        UsuarioAutenticado gerente = autenticarGerente("gerente.point.fefo@meraki.com");
+        UsuarioAutenticado operador = autenticarComPermissoes("operador.point.fefo@meraki.com", PERMISSOES_ATENDENTE);
+
+        CaixaEntity caixa = caixa(estabelecimento, "Caixa Point FEFO");
+        String terminalUuid1 = cadastrarTerminal(gerente, caixa.getId(), "PAX_A910__SMARTPOS_FEFO_01", "Smart FEFO 1");
+        String terminalUuid2 = cadastrarTerminal(gerente, caixa.getId(), "PAX_A910__SMARTPOS_FEFO_02", "Smart FEFO 2");
+        habilitarPointNaConfiguracao(true);
+        abrirSessao(operador, caixa.getId(), "100.00");
+
+        CategoriaEntity cat = categoria("Bebidas FEFO Point");
+        ProdutoEntity cerveja = produtoPadrao("Eisenbahn 600ml", cat, false, "7.00", "15.00", null, "0.000");
+        LocalDate hoje = LocalDate.now();
+        lote(cerveja, "CERV-VENCIDA", hoje.minusDays(1), "2.000");
+        lote(cerveja, "CERV-A", hoje.plusDays(3), "1.000");
+        lote(cerveja, "CERV-B", hoje.plusDays(20), "3.000");
+
+        ProdutoEntity vodka = produtoPadrao("Vodka 1L", cat, true, "80.00", "150.00", "1000.000", "0.000");
+        lote(vodka, "VOD-A", hoje.plusDays(5), "100.000");
+        lote(vodka, "VOD-B", hoje.plusDays(60), "500.000");
+        ProdutoEntity drink = drinkComReceita("Caipiroska", cat, "25.00", vodka, "100.000", UnidadeConsumoDrink.ML);
+
+        // Pedido 1 (R$ 45 + R$ 50 = R$ 95) e Pedido 2 concorrente (2 cervejas) criados antes da reserva
+        String pedido1Id = criarPedido(operador, "Mesa FEFO 01", cerveja.getId(), 3, drink.getId(), 2);
+        String pedido2Id = criarPedidoSimples(operador, "Mesa FEFO 02", cerveja.getId(), 2);
+
+        // 1) Envia Pedido 1 para Point -> reserva 3 cervejas e 200ml de vodka sem debitar os lotes ainda
+        MvcResult pag1 = mockMvc.perform(post("/caixa/pedidos/{id}/pagamentos", pedido1Id)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "forma": "PIX",
+                                  "valor": 95.00,
+                                  "terminalCaixaId": "%s",
+                                  "chaveIdempotencia": "point-fefo-01"
+                                }
+                                """.formatted(terminalUuid1)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AGUARDANDO_MAQUINA"))
+                .andReturn();
+        String orderId1 = JsonPath.read(pag1.getResponse().getContentAsString(), "$.pagamentos[0].orderExternaId");
+
+        EstoqueEntity estoqueCervejaReservado = estoqueRepository.findByProdutoId(cerveja.getId()).orElseThrow();
+        assertThat(estoqueCervejaReservado.getQuantidadeReservada()).isEqualByComparingTo("3.000");
+        assertThat(loteEstoqueRepository.findAllByEstoqueId(estoqueCervejaReservado.getId()))
+                .extracting(LoteEstoqueEntity::getCodigo, LoteEstoqueEntity::getQuantidadeAtual)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("CERV-VENCIDA", new BigDecimal("2.000")),
+                        org.assertj.core.groups.Tuple.tuple("CERV-A", new BigDecimal("1.000")),
+                        org.assertj.core.groups.Tuple.tuple("CERV-B", new BigDecimal("3.000"))
+                );
+
+        // 2) Pedido 2 tentando reservar 2 cervejas no terminal 2 falha com 409 porque restam apenas 1 não vencida
+        // (saldo físico livre é 6 - 3 = 3, mas 2 são vencidas)
+        mockMvc.perform(post("/caixa/pedidos/{id}/pagamentos", pedido2Id)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "forma": "DEBITO",
+                                  "valor": 30.00,
+                                  "terminalCaixaId": "%s",
+                                  "chaveIdempotencia": "point-fefo-bloqueio-02"
+                                }
+                                """.formatted(terminalUuid2)))
+                .andExpect(status().isConflict());
+
+        // 3) Webhook aprova Pedido 1 -> efetiva reservas debitando lotes por FEFO e gravando movimentacao_estoque_lote
+        mockPointClient.atualizarStatusMock(orderId1, "processed", "accredited", "accredited");
+        String requestId = "req-fefo-01";
+        String xSignature = validadorAssinatura.gerarAssinatura(orderId1, requestId, Instant.now().getEpochSecond());
+        mockMvc.perform(post("/webhooks/mercado-pago/point")
+                        .queryParam("data.id", orderId1)
+                        .queryParam("type", "order")
+                        .header("x-request-id", requestId)
+                        .header("x-signature", xSignature)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"id":"evt-fefo-01","type":"order","action":"order.processed","data":{"id":"%s"}}
+                                """.formatted(orderId1).trim()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PROCESSADO"));
+
+        EstoqueEntity estoqueCervejaFinal = estoqueRepository.findByProdutoId(cerveja.getId()).orElseThrow();
+        EstoqueEntity estoqueVodkaFinal = estoqueRepository.findByProdutoId(vodka.getId()).orElseThrow();
+        assertThat(estoqueCervejaFinal.getQuantidadeReservada()).isEqualByComparingTo("0.000");
+        assertThat(estoqueCervejaFinal.getQuantidadeAtual()).isEqualByComparingTo("3.000");
+        assertThat(estoqueVodkaFinal.getQuantidadeAtual()).isEqualByComparingTo("400.000");
+
+        assertThat(loteEstoqueRepository.findAllByEstoqueId(estoqueCervejaFinal.getId()))
+                .extracting(LoteEstoqueEntity::getCodigo, LoteEstoqueEntity::getQuantidadeAtual)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("CERV-VENCIDA", new BigDecimal("2.000")),
+                        org.assertj.core.groups.Tuple.tuple("CERV-A", new BigDecimal("0.000")),
+                        org.assertj.core.groups.Tuple.tuple("CERV-B", new BigDecimal("1.000"))
+                );
+        assertThat(loteEstoqueRepository.findAllByEstoqueId(estoqueVodkaFinal.getId()))
+                .satisfiesExactlyInAnyOrder(
+                        l -> {
+                            assertThat(l.getCodigo()).isEqualTo("VOD-A");
+                            assertThat(l.getQuantidadeAtual()).isEqualByComparingTo("0.000");
+                        },
+                        l -> {
+                            assertThat(l.getCodigo()).isEqualTo("VOD-B");
+                            assertThat(l.getQuantidadeAtual()).isEqualByComparingTo("400.000");
+                        }
+                );
+
+        List<MovimentacaoEstoqueEntity> movsWebhook = movimentacaoEstoqueRepository
+                .findAllByEstoqueProdutoEstabelecimentoIdOrderByOcorridoEmDesc(estabelecimento.getId())
+                .stream()
+                .filter(m -> "WEBHOOK".equals(m.getOrigem()))
+                .toList();
+        assertThat(movsWebhook).hasSize(2);
+        List<Long> idsMovsWebhook = movsWebhook.stream().map(MovimentacaoEstoqueEntity::getId).toList();
+        List<MovimentacaoLoteEntity> vinculosWebhook = movimentacaoLoteRepository
+                .findAllByMovimentacaoIdInOrderByIdAsc(idsMovsWebhook);
+        assertThat(vinculosWebhook).hasSize(4);
+
+        // 4) Pedido 3 (1 cerveja restante de CERV-B) tem recusa na Point -> libera reserva sem debitar CERV-B
+        String pedido3Id = criarPedidoSimples(operador, "Mesa FEFO 03", cerveja.getId(), 1);
+        MvcResult pag3 = mockMvc.perform(post("/caixa/pedidos/{id}/pagamentos", pedido3Id)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "forma": "CREDITO",
+                                  "valor": 15.00,
+                                  "terminalCaixaId": "%s",
+                                  "chaveIdempotencia": "point-fefo-recusa-03"
+                                }
+                                """.formatted(terminalUuid1)))
+                .andExpect(status().isOk())
+                .andReturn();
+        String orderId3 = JsonPath.read(pag3.getResponse().getContentAsString(), "$.pagamentos[0].orderExternaId");
+
+        mockMvc.perform(post("/dev/mercado-pago/point/orders/{orderId}/simular", orderId3)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "status": "failed",
+                                  "statusDetail": "cc_rejected_insufficient_amount",
+                                  "paymentStatus": "rejected",
+                                  "dispararWebhook": true
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        assertThat(estoqueRepository.findByProdutoId(cerveja.getId()).orElseThrow().getQuantidadeReservada())
+                .isEqualByComparingTo("0.000");
+        assertThat(loteEstoqueRepository.findAllByEstoqueId(estoqueCervejaFinal.getId()))
+                .filteredOn(l -> "CERV-B".equals(l.getCodigo()))
+                .first()
+                .satisfies(l -> assertThat(l.getQuantidadeAtual()).isEqualByComparingTo("1.000"));
     }
 }

@@ -14,12 +14,17 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import valhalla.core.stock.app.modules.caixa.exception.EstoqueInsuficientePedidoException;
+import valhalla.core.stock.app.modules.caixa.pedido.entity.ItemPedidoEntity;
+import valhalla.core.stock.app.modules.caixa.pedido.entity.PedidoEntity;
 import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoResponseDto;
 import valhalla.core.stock.app.modules.estoque.dto.SaidaDrinkRequestDto;
 import valhalla.core.stock.app.modules.estoque.entity.ComposicaoDrinkEntity;
 import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.LoteEstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoEstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoLoteEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
 import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
@@ -93,6 +98,16 @@ class MovimentacaoEstoqueServiceTest {
                     movimentacao.setId(1L);
                     return movimentacao;
                 });
+        lenient().when(movimentacaoEstoqueRepository.saveAndFlush(any(MovimentacaoEstoqueEntity.class)))
+                .thenAnswer(invocation -> {
+                    MovimentacaoEstoqueEntity movimentacao = invocation.getArgument(0);
+                    if (movimentacao.getId() == null) {
+                        movimentacao.setId(1L);
+                    }
+                    return movimentacao;
+                });
+        lenient().when(loteEstoqueRepository.save(any(LoteEstoqueEntity.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         UserEntity usuario = new UserEntity();
         usuario.setName("Operador de teste");
         lenient().when(userRepository.findById(any())).thenReturn(Optional.of(usuario));
@@ -487,6 +502,107 @@ class MovimentacaoEstoqueServiceTest {
                 )
         )).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("O produto informado não possui configuração de fardo");
+    }
+
+    @Test
+    void validarDisponibilidadeItensBloqueiaQuandoRestamApenasLotesVencidos() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        ProdutoEntity cerveja = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Heineken");
+        EstoqueEntity estoque = estoque(cerveja, "10");
+        estoque.setId(10);
+
+        LoteEstoqueEntity vencido = lote(estoque, 1L, "L-VENC", LocalDate.now().minusDays(2), "6");
+        LoteEstoqueEntity valido = lote(estoque, 2L, "L-OK", LocalDate.now().plusDays(15), "4");
+
+        when(produtoRepository.findById(cerveja.getId())).thenReturn(Optional.of(cerveja));
+        when(estoqueRepository.findAllByProdutoIdIn(any())).thenReturn(List.of(estoque));
+        when(loteEstoqueRepository.findAllByEstoqueId(10)).thenReturn(List.of(vencido, valido));
+
+        assertThatThrownBy(() -> movimentacaoEstoqueService.validarDisponibilidadeItens(
+                estabelecimentoId,
+                List.of(new MovimentacaoEstoqueService.ItemConsumoValidacao(cerveja.getId(), new BigDecimal("5")))
+        )).isInstanceOf(EstoqueInsuficientePedidoException.class)
+                .hasMessageContaining("Saldo dentro da validade insuficiente");
+    }
+
+    @Test
+    void baixarEEstornarEstoquePedidoUsaFefoEDevolveParaLotesOriginais() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        UUID operadorId = UUID.randomUUID();
+        ProdutoEntity cerveja = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Corona");
+        EstoqueEntity estoque = estoque(cerveja, "10");
+        estoque.setId(20);
+
+        LoteEstoqueEntity vencido = lote(estoque, 100L, "L-VENCIDO", LocalDate.now().minusDays(1), "3");
+        LoteEstoqueEntity proximo = lote(estoque, 101L, "L-PROX", LocalDate.now().plusDays(5), "2");
+        LoteEstoqueEntity distante = lote(estoque, 102L, "L-DIST", LocalDate.now().plusDays(30), "5");
+
+        PedidoEntity pedido = new PedidoEntity();
+        pedido.setId(UUID.randomUUID());
+        pedido.setEstabelecimentoId(estabelecimentoId);
+        pedido.setNumero(42L);
+
+        ItemPedidoEntity item = new ItemPedidoEntity();
+        item.setId(77L);
+        item.setPedidoId(pedido.getId());
+        item.setProdutoId(cerveja.getId());
+        item.setQuantidade(new BigDecimal("4"));
+
+        when(produtoRepository.findById(cerveja.getId())).thenReturn(Optional.of(cerveja));
+        when(estoqueRepository.findAllByProdutoIdInForUpdate(any())).thenReturn(List.of(estoque));
+        when(loteEstoqueRepository.findAllByEstoqueId(20)).thenReturn(List.of(vencido, proximo, distante));
+
+        movimentacaoEstoqueService.baixarEstoquePedido(pedido, List.of(item), operadorId);
+
+        assertThat(estoque.getQuantidadeAtual()).isEqualByComparingTo("6");
+        assertThat(vencido.getQuantidadeAtual()).isEqualByComparingTo("3");
+        assertThat(proximo.getQuantidadeAtual()).isEqualByComparingTo("0");
+        assertThat(distante.getQuantidadeAtual()).isEqualByComparingTo("3");
+
+        ArgumentCaptor<MovimentacaoLoteEntity> vinculoCaptor = ArgumentCaptor.forClass(MovimentacaoLoteEntity.class);
+        verify(movimentacaoLoteRepository, org.mockito.Mockito.times(2)).save(vinculoCaptor.capture());
+        List<MovimentacaoLoteEntity> vinculosSaida = vinculoCaptor.getAllValues();
+        assertThat(vinculosSaida).extracting(v -> v.getLote().getCodigo(), MovimentacaoLoteEntity::getQuantidade)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("L-PROX", new BigDecimal("2")),
+                        org.assertj.core.groups.Tuple.tuple("L-DIST", new BigDecimal("2"))
+                );
+
+        MovimentacaoEstoqueEntity saidaRegistrada = new MovimentacaoEstoqueEntity();
+        saidaRegistrada.setId(500L);
+        saidaRegistrada.setEstoque(estoque);
+        saidaRegistrada.setItemPedidoId(77L);
+        saidaRegistrada.setTipo(TipoMovimentacaoEstoque.SAIDA);
+        saidaRegistrada.setQuantidade(new BigDecimal("4"));
+        vinculosSaida.forEach(v -> v.setMovimentacao(saidaRegistrada));
+
+        when(movimentacaoEstoqueRepository.findAllByItemPedidoIdInAndTipoInOrderByIdAsc(any(), any()))
+                .thenReturn(List.of(saidaRegistrada));
+        when(movimentacaoLoteRepository.findAllByMovimentacaoIdInOrderByIdAsc(List.of(500L)))
+                .thenReturn(vinculosSaida);
+
+        movimentacaoEstoqueService.estornarEstoquePedido(pedido, List.of(item), operadorId);
+
+        assertThat(estoque.getQuantidadeAtual()).isEqualByComparingTo("10");
+        assertThat(proximo.getQuantidadeAtual()).isEqualByComparingTo("2");
+        assertThat(distante.getQuantidadeAtual()).isEqualByComparingTo("5");
+        assertThat(vencido.getQuantidadeAtual()).isEqualByComparingTo("3");
+    }
+
+    private LoteEstoqueEntity lote(
+            EstoqueEntity estoque,
+            Long id,
+            String codigo,
+            LocalDate validade,
+            String quantidade
+    ) {
+        LoteEstoqueEntity lote = new LoteEstoqueEntity();
+        lote.setId(id);
+        lote.setEstoque(estoque);
+        lote.setCodigo(codigo);
+        lote.setValidade(validade);
+        lote.setQuantidadeAtual(new BigDecimal(quantidade));
+        return lote;
     }
 
     private ProdutoEntity produto(UUID estabelecimentoId, ProdutoTipo tipo, boolean fracionado, String nome) {

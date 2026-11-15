@@ -26,6 +26,7 @@ import valhalla.core.stock.app.modules.estoque.entity.ComposicaoDrinkEntity;
 import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.LoteEstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoEstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoLoteEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
 import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
@@ -38,6 +39,7 @@ import valhalla.core.stock.app.modules.estoque.service.ControleLotesEstoque.Aloc
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
 import valhalla.core.stock.app.modules.estoque.strategy.EstrategiaMovimentacaoEstoque;
 import valhalla.core.stock.app.modules.estoque.strategy.MovimentacaoCommand;
+import valhalla.core.stock.app.modules.estoque.strategy.PoliticaLote;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
@@ -55,6 +57,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -405,18 +408,33 @@ public class MovimentacaoEstoqueService {
         for (Map.Entry<UUID, BigDecimal> entry : consumoPorProdutoPadrao.entrySet()) {
             ProdutoEntity produto = produtosPadrao.get(entry.getKey());
             EstoqueEntity estoque = estoques.get(entry.getKey());
-            if (estoque == null) {
-                throw new EntityNotFoundException("Estoque do produto " + produto.getNome() + " não encontrado");
-            }
-            BigDecimal reservado = estoque.getQuantidadeReservada() == null ? ZERO : estoque.getQuantidadeReservada();
-            BigDecimal disponivel = estoque.getQuantidadeAtual().subtract(reservado);
-            if (disponivel.compareTo(entry.getValue()) < 0) {
-                throw new EstoqueInsuficientePedidoException(
-                        "Estoque insuficiente para o produto " + produto.getNome(),
-                        produto.getNome(),
-                        disponivel
-                );
-            }
+            validarSaldoVendavel(produto, estoque, entry.getValue());
+        }
+    }
+
+    /**
+     * Valida saldo físico livre (descontando reservas) e saldo dentro da validade para venda/reserva.
+     */
+    public void validarSaldoVendavel(ProdutoEntity produto, EstoqueEntity estoque, BigDecimal quantidadeNecessaria) {
+        if (estoque == null) {
+            throw new EntityNotFoundException("Estoque do produto " + produto.getNome() + " não encontrado");
+        }
+        BigDecimal reservado = estoque.getQuantidadeReservada() == null ? ZERO : estoque.getQuantidadeReservada();
+        BigDecimal disponivelFisico = estoque.getQuantidadeAtual().subtract(reservado);
+        if (disponivelFisico.compareTo(quantidadeNecessaria) < 0) {
+            throw new EstoqueInsuficientePedidoException(
+                    "Estoque insuficiente para o produto " + produto.getNome(),
+                    produto.getNome(),
+                    disponivelFisico
+            );
+        }
+        BigDecimal disponivelNaoVencido = controleLotes.saldoNaoVencidoDisponivel(estoque);
+        if (disponivelNaoVencido.compareTo(quantidadeNecessaria) < 0) {
+            throw new EstoqueInsuficientePedidoException(
+                    "Saldo dentro da validade insuficiente para o produto " + produto.getNome(),
+                    produto.getNome(),
+                    disponivelNaoVencido
+            );
         }
     }
 
@@ -473,55 +491,117 @@ public class MovimentacaoEstoqueService {
         for (Map.Entry<UUID, BigDecimal> entry : consumoTotalPorProduto.entrySet()) {
             ProdutoEntity produto = produtosConsumidos.get(entry.getKey());
             EstoqueEntity estoque = estoques.get(entry.getKey());
-            if (estoque == null) {
-                throw new EntityNotFoundException("Estoque do produto " + produto.getNome() + " não encontrado");
-            }
-            BigDecimal reservado = estoque.getQuantidadeReservada() == null ? ZERO : estoque.getQuantidadeReservada();
-            BigDecimal disponivel = estoque.getQuantidadeAtual().subtract(reservado);
-            if (disponivel.compareTo(entry.getValue()) < 0) {
-                throw new EstoqueInsuficientePedidoException(
-                        "Estoque insuficiente para o produto " + produto.getNome(),
-                        produto.getNome(),
-                        disponivel
-                );
-            }
+            validarSaldoVendavel(produto, estoque, entry.getValue());
         }
 
         String motivoPadrao = "Venda concluída - Pedido #" + pedido.getNumero();
+        LocalDateTime agora = LocalDateTime.now();
         for (ItemPedidoEntity item : itens) {
             ProdutoEntity produto = produtosDoPedido.get(item.getProdutoId());
             if (produto.getTipo() == ProdutoTipo.PADRAO) {
                 EstoqueEntity estoque = estoques.get(produto.getId());
                 BigDecimal consumo = calcularQuantidadeEstoquePadrao(produto, item.getQuantidade());
-                MovimentacaoCommand command = new MovimentacaoCommand(
+                registrarBaixaPedidoComFefo(
+                        estoque,
                         TipoMovimentacaoEstoque.SAIDA,
                         consumo,
                         motivoPadrao,
+                        "PEDIDO",
+                        operadorUsuarioId,
+                        item.getId(),
                         null,
                         null,
-                        null,
-                        null
+                        agora
                 );
-                aplicarMovimentacaoPedido(estoque, command, operadorUsuarioId, item.getId());
             } else {
                 List<ComposicaoDrinkEntity> receita = receitasPorDrink.get(produto.getId());
                 JsonNode snapshot = criarSnapshotReceita(produto, receita, item.getQuantidade());
                 for (ComposicaoDrinkEntity comp : receita) {
                     EstoqueEntity estoqueIngrediente = estoques.get(comp.getProduto().getId());
                     BigDecimal consumo = comp.getQuantidade().multiply(item.getQuantidade());
-                    MovimentacaoCommand command = new MovimentacaoCommand(
+                    registrarBaixaPedidoComFefo(
+                            estoqueIngrediente,
                             TipoMovimentacaoEstoque.SAIDA_DRINK,
                             consumo,
                             motivoPadrao,
-                            null,
-                            null,
+                            "PEDIDO",
+                            operadorUsuarioId,
+                            item.getId(),
                             produto.getId(),
-                            snapshot.deepCopy()
+                            snapshot.deepCopy(),
+                            agora
                     );
-                    aplicarMovimentacaoPedido(estoqueIngrediente, command, operadorUsuarioId, item.getId());
                 }
             }
         }
+    }
+
+    /**
+     * Realiza baixa de estoque para pedido aplicando FEFO sem lotes vencidos, gravando
+     * histórico e vínculos em movimentacao_estoque_lote. Requer estoque bloqueado (FOR UPDATE).
+     */
+    public MovimentacaoEstoqueEntity registrarBaixaPedidoComFefo(
+            EstoqueEntity estoque,
+            TipoMovimentacaoEstoque tipo,
+            BigDecimal quantidade,
+            String motivo,
+            String origem,
+            UUID usuarioId,
+            Long itemPedidoId,
+            UUID origemDrinkId,
+            JsonNode receitaAplicada,
+            LocalDateTime ocorridoEm
+    ) {
+        if (tipo != TipoMovimentacaoEstoque.SAIDA && tipo != TipoMovimentacaoEstoque.SAIDA_DRINK) {
+            throw new IllegalArgumentException("Tipo de movimentação inválido para baixa de pedido: " + tipo);
+        }
+        BigDecimal saldoAnterior = estoque.getQuantidadeAtual();
+        BigDecimal saldoPosterior = saldoAnterior.subtract(quantidade);
+        if (saldoPosterior.compareTo(ZERO) < 0) {
+            throw new EstoqueInsuficientePedidoException(
+                    "Saldo de estoque insuficiente para o produto " + estoque.getProduto().getNome(),
+                    estoque.getProduto().getNome(),
+                    saldoAnterior
+            );
+        }
+
+        List<Alocacao> alocacoes;
+        try {
+            // lotes antes do saldo: reconciliar() compara soma dos lotes com o saldo ainda não alterado
+            alocacoes = controleLotes.movimentar(
+                    estoque,
+                    PoliticaLote.DEBITO_SEM_VENCIDOS,
+                    quantidade,
+                    null,
+                    null,
+                    null
+            );
+        } catch (IllegalArgumentException ex) {
+            throw new EstoqueInsuficientePedidoException(
+                    ex.getMessage(),
+                    estoque.getProduto().getNome(),
+                    controleLotes.saldoNaoVencidoDisponivel(estoque)
+            );
+        }
+
+        estoque.setQuantidadeAtual(saldoPosterior);
+        estoqueRepository.save(estoque);
+
+        return persistirMovimentacaoPedido(
+                estoque,
+                tipo,
+                quantidade,
+                saldoAnterior,
+                saldoPosterior,
+                motivo,
+                origem,
+                usuarioId,
+                itemPedidoId,
+                origemDrinkId,
+                receitaAplicada,
+                ocorridoEm,
+                alocacoes
+        );
     }
 
     @Transactional
@@ -557,23 +637,51 @@ public class MovimentacaoEstoqueService {
                 .stream()
                 .collect(Collectors.toMap(e -> e.getProduto().getId(), Function.identity()));
 
+        List<Long> idsSaidas = saidas.stream()
+                .map(MovimentacaoEstoqueEntity::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        Map<Long, List<MovimentacaoLoteEntity>> vinculosPorMovimentacao = idsSaidas.isEmpty()
+                ? Map.of()
+                : movimentacaoLoteRepository.findAllByMovimentacaoIdInOrderByIdAsc(idsSaidas).stream()
+                        .collect(Collectors.groupingBy(vinculo -> vinculo.getMovimentacao().getId()));
+
         String motivoEstorno = "Estorno do pedido #" + pedido.getNumero();
+        LocalDateTime agora = LocalDateTime.now();
         for (MovimentacaoEstoqueEntity saida : saidas) {
             UUID produtoId = saida.getEstoque().getProduto().getId();
             EstoqueEntity estoque = estoques.get(produtoId);
             if (estoque == null) {
                 throw new EntityNotFoundException("Estoque do produto não encontrado para estorno");
             }
-            MovimentacaoCommand command = new MovimentacaoCommand(
+            List<MovimentacaoLoteEntity> vinculosOriginais = saida.getId() == null
+                    ? List.of()
+                    : vinculosPorMovimentacao.getOrDefault(saida.getId(), List.of());
+            List<Alocacao> alocacoes = controleLotes.devolverParaLotes(
+                    estoque,
+                    saida.getQuantidade(),
+                    vinculosOriginais
+            );
+            BigDecimal saldoAnterior = estoque.getQuantidadeAtual();
+            BigDecimal saldoPosterior = saldoAnterior.add(saida.getQuantidade());
+            estoque.setQuantidadeAtual(saldoPosterior);
+            estoqueRepository.save(estoque);
+
+            persistirMovimentacaoPedido(
+                    estoque,
                     TipoMovimentacaoEstoque.AJUSTE_POSITIVO,
                     saida.getQuantidade(),
+                    saldoAnterior,
+                    saldoPosterior,
                     motivoEstorno,
+                    "PEDIDO",
+                    usuarioId,
+                    saida.getItemPedidoId(),
                     null,
                     null,
-                    null,
-                    null
+                    agora,
+                    alocacoes
             );
-            aplicarMovimentacaoPedido(estoque, command, usuarioId, saida.getItemPedidoId());
         }
     }
 
@@ -606,33 +714,38 @@ public class MovimentacaoEstoqueService {
         return motivo == null ? sufixo : motivo + " (" + sufixo + ")";
     }
 
-    private void aplicarMovimentacaoPedido(
+    private MovimentacaoEstoqueEntity persistirMovimentacaoPedido(
             EstoqueEntity estoque,
-            MovimentacaoCommand command,
+            TipoMovimentacaoEstoque tipo,
+            BigDecimal quantidade,
+            BigDecimal saldoAnterior,
+            BigDecimal saldoPosterior,
+            String motivo,
+            String origem,
             UUID usuarioId,
-            Long itemPedidoId
+            Long itemPedidoId,
+            UUID origemDrinkId,
+            JsonNode receitaAplicada,
+            LocalDateTime ocorridoEm,
+            List<Alocacao> alocacoes
     ) {
-        EstrategiaMovimentacaoEstoque estrategia = estrategiaPara(command.tipo());
-        estrategia.validar(command);
-        BigDecimal saldoAnterior = estoque.getQuantidadeAtual();
-        BigDecimal saldoPosterior = estrategia.calcularSaldoPosterior(saldoAnterior, command.quantidade());
-        estoque.setQuantidadeAtual(saldoPosterior);
-        estoqueRepository.save(estoque);
-
         MovimentacaoEstoqueEntity movimentacao = new MovimentacaoEstoqueEntity();
         movimentacao.setEstoque(estoque);
         movimentacao.setUsuarioId(usuarioId);
-        movimentacao.setOrigem("PEDIDO");
+        movimentacao.setOrigem(origem);
         movimentacao.setItemPedidoId(itemPedidoId);
-        movimentacao.setTipo(command.tipo());
-        movimentacao.setQuantidade(command.quantidade());
+        movimentacao.setTipo(tipo);
+        movimentacao.setQuantidade(quantidade);
         movimentacao.setSaldoAnterior(saldoAnterior);
         movimentacao.setSaldoPosterior(saldoPosterior);
-        movimentacao.setMotivo(command.motivo());
-        movimentacao.setOrigemDrinkId(command.origemDrinkId());
-        movimentacao.setReceitaAplicada(command.receitaAplicada());
-        movimentacao.setOcorridoEm(LocalDateTime.now());
-        movimentacaoEstoqueRepository.save(movimentacao);
+        movimentacao.setMotivo(motivo);
+        movimentacao.setLote(ControleLotesEstoque.descreverCodigos(alocacoes));
+        movimentacao.setOrigemDrinkId(origemDrinkId);
+        movimentacao.setReceitaAplicada(receitaAplicada);
+        movimentacao.setOcorridoEm(ocorridoEm);
+        MovimentacaoEstoqueEntity movimentacaoSalva = movimentacaoEstoqueRepository.saveAndFlush(movimentacao);
+        controleLotes.vincular(movimentacaoSalva, alocacoes);
+        return movimentacaoSalva;
     }
 
     private MovimentacaoResponseDto aplicarMovimentacao(
