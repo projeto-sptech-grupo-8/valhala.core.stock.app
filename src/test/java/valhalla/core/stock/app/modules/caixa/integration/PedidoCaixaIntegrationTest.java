@@ -13,12 +13,15 @@ import valhalla.core.stock.app.modules.caixa.configuracao.enums.FormaPagamentoCa
 import valhalla.core.stock.app.modules.caixa.configuracao.entity.TaxaPagamentoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.CategoriaEntity;
 import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.LoteEstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoEstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoLoteEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
 import valhalla.core.stock.app.modules.estoque.entity.UnidadeConsumoDrink;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -549,21 +552,133 @@ class PedidoCaixaIntegrationTest extends CaixaIntegrationTestSupport {
                         .content("{\"motivo\":\"Cliente desistiu\"}"))
                 .andExpect(status().isForbidden());
 
-        // Com credenciais do gerente autorizador -> 200 OK
-        mockMvc.perform(post("/caixa/pedidos/{id}/cancelamento", pedidoComItemId)
-                        .cookie(operadorSemCancelar.accessToken())
-                        .with(csrf(operadorSemCancelar))
+        assertThat(JsonPath.<String>read(
+                mockMvc.perform(post("/caixa/pedidos/{id}/cancelamento", pedidoComItemId)
+                                .cookie(operadorSemCancelar.accessToken())
+                                .with(csrf(operadorSemCancelar))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "motivo": "Cliente desistiu",
+                                          "autorizadorEmail": "gerente.cancelar@meraki.com",
+                                          "autorizadorSenha": "%s"
+                                        }
+                                        """.formatted(SENHA)))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.status").value("CANCELADO"))
+                        .andReturn().getResponse().getContentAsString(),
+                "$.canceladoPorUsuarioId"
+        )).isEqualTo(gerente.usuarioId().toString());
+    }
+
+    @Test
+    void vendaPorCaixaConsomeLotesPorFefoBloqueiaVencidoEEstornaParaLotesOriginais() throws Exception {
+        CaixaEntity caixa = caixa(estabelecimento, "Caixa FEFO");
+        UsuarioAutenticado operador = autenticarComPermissoes("operador.fefo@meraki.com", PERMISSOES_ATENDENTE);
+        autenticarGerente("gerente.fefo@meraki.com");
+        abrirSessao(operador, caixa.getId(), "100.00");
+
+        CategoriaEntity cat = categoria("Cervejas FEFO");
+        ProdutoEntity corona = produtoPadrao(
+                "Corona Long Neck", cat, false, "7.00", "16.00", null, "0.000"
+        );
+        LocalDate hoje = LocalDate.now();
+        lote(corona, "LOTE-VENCIDO", hoje.minusDays(2), "3.000");
+        lote(corona, "LOTE-PROXIMO", hoje.plusDays(4), "2.000");
+        lote(corona, "LOTE-DISTANTE", hoje.plusDays(30), "5.000");
+
+        // Saldo físico = 10, mas dentro da validade = 7 -> pedido de 8 deve ser bloqueado (409)
+        mockMvc.perform(post("/caixa/pedidos")
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "motivo": "Cliente desistiu",
-                                  "autorizadorEmail": "gerente.cancelar@meraki.com",
+                                  "canal": "BALCAO",
+                                  "itens": [{"produtoId": "%s", "quantidade": 8}]
+                                }
+                                """.formatted(corona.getId())))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.fieldErrors.estoque").exists());
+
+        // Pedido de 4 unidades -> consome 2 de LOTE-PROXIMO e 2 de LOTE-DISTANTE; LOTE-VENCIDO fica intacto
+        MvcResult criado = mockMvc.perform(post("/caixa/pedidos")
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "canal": "BALCAO",
+                                  "itens": [{"produtoId": "%s", "quantidade": 4}]
+                                }
+                                """.formatted(corona.getId())))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String pedidoId = JsonPath.read(criado.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(post("/caixa/pedidos/{id}/pagamentos", pedidoId)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "forma": "DINHEIRO",
+                                  "valor": 64.00,
+                                  "valorRecebido": 64.00
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONCLUIDO"));
+
+        EstoqueEntity estoqueAposVenda = estoqueRepository.findByProdutoId(corona.getId()).orElseThrow();
+        assertThat(estoqueAposVenda.getQuantidadeAtual()).isEqualByComparingTo("6.000");
+
+        List<LoteEstoqueEntity> lotesAposVenda = loteEstoqueRepository.findAllByEstoqueId(estoqueAposVenda.getId());
+        assertThat(lotesAposVenda).extracting(LoteEstoqueEntity::getCodigo, LoteEstoqueEntity::getQuantidadeAtual)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("LOTE-VENCIDO", new BigDecimal("3.000")),
+                        org.assertj.core.groups.Tuple.tuple("LOTE-PROXIMO", new BigDecimal("0.000")),
+                        org.assertj.core.groups.Tuple.tuple("LOTE-DISTANTE", new BigDecimal("3.000"))
+                );
+
+        MovimentacaoEstoqueEntity saidaVenda = movimentacaoEstoqueRepository
+                .findAllByEstoqueProdutoEstabelecimentoIdOrderByOcorridoEmDesc(estabelecimento.getId())
+                .stream()
+                .filter(m -> m.getTipo() == TipoMovimentacaoEstoque.SAIDA)
+                .findFirst()
+                .orElseThrow();
+        assertThat(saidaVenda.getLote()).isEqualTo("LOTE-PROXIMO, LOTE-DISTANTE");
+
+        List<MovimentacaoLoteEntity> vinculosSaida = movimentacaoLoteRepository
+                .findAllByMovimentacaoIdInOrderByIdAsc(List.of(saidaVenda.getId()));
+        assertThat(vinculosSaida).extracting(v -> v.getLote().getCodigo(), MovimentacaoLoteEntity::getQuantidade)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("LOTE-PROXIMO", new BigDecimal("2.000")),
+                        org.assertj.core.groups.Tuple.tuple("LOTE-DISTANTE", new BigDecimal("2.000"))
+                );
+
+        // Estorno devolve exatamente 2 para LOTE-PROXIMO e 2 para LOTE-DISTANTE (não vai para SEM-LOTE)
+        mockMvc.perform(post("/caixa/pedidos/{id}/estorno", pedidoId)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "motivo": "Teste estorno FEFO",
+                                  "autorizadorEmail": "gerente.fefo@meraki.com",
                                   "autorizadorSenha": "%s"
                                 }
                                 """.formatted(SENHA)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("CANCELADO"))
-                .andExpect(jsonPath("$.canceladoPorUsuarioId").value(gerente.usuarioId().toString()));
+                .andExpect(jsonPath("$.status").value("ESTORNADO"));
+
+        List<LoteEstoqueEntity> lotesAposEstorno = loteEstoqueRepository.findAllByEstoqueId(estoqueAposVenda.getId());
+        assertThat(lotesAposEstorno).extracting(LoteEstoqueEntity::getCodigo, LoteEstoqueEntity::getQuantidadeAtual)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("LOTE-VENCIDO", new BigDecimal("3.000")),
+                        org.assertj.core.groups.Tuple.tuple("LOTE-PROXIMO", new BigDecimal("2.000")),
+                        org.assertj.core.groups.Tuple.tuple("LOTE-DISTANTE", new BigDecimal("5.000"))
+                );
     }
 
     private String abrirSessao(UsuarioAutenticado usuario, UUID caixaId, String fundoTroco) throws Exception {

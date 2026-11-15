@@ -24,7 +24,6 @@ import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
 import valhalla.core.stock.app.modules.estoque.entity.UnidadeConsumoDrink;
 import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkRepository;
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
-import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
 import valhalla.core.stock.app.modules.estoque.service.MovimentacaoEstoqueService;
 
@@ -49,7 +48,6 @@ public class ReservaEstoqueService {
     private final ProdutoRepository produtoRepository;
     private final EstoqueRepository estoqueRepository;
     private final ComposicaoDrinkRepository composicaoDrinkRepository;
-    private final MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
     private final MovimentacaoEstoqueService movimentacaoEstoqueService;
     private final MercadoPagoPointProperties pointProperties;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -59,7 +57,6 @@ public class ReservaEstoqueService {
             ProdutoRepository produtoRepository,
             EstoqueRepository estoqueRepository,
             ComposicaoDrinkRepository composicaoDrinkRepository,
-            MovimentacaoEstoqueRepository movimentacaoEstoqueRepository,
             MovimentacaoEstoqueService movimentacaoEstoqueService,
             MercadoPagoPointProperties pointProperties
     ) {
@@ -67,7 +64,6 @@ public class ReservaEstoqueService {
         this.produtoRepository = produtoRepository;
         this.estoqueRepository = estoqueRepository;
         this.composicaoDrinkRepository = composicaoDrinkRepository;
-        this.movimentacaoEstoqueRepository = movimentacaoEstoqueRepository;
         this.movimentacaoEstoqueService = movimentacaoEstoqueService;
         this.pointProperties = pointProperties;
     }
@@ -164,18 +160,7 @@ public class ReservaEstoqueService {
         for (Map.Entry<UUID, BigDecimal> entry : consumoTotalPorProduto.entrySet()) {
             ProdutoEntity produto = produtosConsumidos.get(entry.getKey());
             EstoqueEntity estoque = estoques.get(entry.getKey());
-            if (estoque == null) {
-                throw new EntityNotFoundException("Estoque do produto " + produto.getNome() + " não encontrado");
-            }
-            BigDecimal reservado = estoque.getQuantidadeReservada() == null ? ZERO : estoque.getQuantidadeReservada();
-            BigDecimal disponivel = estoque.getQuantidadeAtual().subtract(reservado);
-            if (disponivel.compareTo(entry.getValue()) < 0) {
-                throw new EstoqueInsuficientePedidoException(
-                        "Estoque insuficiente para o produto " + produto.getNome(),
-                        produto.getNome(),
-                        disponivel
-                );
-            }
+            movimentacaoEstoqueService.validarSaldoVendavel(produto, estoque, entry.getValue());
         }
 
         for (Map.Entry<UUID, BigDecimal> entry : consumoTotalPorProduto.entrySet()) {
@@ -273,43 +258,34 @@ public class ReservaEstoqueService {
             if (novoReservado.compareTo(ZERO) < 0) {
                 novoReservado = ZERO;
             }
-
-            BigDecimal saldoAnterior = estoque.getQuantidadeAtual();
-            BigDecimal saldoPosterior = saldoAnterior.subtract(reserva.getQuantidade());
-            if (saldoPosterior.compareTo(ZERO) < 0) {
-                throw new EstoqueInsuficientePedidoException(
-                        "Saldo de estoque insuficiente para efetivar reserva do produto "
-                                + estoque.getProduto().getNome(),
-                        estoque.getProduto().getNome(),
-                        saldoAnterior
-                );
-            }
-
             estoque.setQuantidadeReservada(novoReservado);
-            estoque.setQuantidadeAtual(saldoPosterior);
-            estoqueRepository.save(estoque);
 
-            MovimentacaoEstoqueEntity movimentacao = new MovimentacaoEstoqueEntity();
-            movimentacao.setEstoque(estoque);
-            movimentacao.setUsuarioId("USUARIO".equals(origem) || "PEDIDO".equals(origem) ? operadorUsuarioId : null);
-            movimentacao.setOrigem(origem);
-            movimentacao.setItemPedidoId(reserva.getItemPedidoId());
-            movimentacao.setTipo(reserva.getOrigemDrinkId() != null
+            UUID usuarioMovimentacao = "USUARIO".equals(origem) || "PEDIDO".equals(origem)
+                    ? operadorUsuarioId
+                    : null;
+            TipoMovimentacaoEstoque tipo = reserva.getOrigemDrinkId() != null
                     ? TipoMovimentacaoEstoque.SAIDA_DRINK
-                    : TipoMovimentacaoEstoque.SAIDA);
-            movimentacao.setQuantidade(reserva.getQuantidade());
-            movimentacao.setSaldoAnterior(saldoAnterior);
-            movimentacao.setSaldoPosterior(saldoPosterior);
-            movimentacao.setMotivo(motivo);
-            movimentacao.setOrigemDrinkId(reserva.getOrigemDrinkId());
+                    : TipoMovimentacaoEstoque.SAIDA;
+            JsonNode receitaAplicada = null;
             if (reserva.getOrigemDrinkId() != null) {
                 JsonNode snap = snapshotsPorItemDrink.get(reserva.getItemPedidoId());
                 if (snap != null) {
-                    movimentacao.setReceitaAplicada(snap.deepCopy());
+                    receitaAplicada = snap.deepCopy();
                 }
             }
-            movimentacao.setOcorridoEm(agora);
-            MovimentacaoEstoqueEntity movimentacaoSalva = movimentacaoEstoqueRepository.saveAndFlush(movimentacao);
+
+            MovimentacaoEstoqueEntity movimentacaoSalva = movimentacaoEstoqueService.registrarBaixaPedidoComFefo(
+                    estoque,
+                    tipo,
+                    reserva.getQuantidade(),
+                    motivo,
+                    origem,
+                    usuarioMovimentacao,
+                    reserva.getItemPedidoId(),
+                    reserva.getOrigemDrinkId(),
+                    receitaAplicada,
+                    agora
+            );
 
             reserva.setStatus(StatusReservaEstoque.EFETIVADA);
             reserva.setEfetivadaEm(agora);

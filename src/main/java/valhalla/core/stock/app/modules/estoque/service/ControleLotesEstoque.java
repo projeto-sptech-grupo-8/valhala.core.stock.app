@@ -66,6 +66,82 @@ public class ControleLotesEstoque {
         return LocalDate.now(clock);
     }
 
+    /**
+     * Calcula o saldo disponível para venda considerando apenas lotes dentro da validade
+     * (descontando também o saldo já reservado). Método somente leitura; seguro para validações
+     * antes do lock ou em transações read-only.
+     */
+    public BigDecimal saldoNaoVencidoDisponivel(EstoqueEntity estoque) {
+        List<LoteEstoqueEntity> lotes = estoque.getId() == null
+                ? List.of()
+                : loteEstoqueRepository.findAllByEstoqueId(estoque.getId());
+        LocalDate hoje = hoje();
+        BigDecimal somaTodos = BigDecimal.ZERO;
+        BigDecimal somaValidos = BigDecimal.ZERO;
+        for (LoteEstoqueEntity lote : lotes) {
+            BigDecimal qtd = lote.getQuantidadeAtual() == null ? BigDecimal.ZERO : lote.getQuantidadeAtual();
+            somaTodos = somaTodos.add(qtd);
+            if (!lote.vencidoEm(hoje)) {
+                somaValidos = somaValidos.add(qtd);
+            }
+        }
+        BigDecimal saldoAtual = estoque.getQuantidadeAtual() == null ? BigDecimal.ZERO : estoque.getQuantidadeAtual();
+        BigDecimal diferenca = saldoAtual.subtract(somaTodos);
+        // Espelha reconciliar(): saldo ainda sem lote cadastrado corresponde a SEM-LOTE (sem validade).
+        BigDecimal saldoValido = diferenca.signum() > 0
+                ? somaValidos.add(diferenca)
+                : somaValidos.min(saldoAtual);
+        BigDecimal reservado = estoque.getQuantidadeReservada() == null
+                ? BigDecimal.ZERO
+                : estoque.getQuantidadeReservada();
+        return saldoValido.subtract(reservado).max(BigDecimal.ZERO);
+    }
+
+    /**
+     * Devolve aos lotes exatos de origem as quantidades consumidas por uma saída de pedido estornada.
+     * Chamar com o estoque bloqueado e antes de alterar estoque.quantidadeAtual.
+     * Pedidos antigos sem vínculo de lote mantêm fallback para SEM-LOTE via política de crédito.
+     */
+    public List<Alocacao> devolverParaLotes(
+            EstoqueEntity estoque,
+            BigDecimal quantidadeTotal,
+            List<MovimentacaoLoteEntity> vinculosOriginais
+    ) {
+        if (vinculosOriginais == null || vinculosOriginais.isEmpty()) {
+            return movimentar(estoque, PoliticaLote.CREDITO, quantidadeTotal, null, null, null);
+        }
+        BigDecimal somaVinculos = vinculosOriginais.stream()
+                .map(MovimentacaoLoteEntity::getQuantidade)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (somaVinculos.compareTo(quantidadeTotal) != 0) {
+            return movimentar(estoque, PoliticaLote.CREDITO, quantidadeTotal, null, null, null);
+        }
+
+        List<LoteEstoqueEntity> lotes = reconciliar(estoque);
+        List<Alocacao> alocacoes = new ArrayList<>();
+        for (MovimentacaoLoteEntity vinculo : vinculosOriginais) {
+            LoteEstoqueEntity origem = vinculo.getLote();
+            LoteEstoqueEntity destino = lotes.stream()
+                    .filter(lote -> Objects.equals(lote.getId(), origem.getId()))
+                    .findFirst()
+                    .or(() -> lotes.stream()
+                            .filter(lote -> lote.getCodigo().equalsIgnoreCase(origem.getCodigo())
+                                    && Objects.equals(lote.getValidade(), origem.getValidade()))
+                            .findFirst())
+                    .orElseGet(() -> {
+                        LoteEstoqueEntity recriado = novoLote(estoque, origem.getCodigo(), origem.getValidade());
+                        lotes.add(recriado);
+                        return recriado;
+                    });
+            BigDecimal atual = destino.getQuantidadeAtual() == null ? BigDecimal.ZERO : destino.getQuantidadeAtual();
+            destino.setQuantidadeAtual(atual.add(vinculo.getQuantidade()));
+            loteEstoqueRepository.save(destino);
+            alocacoes.add(new Alocacao(destino, vinculo.getQuantidade()));
+        }
+        return alocacoes;
+    }
+
     /** Aplica nos lotes o efeito de uma movimentação; chamar antes de alterar o saldo do estoque. */
     public List<Alocacao> movimentar(
             EstoqueEntity estoque,
