@@ -18,11 +18,13 @@ import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.ItemPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PedidoEntity;
 import valhalla.core.stock.app.modules.caixa.exception.EstoqueInsuficientePedidoException;
+import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoLoteResponseDto;
 import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoResponseDto;
 import valhalla.core.stock.app.modules.estoque.dto.SaidaDrinkRequestDto;
 import valhalla.core.stock.app.modules.estoque.entity.ComposicaoDrinkEntity;
 import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.LoteEstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoEstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
@@ -31,6 +33,8 @@ import valhalla.core.stock.app.modules.estoque.entity.UnidadeConsumoDrink;
 import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkRepository;
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRepository;
+import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoLoteRepository;
+import valhalla.core.stock.app.modules.estoque.service.ControleLotesEstoque.Alocacao;
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
 import valhalla.core.stock.app.modules.estoque.strategy.EstrategiaMovimentacaoEstoque;
 import valhalla.core.stock.app.modules.estoque.strategy.MovimentacaoCommand;
@@ -81,6 +85,8 @@ public class MovimentacaoEstoqueService {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<TipoMovimentacaoEstoque, EstrategiaMovimentacaoEstoque> estrategias;
     private final BusinessEventLogger businessEventLogger;
+    private final ControleLotesEstoque controleLotes;
+    private final MovimentacaoLoteRepository movimentacaoLoteRepository;
 
     public MovimentacaoEstoqueService(
             ProdutoRepository produtoRepository,
@@ -89,8 +95,12 @@ public class MovimentacaoEstoqueService {
             MovimentacaoEstoqueRepository movimentacaoEstoqueRepository,
             UserRepository userRepository,
             List<EstrategiaMovimentacaoEstoque> estrategias,
-            BusinessEventLogger businessEventLogger
+            BusinessEventLogger businessEventLogger,
+            ControleLotesEstoque controleLotes,
+            MovimentacaoLoteRepository movimentacaoLoteRepository
     ) {
+        this.controleLotes = controleLotes;
+        this.movimentacaoLoteRepository = movimentacaoLoteRepository;
         this.produtoRepository = produtoRepository;
         this.estoqueRepository = estoqueRepository;
         this.composicaoDrinkRepository = composicaoDrinkRepository;
@@ -130,9 +140,11 @@ public class MovimentacaoEstoqueService {
                         Set.of("ocorridoEm", "tipo", "quantidade", "saldoPosterior"))
         );
         Map<UUID, String> nomesUsuarios = nomesUsuariosPorId(resultado.getContent());
+        Map<Long, List<MovimentacaoLoteResponseDto>> lotes = lotesPorMovimentacao(resultado.getContent());
         return RespostaPaginadaDto.de(resultado,
                 movimentacao -> paraResposta(movimentacao,
-                        nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado")));
+                        nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado"),
+                        lotes.getOrDefault(movimentacao.getId(), List.of())));
     }
 
     @Transactional(readOnly = true)
@@ -157,9 +169,11 @@ public class MovimentacaoEstoqueService {
                 especificacao, paginacaoOrdenacao.getSort()
         );
         Map<UUID, String> nomesUsuarios = nomesUsuariosPorId(movimentacoes);
+        Map<Long, List<MovimentacaoLoteResponseDto>> lotes = lotesPorMovimentacao(movimentacoes);
         return movimentacoes.stream()
                 .map(movimentacao -> paraResposta(movimentacao,
-                        nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado")))
+                        nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado"),
+                        lotes.getOrDefault(movimentacao.getId(), List.of())))
                 .toList();
     }
 
@@ -218,7 +232,7 @@ public class MovimentacaoEstoqueService {
         String motivo = comporMotivoMovimentacao(normalizar(dto.motivo()), dto.quantidade(), Boolean.TRUE.equals(dto.emFardo()));
         MovimentacaoCommand command = new MovimentacaoCommand(
                 dto.tipo(), quantidadeBase, motivo, normalizar(dto.lote()),
-                normalizar(dto.numeroNotaFiscal()), null, null
+                normalizar(dto.numeroNotaFiscal()), null, null, dto.validade(), dto.loteId()
         );
         UUID usuarioId = obterIdUsuarioAutenticado();
         MovimentacaoResponseDto response = aplicarMovimentacao(estoque, command, usuarioId, nomeUsuario(usuarioId));
@@ -299,8 +313,11 @@ public class MovimentacaoEstoqueService {
         if (estoque.getQuantidadeAtual().compareTo(saldoPosterior) != 0) {
             throw new IllegalStateException("O saldo inicial informado é inconsistente");
         }
+        List<Alocacao> alocacoes = controleLotes.registrarSaldoInicial(estoque, quantidadeInicial);
         MovimentacaoEstoqueEntity movimento = salvarHistorico(
-                estoque, command, ZERO, saldoPosterior, obterIdUsuarioAutenticado());
+                estoque, command, ZERO, saldoPosterior, obterIdUsuarioAutenticado(),
+                ControleLotesEstoque.descreverCodigos(alocacoes));
+        controleLotes.vincular(movimento, alocacoes);
         businessEventLogger.success("stock.initial-entry.registered", "stock-movement", movimento.getId());
     }
 
@@ -615,9 +632,20 @@ public class MovimentacaoEstoqueService {
         estrategia.validar(command);
         BigDecimal saldoAnterior = estoque.getQuantidadeAtual();
         BigDecimal saldoPosterior = estrategia.calcularSaldoPosterior(saldoAnterior, command.quantidade());
+        // lotes antes do saldo: a reconciliação compara a soma dos lotes com o saldo ainda não alterado
+        List<Alocacao> alocacoes = controleLotes.movimentar(
+                estoque, estrategia.politicaLote(), command.quantidade(),
+                command.lote(), command.validade(), command.loteId()
+        );
         estoque.setQuantidadeAtual(saldoPosterior);
         estoqueRepository.save(estoque);
-        return paraResposta(salvarHistorico(estoque, command, saldoAnterior, saldoPosterior, usuarioId), usuarioNome);
+        MovimentacaoEstoqueEntity movimentacao = salvarHistorico(
+                estoque, command, saldoAnterior, saldoPosterior, usuarioId,
+                ControleLotesEstoque.descreverCodigos(alocacoes));
+        controleLotes.vincular(movimentacao, alocacoes);
+        return paraResposta(movimentacao, usuarioNome, alocacoes.stream()
+                .map(alocacao -> paraLoteResposta(alocacao.lote(), alocacao.quantidade()))
+                .toList());
     }
 
     private MovimentacaoEstoqueEntity salvarHistorico(
@@ -625,7 +653,8 @@ public class MovimentacaoEstoqueService {
             MovimentacaoCommand command,
             BigDecimal saldoAnterior,
             BigDecimal saldoPosterior,
-            UUID usuarioId
+            UUID usuarioId,
+            String codigosLotes
     ) {
         MovimentacaoEstoqueEntity movimentacao = new MovimentacaoEstoqueEntity();
         movimentacao.setEstoque(estoque);
@@ -635,7 +664,7 @@ public class MovimentacaoEstoqueService {
         movimentacao.setSaldoAnterior(saldoAnterior);
         movimentacao.setSaldoPosterior(saldoPosterior);
         movimentacao.setMotivo(command.motivo());
-        movimentacao.setLote(command.lote());
+        movimentacao.setLote(codigosLotes != null ? codigosLotes : command.lote());
         movimentacao.setNumeroNotaFiscal(command.numeroNotaFiscal());
         movimentacao.setOrigemDrinkId(command.origemDrinkId());
         movimentacao.setReceitaAplicada(command.receitaAplicada());
@@ -692,7 +721,28 @@ public class MovimentacaoEstoqueService {
         }
     }
 
-    private MovimentacaoResponseDto paraResposta(MovimentacaoEstoqueEntity movimentacao, String usuarioNome) {
+    private Map<Long, List<MovimentacaoLoteResponseDto>> lotesPorMovimentacao(List<MovimentacaoEstoqueEntity> movimentacoes) {
+        List<Long> ids = movimentacoes.stream().map(MovimentacaoEstoqueEntity::getId).toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return movimentacaoLoteRepository.findAllByMovimentacaoIdInOrderByIdAsc(ids).stream()
+                .collect(Collectors.groupingBy(
+                        vinculo -> vinculo.getMovimentacao().getId(),
+                        Collectors.mapping(vinculo -> paraLoteResposta(vinculo.getLote(), vinculo.getQuantidade()),
+                                Collectors.toList())
+                ));
+    }
+
+    private MovimentacaoLoteResponseDto paraLoteResposta(LoteEstoqueEntity lote, BigDecimal quantidade) {
+        return new MovimentacaoLoteResponseDto(lote.getId(), lote.getCodigo(), lote.getValidade(), quantidade);
+    }
+
+    private MovimentacaoResponseDto paraResposta(
+            MovimentacaoEstoqueEntity movimentacao,
+            String usuarioNome,
+            List<MovimentacaoLoteResponseDto> lotes
+    ) {
         ProdutoEntity produto = movimentacao.getEstoque().getProduto();
         return new MovimentacaoResponseDto(
                 movimentacao.getId(), usuarioNome, produto.getId(), produto.getNome(),
@@ -700,7 +750,8 @@ public class MovimentacaoEstoqueService {
                 movimentacao.getTipo(), movimentacao.getQuantidade(),
                 movimentacao.getSaldoAnterior(), movimentacao.getSaldoPosterior(),
                 movimentacao.getMotivo(), movimentacao.getLote(), movimentacao.getNumeroNotaFiscal(),
-                movimentacao.getOrigemDrinkId(), receitaAplicadaParaResposta(movimentacao.getReceitaAplicada()), movimentacao.getOcorridoEm()
+                movimentacao.getOrigemDrinkId(), receitaAplicadaParaResposta(movimentacao.getReceitaAplicada()), movimentacao.getOcorridoEm(),
+                lotes
         );
     }
 

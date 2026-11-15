@@ -11,4 +11,6 @@ public interface EstrategiaMovimentacaoEstoque {
     void validar(MovimentacaoCommand command);
 
     BigDecimal calcularSaldoPosterior(BigDecimal saldoAnterior, BigDecimal quantidade);
+
+    PoliticaLote politicaLote();
 }

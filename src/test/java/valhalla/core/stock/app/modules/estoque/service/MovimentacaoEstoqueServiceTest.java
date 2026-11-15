@@ -26,6 +26,8 @@ import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
 import valhalla.core.stock.app.modules.estoque.entity.UnidadeConsumoDrink;
 import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkRepository;
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
+import valhalla.core.stock.app.modules.estoque.repository.LoteEstoqueRepository;
+import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoLoteRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
@@ -63,6 +65,8 @@ class MovimentacaoEstoqueServiceTest {
     @Mock private ComposicaoDrinkRepository composicaoDrinkRepository;
     @Mock private MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
     @Mock private UserRepository userRepository;
+    @Mock private LoteEstoqueRepository loteEstoqueRepository;
+    @Mock private MovimentacaoLoteRepository movimentacaoLoteRepository;
 
     private MovimentacaoEstoqueService movimentacaoEstoqueService;
 
@@ -79,7 +83,9 @@ class MovimentacaoEstoqueServiceTest {
                         new EstrategiaAjustePositivo(), new EstrategiaAjusteNegativo(),
                         new EstrategiaPerda(), new EstrategiaSaidaDrink()
                 ),
-                new BusinessEventLogger()
+                new BusinessEventLogger(),
+                new ControleLotesEstoque(loteEstoqueRepository, movimentacaoLoteRepository),
+                movimentacaoLoteRepository
         );
         lenient().when(movimentacaoEstoqueRepository.save(any(MovimentacaoEstoqueEntity.class)))
                 .thenAnswer(invocation -> {

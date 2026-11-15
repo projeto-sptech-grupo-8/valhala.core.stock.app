@@ -22,4 +22,9 @@ public class EstrategiaAjusteNegativo extends AbstractEstrategiaMovimentacao {
     public BigDecimal calcularSaldoPosterior(BigDecimal saldoAnterior, BigDecimal quantidade) {
         return subtrairSemPermitirNegativo(saldoAnterior, quantidade);
     }
+
+    @Override
+    public PoliticaLote politicaLote() {
+        return PoliticaLote.DEBITO_COM_VENCIDOS;
+    }
 }
