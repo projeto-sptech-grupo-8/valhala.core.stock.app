@@ -363,6 +363,25 @@ class MovimentacaoEstoqueServiceTest {
     }
 
     @Test
+    void registraEntradaInicialComLoteEValidade() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        ProdutoEntity produto = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Gin");
+        EstoqueEntity estoque = estoque(produto, "15");
+        LocalDate validade = LocalDate.of(2027, 6, 30);
+        autenticar(estabelecimentoId);
+
+        movimentacaoEstoqueService.registrarEntradaInicial(estoque, new BigDecimal("15"), "L2611A", validade);
+
+        ArgumentCaptor<valhalla.core.stock.app.modules.estoque.entity.LoteEstoqueEntity> loteCaptor =
+                ArgumentCaptor.forClass(valhalla.core.stock.app.modules.estoque.entity.LoteEstoqueEntity.class);
+        verify(loteEstoqueRepository).save(loteCaptor.capture());
+        assertThat(loteCaptor.getValue().getCodigo()).isEqualTo("L2611A");
+        assertThat(loteCaptor.getValue().getValidade()).isEqualTo(validade);
+        assertThat(loteCaptor.getValue().getQuantidadeAtual()).isEqualByComparingTo("15");
+        verify(movimentacaoEstoqueRepository).save(any(MovimentacaoEstoqueEntity.class));
+    }
+
+    @Test
     void ignoraEntradaInicialSeZeroOuNula() {
         EstoqueEntity estoque = new EstoqueEntity();
         movimentacaoEstoqueService.registrarEntradaInicial(estoque, null);

@@ -11,6 +11,7 @@ import jakarta.validation.constraints.Size;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Schema(description = "Dados para criar um produto. O SKU é gerado pelo servidor.")
 public record ProdutoRequestDto(
@@ -70,7 +71,14 @@ public record ProdutoRequestDto(
         Integer unidadesPorFardo,
 
         @Schema(description = "Quando true, a quantidade inicial informada é multiplicada por unidadesPorFardo.", example = "false")
-        Boolean quantidadeInicialEmFardos
+        Boolean quantidadeInicialEmFardos,
+
+        @Size(max = 100, message = "O lote deve ter no máximo 100 caracteres")
+        @Schema(description = "Opcional. Código do lote inicial do produto.", example = "L2611A")
+        String lote,
+
+        @Schema(description = "Opcional. Data de validade do lote inicial do produto.", example = "2027-06-30")
+        LocalDate validade
 ) {
     public ProdutoRequestDto(
             String nome,
@@ -88,6 +96,28 @@ public record ProdutoRequestDto(
     ) {
         this(nome, categoriaId, unidadeMedida, precoVenda, precoCusto, tipo, codigoBarras,
                 descricao, fracionado, volumeEmbalagemMl, estoqueMinimo, quantidadeInicial,
-                null, null, null);
+                null, null, null, null, null);
+    }
+
+    public ProdutoRequestDto(
+            String nome,
+            Integer categoriaId,
+            String unidadeMedida,
+            BigDecimal precoVenda,
+            BigDecimal precoCusto,
+            ProdutoTipo tipo,
+            String codigoBarras,
+            String descricao,
+            Boolean fracionado,
+            BigDecimal volumeEmbalagemMl,
+            BigDecimal estoqueMinimo,
+            BigDecimal quantidadeInicial,
+            Boolean fardo,
+            Integer unidadesPorFardo,
+            Boolean quantidadeInicialEmFardos
+    ) {
+        this(nome, categoriaId, unidadeMedida, precoVenda, precoCusto, tipo, codigoBarras,
+                descricao, fracionado, volumeEmbalagemMl, estoqueMinimo, quantidadeInicial,
+                fardo, unidadesPorFardo, quantidadeInicialEmFardos, null, null);
     }
 }

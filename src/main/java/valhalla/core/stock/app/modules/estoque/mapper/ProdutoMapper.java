@@ -8,6 +8,7 @@ import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 
 public final class ProdutoMapper {
 
@@ -15,6 +16,15 @@ public final class ProdutoMapper {
     }
 
     public static ProdutoResponseDto paraResposta(ProdutoEntity produto, EstoqueEntity estoque) {
+        return paraResposta(produto, estoque, null, null);
+    }
+
+    public static ProdutoResponseDto paraResposta(
+            ProdutoEntity produto,
+            EstoqueEntity estoque,
+            String lote,
+            LocalDate validade
+    ) {
         BigDecimal quantidadeEstoque = estoque == null ? null : estoque.getQuantidadeAtual();
         BigDecimal estoqueMinimo = estoque == null ? null : estoque.getEstoqueMinimo();
 
@@ -38,6 +48,8 @@ public final class ProdutoMapper {
                 produto.isAtivo(),
                 quantidadeEstoque,
                 estoqueMinimo,
+                lote,
+                validade,
                 produto.getCriadoEm(),
                 produto.getAtualizadoEm()
         );

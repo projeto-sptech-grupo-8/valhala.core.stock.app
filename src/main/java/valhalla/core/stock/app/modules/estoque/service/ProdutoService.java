@@ -31,6 +31,7 @@ import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
 import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -210,9 +211,11 @@ public class ProdutoService {
     public ProdutoResponseDto criarProduto(ProdutoRequestDto dto) {
         ProdutoTipo tipo = dto.tipo() == null ? ProdutoTipo.PADRAO : dto.tipo();
         boolean isFardo = Boolean.TRUE.equals(dto.fardo());
+        String lote = normalizarOpcional(dto.lote());
         validarCamposEspecificosDoTipo(tipo, Boolean.TRUE.equals(dto.fracionado()),
                 dto.volumeEmbalagemMl(), dto.estoqueMinimo(), dto.quantidadeInicial(),
-                isFardo, dto.unidadesPorFardo(), Boolean.TRUE.equals(dto.quantidadeInicialEmFardos()));
+                isFardo, dto.unidadesPorFardo(), Boolean.TRUE.equals(dto.quantidadeInicialEmFardos()),
+                lote, dto.validade());
 
         UUID idEstabelecimento = obterIdEstabelecimentoAutenticado();
         ProdutoEntity produto = new ProdutoEntity();
@@ -242,11 +245,13 @@ public class ProdutoService {
                 ? criarEstoqueInicial(produtoSalvo, quantidadeInicialBase, dto.estoqueMinimo())
                 : null;
         if (estoque != null) {
-            movimentacaoEstoqueService.registrarEntradaInicial(estoque, estoque.getQuantidadeAtual());
+            movimentacaoEstoqueService.registrarEntradaInicial(
+                    estoque, estoque.getQuantidadeAtual(), lote, dto.validade()
+            );
         }
 
         businessEventLogger.success("stock.product.created", "product", produtoSalvo.getId());
-        return ProdutoMapper.paraResposta(produtoSalvo, estoque);
+        return ProdutoMapper.paraResposta(produtoSalvo, estoque, lote, dto.validade());
     }
 
     @Transactional
@@ -373,7 +378,9 @@ public class ProdutoService {
             BigDecimal quantidadeInicial,
             boolean fardo,
             Integer unidadesPorFardo,
-            boolean quantidadeInicialEmFardos
+            boolean quantidadeInicialEmFardos,
+            String lote,
+            LocalDate validade
     ) {
         if (tipo != ProdutoTipo.DRINK) {
             if (fracionado && volumeEmbalagemMl == null) {
@@ -399,7 +406,8 @@ public class ProdutoService {
             return;
         }
         if (fracionado || volumeEmbalagemMl != null || estoqueMinimo != null || quantidadeInicial != null
-                || fardo || unidadesPorFardo != null || quantidadeInicialEmFardos) {
+                || fardo || unidadesPorFardo != null || quantidadeInicialEmFardos
+                || lote != null || validade != null) {
             throw new IllegalArgumentException(
                     "Drink não possui estoque próprio; informe esses dados nos produtos ingredientes"
             );

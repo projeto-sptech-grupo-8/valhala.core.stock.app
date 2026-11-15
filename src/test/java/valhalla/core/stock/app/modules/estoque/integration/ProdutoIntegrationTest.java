@@ -137,6 +137,34 @@ class ProdutoIntegrationTest extends EstoqueIntegrationTestSupport {
         }
     }
 
+    @Test
+    void criaProdutoComLoteEValidadeSalvaNoBancoERetornaNaResposta() throws Exception {
+        CategoriaEntity cervejas = categoria("Cervejas");
+        Cookie gerente = autenticarGerente("gerente-lote-produto@meraki.com");
+
+        MvcResult criado = mockMvc.perform(post("/produtos").cookie(gerente).with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nome":"Heineken 600ml","categoriaId":%d,"unidadeMedida":"un",
+                                 "precoVenda":15.00,"precoCusto":9.00,"tipo":"PADRAO",
+                                 "quantidadeInicial":18,"lote":"L2611A","validade":"2027-06-30"}
+                                """.formatted(cervejas.getId())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.lote").value("L2611A"))
+                .andExpect(jsonPath("$.validade").value("2027-06-30"))
+                .andExpect(jsonPath("$.quantidadeEstoque").value(18))
+                .andReturn();
+
+        String produtoId = com.jayway.jsonpath.JsonPath.read(criado.getResponse().getContentAsString(), "$.id").toString();
+
+        mockMvc.perform(get("/lotes").param("produtoId", produtoId).cookie(gerente))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItens").value(1))
+                .andExpect(jsonPath("$.itens[0].codigo").value("L2611A"))
+                .andExpect(jsonPath("$.itens[0].validade").value("2027-06-30"))
+                .andExpect(jsonPath("$.itens[0].quantidadeAtual").value(18));
+    }
+
     private String novoProduto(int categoriaId) {
         return """
                 {"nome":"Vodka Absolut","categoriaId":%d,"unidadeMedida":"garrafa",

@@ -33,6 +33,7 @@ import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -297,6 +298,51 @@ class ProdutoServiceTest {
         assertThat(estoqueCaptor.getValue().getQuantidadeAtual()).isEqualByComparingTo("24");
         assertThat(resposta.fardo()).isTrue();
         assertThat(resposta.unidadesPorFardo()).isEqualTo(12);
+    }
+
+    @Test
+    void criaProdutoPadraoComLoteEValidadeERetornaNaResposta() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        CategoriaEntity categoria = categoria(estabelecimentoId, true);
+        LocalDate validade = LocalDate.of(2027, 6, 30);
+        autenticarNoEstabelecimento(estabelecimentoId);
+        when(categoriaRepository.findById(1)).thenReturn(Optional.of(categoria));
+        when(produtoRepository.existsByEstabelecimentoIdAndSku(any(), anyString())).thenReturn(false);
+        when(produtoRepository.saveAndFlush(any(ProdutoEntity.class))).thenAnswer(invocation -> {
+            ProdutoEntity produto = invocation.getArgument(0);
+            produto.setId(UUID.randomUUID());
+            return produto;
+        });
+        when(estoqueRepository.saveAndFlush(any(EstoqueEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProdutoResponseDto resposta = produtoService.criarProduto(new ProdutoRequestDto(
+                "Heineken 600ml", 1, "un", new BigDecimal("14.00"),
+                new BigDecimal("8.50"), ProdutoTipo.PADRAO, null, null,
+                false, null, new BigDecimal("6"), new BigDecimal("24"),
+                false, null, false, " L2611A ", validade
+        ));
+
+        ArgumentCaptor<EstoqueEntity> estoqueCaptor = ArgumentCaptor.forClass(EstoqueEntity.class);
+        verify(estoqueRepository).saveAndFlush(estoqueCaptor.capture());
+        verify(movimentacaoEstoqueService).registrarEntradaInicial(
+                estoqueCaptor.getValue(), new BigDecimal("24"), "L2611A", validade
+        );
+        assertThat(resposta.lote()).isEqualTo("L2611A");
+        assertThat(resposta.validade()).isEqualTo(validade);
+    }
+
+    @Test
+    void impedeCriarDrinkComLoteOuValidade() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        autenticarNoEstabelecimento(estabelecimentoId);
+
+        assertThatThrownBy(() -> produtoService.criarProduto(new ProdutoRequestDto(
+                "Gin Tônica", 1, "copo", new BigDecimal("28.00"), BigDecimal.ZERO,
+                ProdutoTipo.DRINK, null, null, false, null, null, null,
+                false, null, false, "LOTE-DRINK", LocalDate.of(2027, 1, 1)
+        )))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Drink não possui estoque próprio; informe esses dados nos produtos ingredientes");
     }
 
     @Test

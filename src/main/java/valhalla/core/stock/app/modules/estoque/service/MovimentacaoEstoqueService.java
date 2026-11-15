@@ -300,12 +300,25 @@ public class MovimentacaoEstoqueService {
 
     @Transactional
     public void registrarEntradaInicial(EstoqueEntity estoque, BigDecimal quantidadeInicial) {
+        registrarEntradaInicial(estoque, quantidadeInicial, null, null);
+    }
+
+    @Transactional
+    public void registrarEntradaInicial(
+            EstoqueEntity estoque,
+            BigDecimal quantidadeInicial,
+            String lote,
+            LocalDate validade
+    ) {
         if (quantidadeInicial == null || quantidadeInicial.signum() == 0) {
+            if (lote != null || validade != null) {
+                controleLotes.registrarSaldoInicial(estoque, ZERO, lote, validade);
+            }
             return;
         }
         MovimentacaoCommand command = new MovimentacaoCommand(
                 TipoMovimentacaoEstoque.ENTRADA_INICIAL, quantidadeInicial,
-                "Saldo inicial do produto", null, null, null, null
+                "Saldo inicial do produto", lote, null, null, null, validade, null
         );
         EstrategiaMovimentacaoEstoque estrategia = estrategiaPara(command.tipo());
         estrategia.validar(command);
@@ -313,7 +326,7 @@ public class MovimentacaoEstoqueService {
         if (estoque.getQuantidadeAtual().compareTo(saldoPosterior) != 0) {
             throw new IllegalStateException("O saldo inicial informado é inconsistente");
         }
-        List<Alocacao> alocacoes = controleLotes.registrarSaldoInicial(estoque, quantidadeInicial);
+        List<Alocacao> alocacoes = controleLotes.registrarSaldoInicial(estoque, quantidadeInicial, lote, validade);
         MovimentacaoEstoqueEntity movimento = salvarHistorico(
                 estoque, command, ZERO, saldoPosterior, obterIdUsuarioAutenticado(),
                 ControleLotesEstoque.descreverCodigos(alocacoes));
