@@ -7,6 +7,7 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoResponseDto;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
+import valhalla.core.stock.app.shared.export.PoiExportadorExcel;
 
 import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
@@ -18,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ProdutoExportacaoServiceTest {
 
-    private final ProdutoExportacaoService service = new ProdutoExportacaoService();
+    private final ProdutoExportacaoService service = new ProdutoExportacaoService(new PoiExportadorExcel());
 
     @Test
     void geraPlanilhaExcelComProdutosPadraoFracionadoEDrink() throws Exception {

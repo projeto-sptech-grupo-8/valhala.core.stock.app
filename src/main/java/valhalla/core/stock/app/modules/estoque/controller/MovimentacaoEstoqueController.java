@@ -25,7 +25,9 @@ import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoResponseDto;
 import valhalla.core.stock.app.modules.estoque.dto.SaidaDrinkRequestDto;
 import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
 import valhalla.core.stock.app.modules.estoque.service.MovimentacaoEstoqueService;
+import valhalla.core.stock.app.modules.estoque.service.MovimentacaoExportacaoService;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
+import valhalla.core.stock.app.shared.export.RespostaArquivoExcel;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
 
@@ -42,9 +44,14 @@ import java.util.UUID;
 public class MovimentacaoEstoqueController {
 
     private final MovimentacaoEstoqueService movimentacaoEstoqueService;
+    private final MovimentacaoExportacaoService movimentacaoExportacaoService;
 
-    public MovimentacaoEstoqueController(MovimentacaoEstoqueService movimentacaoEstoqueService) {
+    public MovimentacaoEstoqueController(
+            MovimentacaoEstoqueService movimentacaoEstoqueService,
+            MovimentacaoExportacaoService movimentacaoExportacaoService
+    ) {
         this.movimentacaoEstoqueService = movimentacaoEstoqueService;
+        this.movimentacaoExportacaoService = movimentacaoExportacaoService;
     }
 
     @GetMapping
@@ -82,6 +89,40 @@ public class MovimentacaoEstoqueController {
                 produtoId, tipo, usuarioId, dataInicial, dataFinal,
                 pagina, tamanho, ordenarPor, direcao
         ));
+    }
+
+    @GetMapping("/exportar")
+    @Operation(summary = "Exportar movimentações de estoque em planilha Excel (.xlsx)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Planilha Excel gerada."),
+            @ApiResponse(responseCode = "400", description = "Parâmetros de consulta inválidos.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Usuário sem permissão para visualizar estoque.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    public ResponseEntity<byte[]> exportarMovimentacoes(
+            @Parameter(description = "ID do produto movimentado. Omitido: todos os produtos.")
+            @RequestParam(required = false) UUID produtoId,
+            @Parameter(description = "Tipo da movimentação. Omitido: todos os tipos.", example = "SAIDA")
+            @RequestParam(required = false) TipoMovimentacaoEstoque tipo,
+            @Parameter(description = "ID do usuário que registrou a movimentação. Omitido: todos os usuários.")
+            @RequestParam(required = false) UUID usuarioId,
+            @Parameter(description = "Data inicial inclusiva, em yyyy-MM-dd. Omitido: sem limite inferior.", example = "2026-10-01")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataInicial,
+            @Parameter(description = "Data final inclusiva, em yyyy-MM-dd. Omitido: sem limite superior.", example = "2026-10-31")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataFinal,
+            @Parameter(description = "Campo de ordenação: ocorridoEm, tipo, quantidade ou saldoPosterior. Padrão: ocorridoEm.", schema = @Schema(defaultValue = "ocorridoEm"))
+            @RequestParam(defaultValue = "ocorridoEm") String ordenarPor,
+            @Parameter(description = "Direção da ordenação: ASC ou DESC. Padrão: DESC.", schema = @Schema(defaultValue = "DESC"))
+            @RequestParam(defaultValue = "DESC") DirecaoOrdenacao direcao
+    ) {
+        List<MovimentacaoResponseDto> movimentacoes = movimentacaoEstoqueService.listarMovimentacoesParaExportacao(
+                produtoId, tipo, usuarioId, dataInicial, dataFinal, ordenarPor, direcao
+        );
+        byte[] arquivo = movimentacaoExportacaoService.gerarPlanilhaExcel(movimentacoes);
+        return RespostaArquivoExcel.anexo("movimentacoes", arquivo);
     }
 
     @PostMapping

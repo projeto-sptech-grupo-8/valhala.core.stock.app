@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.estoque.entity.CategoriaEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ComposicaoDrinkEntity;
@@ -16,6 +17,7 @@ import java.math.BigDecimal;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -81,6 +83,41 @@ class MovimentacaoEstoqueIntegrationTest extends EstoqueIntegrationTestSupport {
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].tipo").value("SAIDA_DRINK"))
                 .andExpect(jsonPath("$[0].receitaAplicada.drinkNome").value("Vodka Energy"));
+    }
+
+    @Test
+    void exportaMovimentacoesEmExcelRespeitandoFiltrosEPermissao() throws Exception {
+        CategoriaEntity categoria = categoria("Bebidas");
+        ProdutoEntity energetico = produtoPadrao("Red Bull", categoria, false, "10");
+        Cookie semPermissao = autenticarComPermissoes("sem-mov-export@meraki.com");
+        Cookie operador = autenticarComPermissoes("operador-mov-export@meraki.com",
+                "MOVIMENTAR_ESTOQUE", "VISUALIZAR_ESTOQUE");
+
+        mockMvc.perform(get("/movimentacoes-estoque/exportar").cookie(semPermissao))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/movimentacoes-estoque").cookie(operador).with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON).content(movimentacao(energetico, "ENTRADA", "5")))
+                .andExpect(status().isCreated());
+
+        MvcResult exportado = mockMvc.perform(get("/movimentacoes-estoque/exportar")
+                        .param("produtoId", energetico.getId().toString())
+                        .param("tipo", "ENTRADA")
+                        .cookie(operador))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .andExpect(header().string("Content-Disposition",
+                        org.hamcrest.Matchers.containsString("movimentacoes-")))
+                .andReturn();
+
+        try (var wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(
+                new java.io.ByteArrayInputStream(exportado.getResponse().getContentAsByteArray()))) {
+            var sheet = wb.getSheet("Movimentações");
+            org.assertj.core.api.Assertions.assertThat(sheet.getPhysicalNumberOfRows()).isEqualTo(2);
+            org.assertj.core.api.Assertions.assertThat(sheet.getRow(1).getCell(1).getStringCellValue()).isEqualTo("Red Bull");
+            org.assertj.core.api.Assertions.assertThat(sheet.getRow(1).getCell(2).getStringCellValue()).isEqualTo("Entrada");
+        }
     }
 
     private String movimentacao(ProdutoEntity produto, String tipo, String quantidade) {

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -119,6 +120,56 @@ public class MovimentacaoEstoqueService {
             String ordenarPor,
             DirecaoOrdenacao direcao
     ) {
+        Specification<MovimentacaoEstoqueEntity> especificacao = criarEspecificacaoMovimentacoes(
+                produtoId, tipo, usuarioId, dataInicial, dataFinal
+        );
+
+        Page<MovimentacaoEstoqueEntity> resultado = movimentacaoEstoqueRepository.findAll(
+                especificacao,
+                Paginacao.criar(pagina, tamanho, ordenarPor, direcao,
+                        Set.of("ocorridoEm", "tipo", "quantidade", "saldoPosterior"))
+        );
+        Map<UUID, String> nomesUsuarios = nomesUsuariosPorId(resultado.getContent());
+        return RespostaPaginadaDto.de(resultado,
+                movimentacao -> paraResposta(movimentacao,
+                        nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado")));
+    }
+
+    @Transactional(readOnly = true)
+    @PreAuthorize("@permissionAuthorizationService.hasPermission('VISUALIZAR_ESTOQUE', authentication)")
+    public List<MovimentacaoResponseDto> listarMovimentacoesParaExportacao(
+            UUID produtoId,
+            TipoMovimentacaoEstoque tipo,
+            UUID usuarioId,
+            LocalDate dataInicial,
+            LocalDate dataFinal,
+            String ordenarPor,
+            DirecaoOrdenacao direcao
+    ) {
+        Specification<MovimentacaoEstoqueEntity> especificacao = criarEspecificacaoMovimentacoes(
+                produtoId, tipo, usuarioId, dataInicial, dataFinal
+        );
+        Pageable paginacaoOrdenacao = Paginacao.criar(
+                0, 100, ordenarPor, direcao,
+                Set.of("ocorridoEm", "tipo", "quantidade", "saldoPosterior")
+        );
+        List<MovimentacaoEstoqueEntity> movimentacoes = movimentacaoEstoqueRepository.findAll(
+                especificacao, paginacaoOrdenacao.getSort()
+        );
+        Map<UUID, String> nomesUsuarios = nomesUsuariosPorId(movimentacoes);
+        return movimentacoes.stream()
+                .map(movimentacao -> paraResposta(movimentacao,
+                        nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado")))
+                .toList();
+    }
+
+    private Specification<MovimentacaoEstoqueEntity> criarEspecificacaoMovimentacoes(
+            UUID produtoId,
+            TipoMovimentacaoEstoque tipo,
+            UUID usuarioId,
+            LocalDate dataInicial,
+            LocalDate dataFinal
+    ) {
         if (dataInicial != null && dataFinal != null && dataInicial.isAfter(dataFinal)) {
             throw new IllegalArgumentException("A data inicial não pode ser posterior à data final");
         }
@@ -146,16 +197,7 @@ public class MovimentacaoEstoqueService {
                     root.get("ocorridoEm"), dataFinal.plusDays(1).atStartOfDay()
             ));
         }
-
-        Page<MovimentacaoEstoqueEntity> resultado = movimentacaoEstoqueRepository.findAll(
-                especificacao,
-                Paginacao.criar(pagina, tamanho, ordenarPor, direcao,
-                        Set.of("ocorridoEm", "tipo", "quantidade", "saldoPosterior"))
-        );
-        Map<UUID, String> nomesUsuarios = nomesUsuariosPorId(resultado.getContent());
-        return RespostaPaginadaDto.de(resultado,
-                movimentacao -> paraResposta(movimentacao,
-                        nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado")));
+        return especificacao;
     }
 
     @Transactional

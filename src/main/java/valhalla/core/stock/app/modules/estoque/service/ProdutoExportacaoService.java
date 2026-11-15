@@ -1,21 +1,12 @@
 package valhalla.core.stock.app.modules.estoque.service;
 
-import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.CellStyle;
-import org.apache.poi.ss.usermodel.DataFormat;
-import org.apache.poi.ss.usermodel.FillPatternType;
-import org.apache.poi.ss.usermodel.Font;
-import org.apache.poi.ss.usermodel.IndexedColors;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoResponseDto;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
+import valhalla.core.stock.app.shared.export.ColunaExcel;
+import valhalla.core.stock.app.shared.export.ExportadorExcel;
+import valhalla.core.stock.app.shared.export.FormatoCelulaExcel;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
@@ -23,97 +14,39 @@ import java.util.List;
 @Service
 public class ProdutoExportacaoService {
 
-    private static final String[] COLUNAS = {
-            "SKU",
-            "Nome",
-            "Tipo",
-            "Categoria",
-            "Unidade",
-            "Fardo",
-            "Unid. por Fardo",
-            "Fracionado",
-            "Volume Embalagem (ml)",
-            "Quantidade em Estoque",
-            "Estoque Mínimo",
-            "Preço de Custo",
-            "Preço de Venda",
-            "Margem (%)",
-            "Situação",
-            "Código de Barras"
-    };
+    private static final List<ColunaExcel<ProdutoResponseDto>> COLUNAS = List.of(
+            new ColunaExcel<>("SKU", FormatoCelulaExcel.TEXTO, p -> textoOuVazio(p.sku())),
+            new ColunaExcel<>("Nome", FormatoCelulaExcel.TEXTO, p -> textoOuVazio(p.nome())),
+            new ColunaExcel<>("Tipo", FormatoCelulaExcel.TEXTO, p -> p.tipo() == ProdutoTipo.DRINK ? "Drink" : "Padrão"),
+            new ColunaExcel<>("Categoria", FormatoCelulaExcel.TEXTO, p -> textoOuVazio(p.categoriaNome())),
+            new ColunaExcel<>("Unidade", FormatoCelulaExcel.TEXTO, p -> textoOuVazio(p.unidadeMedida())),
+            new ColunaExcel<>("Fardo", FormatoCelulaExcel.TEXTO, p -> Boolean.TRUE.equals(p.fardo()) ? "Sim" : "Não"),
+            new ColunaExcel<>("Unid. por Fardo", FormatoCelulaExcel.INTEIRO, ProdutoResponseDto::unidadesPorFardo),
+            new ColunaExcel<>("Fracionado", FormatoCelulaExcel.TEXTO, p -> Boolean.TRUE.equals(p.fracionado()) ? "Sim" : "Não"),
+            new ColunaExcel<>("Volume Embalagem (ml)", FormatoCelulaExcel.DECIMAL, ProdutoResponseDto::volumeEmbalagemMl),
+            new ColunaExcel<>("Quantidade em Estoque", FormatoCelulaExcel.DECIMAL,
+                    p -> p.tipo() == ProdutoTipo.DRINK ? null : converterParaUnidadeExibicao(p, p.quantidadeEstoque())),
+            new ColunaExcel<>("Estoque Mínimo", FormatoCelulaExcel.DECIMAL,
+                    p -> p.tipo() == ProdutoTipo.DRINK ? null : converterParaUnidadeExibicao(p, p.estoqueMinimo())),
+            new ColunaExcel<>("Preço de Custo", FormatoCelulaExcel.MOEDA,
+                    p -> p.tipo() == ProdutoTipo.DRINK ? null : p.precoCusto()),
+            new ColunaExcel<>("Preço de Venda", FormatoCelulaExcel.MOEDA, ProdutoResponseDto::precoVenda),
+            new ColunaExcel<>("Margem (%)", FormatoCelulaExcel.DECIMAL, ProdutoResponseDto::margemPercentual),
+            new ColunaExcel<>("Situação", FormatoCelulaExcel.TEXTO, p -> Boolean.TRUE.equals(p.ativo()) ? "Ativo" : "Inativo"),
+            new ColunaExcel<>("Código de Barras", FormatoCelulaExcel.TEXTO, p -> textoOuVazio(p.codigoBarras()))
+    );
+
+    private final ExportadorExcel exportadorExcel;
+
+    public ProdutoExportacaoService(ExportadorExcel exportadorExcel) {
+        this.exportadorExcel = exportadorExcel;
+    }
 
     public byte[] gerarPlanilhaExcel(List<ProdutoResponseDto> produtos) {
-        try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            Sheet sheet = workbook.createSheet("Produtos");
-
-            CellStyle headerStyle = criarEstiloCabecalho(workbook);
-            DataFormat dataFormat = workbook.createDataFormat();
-
-            CellStyle moedaStyle = workbook.createCellStyle();
-            moedaStyle.setDataFormat(dataFormat.getFormat("R$ #,##0.00"));
-
-            CellStyle decimalStyle = workbook.createCellStyle();
-            decimalStyle.setDataFormat(dataFormat.getFormat("#,##0.###"));
-
-            CellStyle inteiroStyle = workbook.createCellStyle();
-            inteiroStyle.setDataFormat(dataFormat.getFormat("#,##0"));
-
-            Row header = sheet.createRow(0);
-            for (int i = 0; i < COLUNAS.length; i++) {
-                Cell cell = header.createCell(i);
-                cell.setCellValue(COLUNAS[i]);
-                cell.setCellStyle(headerStyle);
-            }
-
-            int rowIdx = 1;
-            for (ProdutoResponseDto produto : produtos) {
-                Row row = sheet.createRow(rowIdx++);
-                preencherLinha(row, produto, moedaStyle, decimalStyle, inteiroStyle);
-            }
-
-            for (int i = 0; i < COLUNAS.length; i++) {
-                sheet.autoSizeColumn(i);
-                int largura = Math.min(sheet.getColumnWidth(i) + 512, 12000);
-                sheet.setColumnWidth(i, largura);
-            }
-
-            workbook.write(out);
-            return out.toByteArray();
-        } catch (IOException excecao) {
-            throw new IllegalStateException("Não foi possível gerar a planilha Excel de produtos", excecao);
-        }
+        return exportadorExcel.gerarPlanilha("Produtos", COLUNAS, produtos);
     }
 
-    private void preencherLinha(
-            Row row,
-            ProdutoResponseDto produto,
-            CellStyle moedaStyle,
-            CellStyle decimalStyle,
-            CellStyle inteiroStyle
-    ) {
-        boolean isDrink = produto.tipo() == ProdutoTipo.DRINK;
-        BigDecimal estoque = converterParaUnidadeExibicao(produto, produto.quantidadeEstoque());
-        BigDecimal estoqueMinimo = converterParaUnidadeExibicao(produto, produto.estoqueMinimo());
-
-        row.createCell(0).setCellValue(textoOuVazio(produto.sku()));
-        row.createCell(1).setCellValue(textoOuVazio(produto.nome()));
-        row.createCell(2).setCellValue(isDrink ? "Drink" : "Padrão");
-        row.createCell(3).setCellValue(textoOuVazio(produto.categoriaNome()));
-        row.createCell(4).setCellValue(textoOuVazio(produto.unidadeMedida()));
-        row.createCell(5).setCellValue(Boolean.TRUE.equals(produto.fardo()) ? "Sim" : "Não");
-        escreverInteiro(row.createCell(6), produto.unidadesPorFardo(), inteiroStyle);
-        row.createCell(7).setCellValue(Boolean.TRUE.equals(produto.fracionado()) ? "Sim" : "Não");
-        escreverDecimal(row.createCell(8), produto.volumeEmbalagemMl(), decimalStyle);
-        escreverDecimal(row.createCell(9), isDrink ? null : estoque, decimalStyle);
-        escreverDecimal(row.createCell(10), isDrink ? null : estoqueMinimo, decimalStyle);
-        escreverDecimal(row.createCell(11), isDrink ? null : produto.precoCusto(), moedaStyle);
-        escreverDecimal(row.createCell(12), produto.precoVenda(), moedaStyle);
-        escreverDecimal(row.createCell(13), produto.margemPercentual(), decimalStyle);
-        row.createCell(14).setCellValue(Boolean.TRUE.equals(produto.ativo()) ? "Ativo" : "Inativo");
-        row.createCell(15).setCellValue(textoOuVazio(produto.codigoBarras()));
-    }
-
-    private BigDecimal converterParaUnidadeExibicao(ProdutoResponseDto produto, BigDecimal valorBase) {
+    private static BigDecimal converterParaUnidadeExibicao(ProdutoResponseDto produto, BigDecimal valorBase) {
         if (valorBase == null) {
             return null;
         }
@@ -125,33 +58,7 @@ public class ProdutoExportacaoService {
         return valorBase;
     }
 
-    private CellStyle criarEstiloCabecalho(Workbook workbook) {
-        Font font = workbook.createFont();
-        font.setBold(true);
-        CellStyle style = workbook.createCellStyle();
-        style.setFont(font);
-        style.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
-        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-        return style;
-    }
-
-    private void escreverDecimal(Cell cell, BigDecimal valor, CellStyle style) {
-        if (valor == null) {
-            return;
-        }
-        cell.setCellValue(valor.doubleValue());
-        cell.setCellStyle(style);
-    }
-
-    private void escreverInteiro(Cell cell, Integer valor, CellStyle style) {
-        if (valor == null) {
-            return;
-        }
-        cell.setCellValue(valor);
-        cell.setCellStyle(style);
-    }
-
-    private String textoOuVazio(String valor) {
+    private static String textoOuVazio(String valor) {
         return valor == null ? "" : valor;
     }
 }

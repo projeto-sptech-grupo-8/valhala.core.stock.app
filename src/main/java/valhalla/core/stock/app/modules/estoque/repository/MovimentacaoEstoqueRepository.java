@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoEstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
@@ -23,6 +24,13 @@ public interface MovimentacaoEstoqueRepository extends JpaRepository<Movimentaca
     Page<MovimentacaoEstoqueEntity> findAll(
             Specification<MovimentacaoEstoqueEntity> specification,
             Pageable pageable
+    );
+
+    @Override
+    @EntityGraph(attributePaths = {"estoque", "estoque.produto"})
+    List<MovimentacaoEstoqueEntity> findAll(
+            Specification<MovimentacaoEstoqueEntity> specification,
+            Sort sort
     );
 
     @EntityGraph(attributePaths = {"estoque", "estoque.produto"})

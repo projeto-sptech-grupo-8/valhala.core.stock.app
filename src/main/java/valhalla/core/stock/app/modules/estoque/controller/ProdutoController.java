@@ -11,9 +11,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -32,12 +29,11 @@ import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
 import valhalla.core.stock.app.modules.estoque.service.ProdutoExportacaoService;
 import valhalla.core.stock.app.modules.estoque.service.ProdutoService;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
+import valhalla.core.stock.app.shared.export.RespostaArquivoExcel;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
 
 import java.net.URI;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.UUID;
 
@@ -47,11 +43,6 @@ import java.util.UUID;
 @Tag(name = "Produtos", description = "Produtos do estabelecimento autenticado.")
 @SecurityRequirement(name = "accessTokenCookie")
 public class ProdutoController {
-
-    private static final MediaType MEDIA_TYPE_EXCEL = MediaType.parseMediaType(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    );
-    private static final DateTimeFormatter EXPORT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm");
 
     private final ProdutoService produtoService;
     private final ProdutoExportacaoService produtoExportacaoService;
@@ -129,11 +120,7 @@ public class ProdutoController {
                 busca, categoriaId, tipo, ativo, ids, ordenarPor, direcao
         );
         byte[] arquivo = produtoExportacaoService.gerarPlanilhaExcel(produtos);
-        String nomeArquivo = "produtos-" + LocalDateTime.now().format(EXPORT_FORMATTER) + ".xlsx";
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MEDIA_TYPE_EXCEL);
-        headers.setContentDisposition(ContentDisposition.attachment().filename(nomeArquivo).build());
-        return ResponseEntity.ok().headers(headers).body(arquivo);
+        return RespostaArquivoExcel.anexo("produtos", arquivo);
     }
 
     @PostMapping
