@@ -5,6 +5,7 @@ import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 public record MovimentacaoResponseDto(
@@ -22,6 +23,7 @@ public record MovimentacaoResponseDto(
         String numeroNotaFiscal,
         UUID origemDrinkId,
         RawValue receitaAplicada,
-        LocalDateTime ocorridoEm
+        LocalDateTime ocorridoEm,
+        List<MovimentacaoLoteResponseDto> lotes
 ) {
 }

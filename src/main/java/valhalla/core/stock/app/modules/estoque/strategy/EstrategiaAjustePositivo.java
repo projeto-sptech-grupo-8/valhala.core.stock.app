@@ -22,4 +22,9 @@ public class EstrategiaAjustePositivo extends AbstractEstrategiaMovimentacao {
     public BigDecimal calcularSaldoPosterior(BigDecimal saldoAnterior, BigDecimal quantidade) {
         return somar(saldoAnterior, quantidade);
     }
+
+    @Override
+    public PoliticaLote politicaLote() {
+        return PoliticaLote.CREDITO;
+    }
 }
