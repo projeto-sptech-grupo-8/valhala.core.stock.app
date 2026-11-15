@@ -35,6 +35,8 @@ class OpenApiExportIntegrationTest {
                 .contains("/produtos:")
                 .contains("/drinks/{idDrink}/receita:")
                 .contains("/movimentacoes-estoque:")
+                .contains("/lotes:")
+                .contains("/lotes/resumo:")
                 .contains("/dashboard/resumo:")
                 .contains("/auth/csrf:")
                 .contains("csrfTokenHeader:");

@@ -63,9 +63,32 @@ SAIDA_DRINK
 - Lote pertence à entrada/movimentação, e não ao cadastro fixo de Produto.
 - Correções devem ser feitas por ajuste ou estorno, preservando o histórico.
 
+### Lotes e validade (FEFO)
+
+- O saldo do produto é mantido também por lote (`lote_estoque`); a soma dos lotes é sempre igual ao
+  saldo do estoque, na mesma unidade-base.
+- `ENTRADA`, `ENTRADA_INICIAL` e `AJUSTE_POSITIVO` creditam no lote informado em `lote`. Sem código,
+  vão para `SEM-LOTE` (sem validade) ou, se houver `validade`, para o lote `VAL-<yyyy-MM-dd>`.
+  Repetir o código soma no mesmo lote; o mesmo código com outra validade é rejeitado.
+- A `validade` só é aceita em entradas e ajustes positivos. Lote vence no fim do dia da validade:
+  quem vence hoje ainda é vendável.
+- Saídas consomem por FEFO: primeiro o lote que vence antes; lotes sem validade por último.
+  - `SAIDA` e `SAIDA_DRINK` **não consomem lote vencido**. Se o saldo dentro da validade não basta,
+    a operação é rejeitada pedindo o registro da perda.
+  - `PERDA` e `AJUSTE_NEGATIVO` consomem também os vencidos (que, por FEFO, saem primeiro).
+  - Em `SAIDA`, `PERDA` e `AJUSTE_NEGATIVO` é possível indicar o lote específico com `loteId`
+    (ou o código em `lote`), por exemplo para baixar um lote vencido.
+- Cada movimentação guarda quanto saiu de (ou entrou em) cada lote (`movimentacao_estoque_lote`) e
+  devolve essa lista em `lotes`; o campo texto `lote` passa a trazer os códigos movimentados.
+- Saldo anterior aos lotes (ou incluído fora da aplicação) é reconciliado como `SEM-LOTE` na primeira
+  movimentação ou consulta de lotes.
+- `GET /lotes` lista os lotes com saldo (filtros: produto, situação, `venceEmDias`) e
+  `GET /lotes/resumo` traz vencidos, vencimentos em 7 e 30 dias e valor em risco a custo.
+  Situações: `VENCIDO`, `VENCE_EM_7_DIAS` (0–7 dias), `VENCE_EM_30_DIAS` (8–30), `VALIDO`, `SEM_VALIDADE`.
+
 ### Permissões
 
-- `VISUALIZAR_ESTOQUE`: consultar produtos, saldo e movimentações.
+- `VISUALIZAR_ESTOQUE`: consultar produtos, saldo, lotes/validade e movimentações.
 - `GERENCIAR_ESTOQUE`: gerir categorias e produtos.
 - `MOVIMENTAR_ESTOQUE`: registrar entradas, saídas, ajustes, perdas e baixa de drinks.
 
