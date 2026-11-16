@@ -24,6 +24,7 @@ import valhalla.core.stock.app.modules.caixa.exception.TerminalCaixaJaExisteExce
 import valhalla.core.stock.app.modules.caixa.configuracao.mapper.CaixaMapper;
 import valhalla.core.stock.app.modules.caixa.configuracao.mapper.TerminalCaixaMapper;
 import valhalla.core.stock.app.modules.caixa.configuracao.repository.CaixaRepository;
+import valhalla.core.stock.app.modules.caixa.pedido.repository.PagamentoPedidoRepository;
 import valhalla.core.stock.app.modules.caixa.sessao.repository.SessaoCaixaRepository;
 import valhalla.core.stock.app.modules.caixa.configuracao.repository.TerminalCaixaRepository;
 import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
@@ -52,6 +53,7 @@ public class CaixaService {
     private final CaixaRepository caixaRepository;
     private final TerminalCaixaRepository terminalCaixaRepository;
     private final SessaoCaixaRepository sessaoCaixaRepository;
+    private final PagamentoPedidoRepository pagamentoPedidoRepository;
     private final DisponibilidadePoint disponibilidadePoint;
     private final AuditoriaCaixaService auditoriaCaixaService;
     private final ContextoCaixa contextoCaixa;
@@ -62,6 +64,7 @@ public class CaixaService {
             CaixaRepository caixaRepository,
             TerminalCaixaRepository terminalCaixaRepository,
             SessaoCaixaRepository sessaoCaixaRepository,
+            PagamentoPedidoRepository pagamentoPedidoRepository,
             DisponibilidadePoint disponibilidadePoint,
             AuditoriaCaixaService auditoriaCaixaService,
             ContextoCaixa contextoCaixa,
@@ -70,6 +73,7 @@ public class CaixaService {
         this.caixaRepository = caixaRepository;
         this.terminalCaixaRepository = terminalCaixaRepository;
         this.sessaoCaixaRepository = sessaoCaixaRepository;
+        this.pagamentoPedidoRepository = pagamentoPedidoRepository;
         this.disponibilidadePoint = disponibilidadePoint;
         this.auditoriaCaixaService = auditoriaCaixaService;
         this.contextoCaixa = contextoCaixa;
@@ -252,6 +256,63 @@ public class CaixaService {
         }
 
         return montarResposta(caixaSalvo);
+    }
+
+    @Transactional
+    @PreAuthorize("""
+            @permissionAuthorizationService.hasPermission(
+                'CAIXA_CONFIGURAR',
+                authentication
+            )
+            """)
+    public void excluirCaixa(UUID caixaId) {
+        UUID usuarioId = contextoCaixa.usuarioId();
+        CaixaEntity caixaParaExcluir = buscarDoEstabelecimento(caixaId);
+
+        if (sessaoCaixaRepository.existsByCaixaId(caixaParaExcluir.getId())) {
+            throw new CaixaEstadoInvalidoException(
+                    "Não é possível excluir um caixa que possui sessões vinculadas"
+            );
+        }
+
+        if (pagamentoPedidoRepository.existePagamentoPorCaixaId(caixaParaExcluir.getId())) {
+            throw new CaixaEstadoInvalidoException(
+                    "Não é possível excluir um caixa que possui pagamentos vinculados"
+            );
+        }
+
+        Map<String, Object> dadosAnteriores = CaixaMapper.snapshot(caixaParaExcluir);
+        UUID estabelecimentoId = caixaParaExcluir.getEstabelecimentoId();
+        String nomeCaixa = caixaParaExcluir.getNome();
+
+        try {
+            terminalCaixaRepository.deleteAllByCaixaId(caixaParaExcluir.getId());
+            terminalCaixaRepository.flush();
+            caixaRepository.delete(caixaParaExcluir);
+            caixaRepository.flush();
+        } catch (DataIntegrityViolationException excecao) {
+            throw new CaixaEstadoInvalidoException(
+                    "Não é possível excluir um caixa que possui sessões ou pagamentos vinculados"
+            );
+        }
+
+        disponibilidadePoint.exigirTerminalAtivoSePointHabilitada(estabelecimentoId);
+
+        auditoriaCaixaService.registrar(
+                estabelecimentoId,
+                usuarioId,
+                null,
+                EventoAuditoriaCaixa.CAIXA_EXCLUIDO,
+                EventoAuditoriaCaixa.ENTIDADE_CAIXA,
+                caixaParaExcluir.getId().toString(),
+                "Caixa excluído: " + nomeCaixa,
+                null,
+                null,
+                objectMapper.valueToTree(dadosAnteriores),
+                null
+        );
+
+        businessEventLogger.success("cash.register.deleted", "cash_register", caixaParaExcluir.getId());
     }
 
     @Transactional

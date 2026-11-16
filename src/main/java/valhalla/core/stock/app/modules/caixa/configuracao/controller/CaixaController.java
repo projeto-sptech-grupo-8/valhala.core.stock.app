@@ -13,6 +13,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -142,6 +143,28 @@ public class CaixaController {
             @Valid @RequestBody CaixaAtualizacaoRequestDto requestDto
     ) {
         return ResponseEntity.ok(caixaService.atualizarCaixa(id, requestDto));
+    }
+
+    @DeleteMapping("/{id}")
+    @SecurityRequirement(name = "csrfTokenHeader")
+    @Operation(
+            summary = "Excluir um caixa sem sessões ou pagamentos",
+            description = "Remove o caixa e eventuais terminais sem histórico quando não houver sessões ou pagamentos vinculados e a Point não ficar sem terminal ativo."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Caixa excluído."),
+            @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Usuário sem permissão ou caixa de outro estabelecimento.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Caixa não encontrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "Caixa possui sessões ou pagamentos vinculados, ou deixaria a Point sem terminal ativo.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    public ResponseEntity<Void> excluirCaixa(@PathVariable("id") UUID id) {
+        caixaService.excluirCaixa(id);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{caixaId}/terminais")

@@ -30,6 +30,8 @@ public interface TerminalCaixaRepository extends JpaRepository<TerminalCaixaEnti
 
     boolean existsByCaixaIdAndNomeIgnoreCaseAndIdNot(UUID caixaId, String nome, UUID id);
 
+    void deleteAllByCaixaId(UUID caixaId);
+
     @Query("""
             select count(t)
             from TerminalCaixaEntity t

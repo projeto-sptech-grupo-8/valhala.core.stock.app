@@ -11,6 +11,7 @@ public final class EventoAuditoriaCaixa {
     public static final String CONFIGURACAO_CAIXA_ALTERADA = "CONFIGURACAO_CAIXA_ALTERADA";
     public static final String CAIXA_CRIADO = "CAIXA_CRIADO";
     public static final String CAIXA_ALTERADO = "CAIXA_ALTERADO";
+    public static final String CAIXA_EXCLUIDO = "CAIXA_EXCLUIDO";
     public static final String TERMINAL_CAIXA_CRIADO = "TERMINAL_CAIXA_CRIADO";
     public static final String TERMINAL_CAIXA_ALTERADO = "TERMINAL_CAIXA_ALTERADO";
     public static final String TAXA_PAGAMENTO_CRIADA = "TAXA_PAGAMENTO_CRIADA";

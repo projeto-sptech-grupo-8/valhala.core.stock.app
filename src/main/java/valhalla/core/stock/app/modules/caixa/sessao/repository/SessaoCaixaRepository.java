@@ -30,6 +30,8 @@ public interface SessaoCaixaRepository
             StatusSessaoCaixa status
     );
 
+    boolean existsByCaixaId(UUID caixaId);
+
     boolean existsByCaixaIdAndStatus(UUID caixaId, StatusSessaoCaixa status);
 
     @Query("""
