@@ -38,3 +38,8 @@ build/
 !.env.example
 *.log
 logs/
+
+
+docs/QA_BACKEND
+docs/QA_BACKEND_PASSO_A_PASSO
+docs/qa-backend
