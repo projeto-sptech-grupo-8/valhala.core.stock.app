@@ -66,6 +66,18 @@ public interface PagamentoPedidoRepository extends JpaRepository<PagamentoPedido
     );
 
     @Query("""
+            select count(p) > 0
+            from PagamentoPedidoEntity p
+            where p.terminalCaixa.caixa.id = :caixaId
+               or p.terminalId in (
+                   select t.terminalId
+                   from TerminalCaixaEntity t
+                   where t.caixa.id = :caixaId
+               )
+            """)
+    boolean existePagamentoPorCaixaId(@Param("caixaId") UUID caixaId);
+
+    @Query("""
             select p
             from PagamentoPedidoEntity p
             where p.provedor = 'MERCADO_PAGO'

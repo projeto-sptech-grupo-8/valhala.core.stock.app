@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.caixa.sessao.entity.AuditoriaCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.configuracao.entity.CaixaEntity;
 import valhalla.core.stock.app.modules.caixa.configuracao.entity.ConfiguracaoCaixaEntity;
+import valhalla.core.stock.app.modules.caixa.configuracao.entity.TerminalCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.sessao.entity.SessaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPagamentoPedido;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -242,6 +244,128 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
         mockMvc.perform(get("/caixa/caixas/{id}", caixaId).cookie(gerente.accessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.terminais.length()").value(2));
+    }
+
+    @Test
+    void excluiCaixaSemSessoesEPagamentosLiberandoTerminalERegistrandoAuditoria() throws Exception {
+        UsuarioAutenticado gerente = autenticarGerente("gerente.excluir@meraki.com");
+
+        MvcResult criacaoCaixa = mockMvc.perform(post("/caixa/caixas")
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\"Caixa Para Excluir\"}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID caixaExcluidoId = UUID.fromString(
+                JsonPath.read(criacaoCaixa.getResponse().getContentAsString(), "$.id")
+        );
+
+        mockMvc.perform(post("/caixa/caixas/{caixaId}/terminais", caixaExcluidoId)
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"terminalId\":\"POINT-TEMP-001\",\"nome\":\"Point Temp\"}"))
+                .andExpect(status().isCreated());
+
+        UsuarioAutenticado semPermissao = autenticarComPermissoes(
+                "operador.sem-excluir@meraki.com",
+                PERMISSOES_OPERADOR
+        );
+        mockMvc.perform(delete("/caixa/caixas/{id}", caixaExcluidoId)
+                        .cookie(semPermissao.accessToken())
+                        .with(csrf(semPermissao)))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(delete("/caixa/caixas/{id}", caixaExcluidoId)
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente)))
+                .andExpect(status().isNoContent());
+
+        assertThat(caixaRepository.findById(caixaExcluidoId)).isEmpty();
+        assertThat(terminalCaixaRepository.existsByTerminalId("POINT-TEMP-001")).isFalse();
+        assertThat(auditorias())
+                .anyMatch(evento -> "CAIXA_EXCLUIDO".equals(evento.getTipoEvento())
+                        && caixaExcluidoId.toString().equals(evento.getEntidadeId()));
+
+        // O terminal liberado pode ser vinculado a outro caixa.
+        CaixaEntity outroCaixa = caixa(estabelecimento, "Caixa Destino");
+        mockMvc.perform(post("/caixa/caixas/{caixaId}/terminais", outroCaixa.getId())
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"terminalId\":\"POINT-TEMP-001\",\"nome\":\"Point Reaproveitada\"}"))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void bloqueiaExclusaoDeCaixaComSessaoPagamentoOuUltimoTerminalDaPoint() throws Exception {
+        UsuarioAutenticado gerente = autenticarGerente("gerente.bloqueio-exclusao@meraki.com");
+        UsuarioAutenticado operador = autenticarComPermissoes(
+                "operador.bloqueio-exclusao@meraki.com",
+                PERMISSOES_OPERADOR
+        );
+
+        // 1. Caixa com sessão (mesmo após fechada) não pode ser excluído.
+        CaixaEntity caixaComSessao = caixa(estabelecimento, "Caixa Com Sessao");
+        String sessaoId = abrir(operador, caixaComSessao.getId(), "50.00");
+        mockMvc.perform(post("/caixa/sessoes/{id}/fechamento", sessaoId)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"dinheiroContado\":50.00}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(delete("/caixa/caixas/{id}", caixaComSessao.getId())
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value(
+                        "Não é possível excluir um caixa que possui sessões vinculadas"
+                ));
+
+        // 2. Caixa sem sessões, mas cujo terminal possui pagamento, não pode ser excluído.
+        CaixaEntity caixaComPagamento = caixa(estabelecimento, "Caixa Com Pagamento");
+        TerminalCaixaEntity terminalComPagamento = terminal(caixaComPagamento, "POINT-PAG-001", "Point 1");
+        PagamentoPedidoEntity pagamentoVinculado = pagamento(
+                UUID.fromString(sessaoId),
+                "DEBITO",
+                "APROVADO",
+                "30.00"
+        );
+        pagamentoVinculado.setTerminalCaixa(terminalComPagamento);
+        pagamentoVinculado.setTerminalId(terminalComPagamento.getTerminalId());
+        pagamentoPedidoRepository.saveAndFlush(pagamentoVinculado);
+
+        mockMvc.perform(delete("/caixa/caixas/{id}", caixaComPagamento.getId())
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value(
+                        "Não é possível excluir um caixa que possui pagamentos vinculados"
+                ));
+
+        // 3. Último caixa com terminal ativo quando Point está habilitada não pode ser excluído.
+        CaixaEntity caixaPoint = caixa(estabelecimento, "Caixa Point Unico");
+        terminal(caixaPoint, "POINT-UNICO-001", "Point Única");
+        terminalComPagamento.setAtivo(false);
+        terminalCaixaRepository.saveAndFlush(terminalComPagamento);
+
+        mockMvc.perform(put("/caixa/configuracao")
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(configuracaoJson()
+                                .replace("\"pointHabilitado\": false", "\"pointHabilitado\": true")))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(delete("/caixa/caixas/{id}", caixaPoint.getId())
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value(
+                        "A Point está habilitada: mantenha ao menos um terminal ativo ou desabilite a Point antes"
+                ));
     }
 
     @Test

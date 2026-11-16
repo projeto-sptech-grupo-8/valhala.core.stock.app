@@ -31,6 +31,7 @@ import valhalla.core.stock.app.modules.caixa.exception.CaixaJaExisteException;
 import valhalla.core.stock.app.modules.caixa.exception.TerminalCaixaJaExisteException;
 import valhalla.core.stock.app.modules.caixa.configuracao.repository.CaixaRepository;
 import valhalla.core.stock.app.modules.caixa.configuracao.repository.ConfiguracaoCaixaRepository;
+import valhalla.core.stock.app.modules.caixa.pedido.repository.PagamentoPedidoRepository;
 import valhalla.core.stock.app.modules.caixa.sessao.repository.SessaoCaixaRepository;
 import valhalla.core.stock.app.modules.caixa.configuracao.repository.TerminalCaixaRepository;
 import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
@@ -62,6 +63,7 @@ class CaixaServiceTest {
     @Mock private CaixaRepository caixaRepository;
     @Mock private TerminalCaixaRepository terminalCaixaRepository;
     @Mock private SessaoCaixaRepository sessaoCaixaRepository;
+    @Mock private PagamentoPedidoRepository pagamentoPedidoRepository;
     @Mock private ConfiguracaoCaixaRepository configuracaoCaixaRepository;
     @Mock private AuditoriaCaixaService auditoriaCaixaService;
 
@@ -74,7 +76,8 @@ class CaixaServiceTest {
         DisponibilidadePoint disponibilidadePoint =
                 new DisponibilidadePoint(terminalCaixaRepository, configuracaoCaixaRepository);
         caixaService = new CaixaService(caixaRepository, terminalCaixaRepository, sessaoCaixaRepository,
-                disponibilidadePoint, auditoriaCaixaService, new ContextoCaixa(), new BusinessEventLogger());
+                pagamentoPedidoRepository, disponibilidadePoint, auditoriaCaixaService,
+                new ContextoCaixa(), new BusinessEventLogger());
         estabelecimentoId = UUID.randomUUID();
         usuarioId = UUID.randomUUID();
         AutenticacaoTeste.autenticar(estabelecimentoId, usuarioId);
@@ -308,6 +311,73 @@ class CaixaServiceTest {
 
         assertThatThrownBy(() -> caixaService.atualizarCaixa(caixa.getId(),
                 new CaixaAtualizacaoRequestDto(null, false)))
+                .isInstanceOf(CaixaEstadoInvalidoException.class)
+                .hasMessageContaining("Point");
+
+        verifyNoInteractions(auditoriaCaixaService);
+    }
+
+    @Test
+    void deveExcluirCaixaSemSessoesEPagamentosERegistrarAuditoria() {
+        CaixaEntity caixa = caixa("Caixa Temporário", true);
+        when(caixaRepository.findById(caixa.getId())).thenReturn(Optional.of(caixa));
+        when(sessaoCaixaRepository.existsByCaixaId(caixa.getId())).thenReturn(false);
+        when(pagamentoPedidoRepository.existePagamentoPorCaixaId(caixa.getId())).thenReturn(false);
+        when(configuracaoCaixaRepository.findByEstabelecimentoId(estabelecimentoId)).thenReturn(Optional.empty());
+
+        caixaService.excluirCaixa(caixa.getId());
+
+        verify(terminalCaixaRepository).deleteAllByCaixaId(caixa.getId());
+        verify(terminalCaixaRepository).flush();
+        verify(caixaRepository).delete(caixa);
+        verify(caixaRepository).flush();
+        verify(auditoriaCaixaService).registrar(eq(estabelecimentoId), eq(usuarioId), isNull(),
+                eq(EventoAuditoriaCaixa.CAIXA_EXCLUIDO), eq(EventoAuditoriaCaixa.ENTIDADE_CAIXA),
+                eq(caixa.getId().toString()), anyString(), isNull(), isNull(), any(), isNull());
+    }
+
+    @Test
+    void naoDeveExcluirCaixaComSessoesVinculadas() {
+        CaixaEntity caixa = caixa("Caixa Com Sessão", true);
+        when(caixaRepository.findById(caixa.getId())).thenReturn(Optional.of(caixa));
+        when(sessaoCaixaRepository.existsByCaixaId(caixa.getId())).thenReturn(true);
+
+        assertThatThrownBy(() -> caixaService.excluirCaixa(caixa.getId()))
+                .isInstanceOf(CaixaEstadoInvalidoException.class)
+                .hasMessageContaining("sessões");
+
+        verify(caixaRepository, never()).delete(any(CaixaEntity.class));
+        verifyNoInteractions(auditoriaCaixaService);
+    }
+
+    @Test
+    void naoDeveExcluirCaixaComPagamentosVinculados() {
+        CaixaEntity caixa = caixa("Caixa Com Pagamento", true);
+        when(caixaRepository.findById(caixa.getId())).thenReturn(Optional.of(caixa));
+        when(sessaoCaixaRepository.existsByCaixaId(caixa.getId())).thenReturn(false);
+        when(pagamentoPedidoRepository.existePagamentoPorCaixaId(caixa.getId())).thenReturn(true);
+
+        assertThatThrownBy(() -> caixaService.excluirCaixa(caixa.getId()))
+                .isInstanceOf(CaixaEstadoInvalidoException.class)
+                .hasMessageContaining("pagamentos");
+
+        verify(caixaRepository, never()).delete(any(CaixaEntity.class));
+        verifyNoInteractions(auditoriaCaixaService);
+    }
+
+    @Test
+    void naoDeveExcluirUltimoCaixaComTerminalQuandoPointEstaHabilitada() {
+        CaixaEntity caixa = caixa("Caixa Point", true);
+        ConfiguracaoCaixaEntity configuracao = new ConfiguracaoCaixaEntity();
+        configuracao.setPointHabilitado(true);
+        when(caixaRepository.findById(caixa.getId())).thenReturn(Optional.of(caixa));
+        when(sessaoCaixaRepository.existsByCaixaId(caixa.getId())).thenReturn(false);
+        when(pagamentoPedidoRepository.existePagamentoPorCaixaId(caixa.getId())).thenReturn(false);
+        when(configuracaoCaixaRepository.findByEstabelecimentoId(estabelecimentoId))
+                .thenReturn(Optional.of(configuracao));
+        when(terminalCaixaRepository.contarAtivosDoEstabelecimento(estabelecimentoId)).thenReturn(0L);
+
+        assertThatThrownBy(() -> caixaService.excluirCaixa(caixa.getId()))
                 .isInstanceOf(CaixaEstadoInvalidoException.class)
                 .hasMessageContaining("Point");
 
