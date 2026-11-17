@@ -34,6 +34,9 @@ A V7 remove NCM e CEST de Produto e o NCM de Item de Nota Fiscal. Esses dados n�
 A V8 permite ingredientes em `ML` ou `UN` na composição de drinks. Produtos fracionados usam
 `ML`; ingredientes unitários, como uma lata de energético, usam `UN`.
 
+A V11 cria `token_recuperacao_senha`, usada na recuperação de senha por e-mail. Apenas o hash
+SHA-256 de cada token é armazenado, e os tokens são removidos junto com o usuário.
+
 ## Banco novo
 
 Antes da primeira inicialização, execute `src/main/resources/db/script.sql`. Para criar os dados de demonstração, execute depois `src/main/resources/db/seed-inicial.sql`. Em seguida, inicie a aplicação: o Flyway registra a versão e valida a estrutura.

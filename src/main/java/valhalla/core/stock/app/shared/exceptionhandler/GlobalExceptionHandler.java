@@ -12,6 +12,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
+import valhalla.core.stock.app.shared.error.InvalidPasswordResetTokenException;
 import valhalla.core.stock.app.shared.error.InvalidRefreshTokenException;
 import valhalla.core.stock.app.shared.error.InvalidUserUpdateException;
 import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
@@ -53,6 +54,15 @@ public class GlobalExceptionHandler {
                 exception.getMessage(),
                 Map.of()
         );
+    }
+
+    @ExceptionHandler(InvalidPasswordResetTokenException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidPasswordResetToken(
+            InvalidPasswordResetTokenException exception
+    ) {
+        LOGGER.atWarn().addKeyValue("event", "security.password-reset-token.rejected")
+                .log("Password reset token rejected");
+        return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), Map.of());
     }
 
     @ExceptionHandler(EmailAlreadyExistsException.class)

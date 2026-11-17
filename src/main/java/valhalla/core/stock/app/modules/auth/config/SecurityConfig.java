@@ -64,7 +64,7 @@ import java.util.ArrayList;
 
 @Configuration
 @EnableMethodSecurity
-@EnableConfigurationProperties(JwtProperties.class)
+@EnableConfigurationProperties({JwtProperties.class, RecuperacaoSenhaProperties.class})
 public class SecurityConfig {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SecurityConfig.class);
@@ -130,7 +130,9 @@ public class SecurityConfig {
                                 HttpMethod.POST,
                                 "/auth/login",
                                 "/auth/refresh",
-                                "/auth/logout"
+                                "/auth/logout",
+                                "/auth/recuperar-senha",
+                                "/auth/redefinir-senha"
                         ).permitAll()
                         .requestMatchers(
                                 "/swagger-ui/**",
@@ -264,7 +266,9 @@ public class SecurityConfig {
     private boolean isAuthenticationEndpoint(HttpServletRequest request) {
         return request.getServletPath().equals("/auth/login")
                 || request.getServletPath().equals("/auth/refresh")
-                || request.getServletPath().equals("/auth/logout");
+                || request.getServletPath().equals("/auth/logout")
+                || request.getServletPath().equals("/auth/recuperar-senha")
+                || request.getServletPath().equals("/auth/redefinir-senha");
     }
 
     private JwtDecoder jwtDecoder(
