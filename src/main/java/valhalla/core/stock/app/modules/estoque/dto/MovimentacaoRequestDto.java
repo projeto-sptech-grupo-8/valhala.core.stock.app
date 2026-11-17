@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
+import valhalla.core.stock.app.modules.estoque.entity.MotivoPerda;
 import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
 
 import java.math.BigDecimal;
@@ -24,6 +25,11 @@ public record MovimentacaoRequestDto(
         BigDecimal quantidade,
 
         String motivo,
+
+        @Schema(description = "Classificação da perda; obrigatória em PERDA e proibida nos demais tipos. "
+                + "Omitida em PERDA (clientes antigos): deduzida do texto do motivo.",
+                example = "VENCIMENTO")
+        MotivoPerda motivoPerda,
 
         @Size(max = 100, message = "O lote deve ter no máximo 100 caracteres")
         @Schema(description = "Entradas: código do lote que recebe a quantidade (omitido: SEM-LOTE, ou VAL-<validade> se a validade for informada). "
@@ -48,6 +54,6 @@ public record MovimentacaoRequestDto(
             String lote,
             String numeroNotaFiscal
     ) {
-        this(produtoId, tipo, quantidade, motivo, lote, numeroNotaFiscal, null, null);
+        this(produtoId, tipo, quantidade, motivo, null, lote, numeroNotaFiscal, null, null);
     }
 }

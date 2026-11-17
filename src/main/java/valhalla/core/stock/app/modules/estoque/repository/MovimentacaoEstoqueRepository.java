@@ -64,4 +64,7 @@ public interface MovimentacaoEstoqueRepository extends JpaRepository<Movimentaca
     );
 
     boolean existsByEstoqueProdutoId(UUID produtoId);
+
+    @EntityGraph(attributePaths = {"estoque", "estoque.produto"})
+    List<MovimentacaoEstoqueEntity> findAllByItemPedidoIdInOrderByIdAsc(java.util.Collection<Long> idsItensPedido);
 }

@@ -87,6 +87,42 @@ public class ControleLotesEstoque {
         return debitar(estoque, quantidade, politica == PoliticaLote.DEBITO_COM_VENCIDOS, codigoLote, loteId);
     }
 
+    /**
+     * Estorno de uma baixa: devolve cada quantidade ao lote de onde saiu (mesmo vencido, para manter a
+     * rastreabilidade). O que não tiver lote de origem (baixas anteriores ao controle de lotes) vai para SEM-LOTE.
+     * Chamar antes de alterar o saldo do estoque.
+     */
+    public List<Alocacao> devolver(EstoqueEntity estoque, List<Alocacao> origem, BigDecimal quantidade) {
+        List<LoteEstoqueEntity> lotes = reconciliar(estoque);
+        List<Alocacao> alocacoes = new ArrayList<>();
+        BigDecimal restante = quantidade;
+        for (Alocacao alocacao : origem) {
+            LoteEstoqueEntity lote = lotes.stream()
+                    .filter(existente -> Objects.equals(existente.getId(), alocacao.lote().getId()))
+                    .findFirst()
+                    .orElse(null);
+            BigDecimal devolvida = alocacao.quantidade().min(restante);
+            if (lote == null || devolvida.signum() <= 0) {
+                continue;
+            }
+            lote.setQuantidadeAtual(lote.getQuantidadeAtual().add(devolvida));
+            loteEstoqueRepository.save(lote);
+            alocacoes.add(new Alocacao(lote, devolvida));
+            restante = restante.subtract(devolvida);
+        }
+        if (restante.signum() > 0) {
+            // não chama creditar(): ele reconciliaria de novo com os lotes já acrescidos e o saldo ainda antigo
+            LoteEstoqueEntity semLote = lotes.stream()
+                    .filter(existente -> LoteEstoqueEntity.SEM_LOTE.equals(existente.getCodigo()))
+                    .findFirst()
+                    .orElseGet(() -> novoLote(estoque, LoteEstoqueEntity.SEM_LOTE, null));
+            semLote.setQuantidadeAtual(semLote.getQuantidadeAtual().add(restante));
+            loteEstoqueRepository.save(semLote);
+            alocacoes.add(new Alocacao(semLote, restante));
+        }
+        return alocacoes;
+    }
+
     /** Saldo inicial do cadastro: o estoque já nasce com a quantidade, que vai para o lote SEM-LOTE. */
     public List<Alocacao> registrarSaldoInicial(EstoqueEntity estoque, BigDecimal quantidade) {
         List<LoteEstoqueEntity> lotes = reconciliar(estoque);

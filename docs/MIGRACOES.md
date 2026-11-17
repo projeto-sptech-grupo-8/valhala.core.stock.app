@@ -37,6 +37,20 @@ A V8 permite ingredientes em `ML` ou `UN` na composição de drinks. Produtos fr
 A V11 cria `token_recuperacao_senha`, usada na recuperação de senha por e-mail. Apenas o hash
 SHA-256 de cada token é armazenado, e os tokens são removidos junto com o usuário.
 
+A V12 prepara o registro de vendas pela API e corrige a base dos relatórios:
+
+- adiciona `item_pedido.custo_unitario` (custo no momento da venda). Itens já existentes recebem o custo atual
+  do produto;
+- adiciona `pedido.motivo_cancelamento` e restringe os valores de canal, status e forma de pagamento. As regras
+  são criadas como `NOT VALID`: valem para novos registros e não bloqueiam a migração por dados antigos;
+- adiciona `movimentacao_estoque.motivo_perda`, obrigatório em `PERDA`. As perdas existentes são classificadas
+  pelo texto do motivo (vencido/vencimento, consumo interno ou quebra);
+- cria as permissões `REGISTRAR_VENDA`, `CANCELAR_VENDA` e `VISUALIZAR_RELATORIOS`. Perfis `Gerente` recebem
+  as três; `Atendente` recebe `REGISTRAR_VENDA`; perfis `Financeiro`, se existirem, recebem `VISUALIZAR_RELATORIOS`.
+
+Os relatórios deixam de exigir `VISUALIZAR_ESTOQUE` e passam a exigir `VISUALIZAR_RELATORIOS`. Perfis que
+precisam vê-los e não se chamam Gerente ou Financeiro devem recebê-la manualmente.
+
 ## Banco novo
 
 Antes da primeira inicialização, execute `src/main/resources/db/script.sql`. Para criar os dados de demonstração, execute depois `src/main/resources/db/seed-inicial.sql`. Em seguida, inicie a aplicação: o Flyway registra a versão e valida a estrutura.

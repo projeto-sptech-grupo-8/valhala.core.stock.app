@@ -62,6 +62,14 @@ SAIDA_DRINK
 - Entradas podem registrar número de nota fiscal e lote; ambos são opcionais.
 - Lote pertence à entrada/movimentação, e não ao cadastro fixo de Produto.
 - Correções devem ser feitas por ajuste ou estorno, preservando o histórico.
+- Toda `PERDA` tem um `motivoPerda`: `QUEBRA`, `VENCIMENTO` ou `CONSUMO_INTERNO`. Ele é proibido nos
+  demais tipos. Se o cliente não o enviar em uma `PERDA`, o motivo é deduzido do texto (vencido/vencimento →
+  `VENCIMENTO`; "consumo interno" → `CONSUMO_INTERNO`; demais → `QUEBRA`). Só `PERDA` entra no relatório de
+  perdas: ajustes e estornos não são perda.
+- Vendas (`POST /vendas`) baixam o estoque como `SAIDA` (produto padrão; garrafas convertidas em ML quando
+  fracionado) ou `SAIDA_DRINK` (ingredientes), com `item_pedido_id` preenchido. O cancelamento da venda
+  devolve cada quantidade ao lote de origem com um `AJUSTE_POSITIVO` vinculado ao mesmo item.
+- Datas e horas das movimentações são gravadas no fuso `America/Sao_Paulo`, independentemente do fuso do servidor.
 
 ### Lotes e validade (FEFO)
 
@@ -91,6 +99,9 @@ SAIDA_DRINK
 - `VISUALIZAR_ESTOQUE`: consultar produtos, saldo, lotes/validade e movimentações.
 - `GERENCIAR_ESTOQUE`: gerir categorias e produtos.
 - `MOVIMENTAR_ESTOQUE`: registrar entradas, saídas, ajustes, perdas e baixa de drinks.
+- `REGISTRAR_VENDA`: finalizar vendas (a baixa do estoque não exige `MOVIMENTAR_ESTOQUE`).
+- `CANCELAR_VENDA`: cancelar vendas, devolvendo os itens ao estoque.
+- `VISUALIZAR_RELATORIOS`: consultar `/relatorios/*`.
 
 ## 4. Padrão Strategy
 

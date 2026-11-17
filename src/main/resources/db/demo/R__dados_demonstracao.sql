@@ -114,7 +114,10 @@ ON CONFLICT (estabelecimento_id, sku) DO NOTHING;
 -- Só gera movimentação para estoques criados agora, preservando o histórico real em reexecuções.
 WITH novos AS (
     INSERT INTO estoque (produto_id, quantidade_atual, estoque_minimo)
-    SELECT pr.id, s.qtd, s.minimo
+    -- Produto fracionado controla o saldo em ML: as quantidades abaixo são em embalagens e viram ML aqui.
+    SELECT pr.id,
+           s.qtd * CASE WHEN pr.fracionado THEN pr.volume_embalagem_ml ELSE 1 END,
+           s.minimo * CASE WHEN pr.fracionado THEN pr.volume_embalagem_ml ELSE 1 END
     FROM (VALUES
         ('BEB-001', 48, 24), ('BEB-002', 8, 36), ('BEB-003', 36, 24), ('BEB-004', 24, 12),
         ('BEB-005', 12, 6),  ('BEB-006', 18, 6), ('BEB-007', 4, 6),   ('BEB-008', 3, 6),

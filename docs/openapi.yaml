@@ -18,8 +18,16 @@ tags:
     do usuário.
 - name: Produtos
   description: Produtos do estabelecimento autenticado.
+- name: Vendas
+  description: "Vendas do caixa, com baixa e estorno automáticos do estoque."
+- name: Lotes e validade
+  description: "Saldo por lote, validade e indicadores de vencimento. Lotes são criados\
+    \ pelas entradas e consumidos pelas saídas (FEFO) em /movimentacoes-estoque."
 - name: Movimentações de estoque
   description: Histórico e alterações auditáveis do saldo dos produtos.
+- name: Relatórios
+  description: "Relatórios gerenciais agregados do estabelecimento autenticado, por\
+    \ período em dias."
 - name: Dashboard
   description: Indicadores consolidados do estabelecimento autenticado.
 - name: Receitas de drinks
@@ -235,6 +243,172 @@ paths:
                 $ref: "#/components/schemas/ApiErrorResponse"
         "403":
           description: Usuário sem permissão ou de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /vendas:
+    get:
+      tags:
+      - Vendas
+      summary: Listar vendas com filtros e paginação
+      operationId: listar
+      parameters:
+      - name: dataInicial
+        in: query
+        description: "Data inicial inclusiva (yyyy-MM-dd), pela data da venda."
+        required: false
+        schema:
+          type: string
+          format: date
+      - name: dataFinal
+        in: query
+        description: "Data final inclusiva (yyyy-MM-dd), pela data da venda."
+        required: false
+        schema:
+          type: string
+          format: date
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - CONCLUIDO
+          - CANCELADO
+      - name: canal
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - BALCAO
+          - MESA
+          - DELIVERY
+      - name: pagina
+        in: query
+        required: false
+        schema:
+          type: string
+          minimum: 0
+      - name: tamanho
+        in: query
+        required: false
+        schema:
+          type: string
+          maximum: 100
+          minimum: 1
+      - name: ordenarPor
+        in: query
+        description: "numero, criadoEm ou total."
+        required: false
+        schema:
+          type: string
+      - name: direcao
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPaginadaDtoRespostaVendaDto"
+      security:
+      - accessTokenCookie: []
+    post:
+      tags:
+      - Vendas
+      summary: Finalizar venda
+      description: "Grava a venda com os preços do cadastro e baixa o estoque (FEFO,\
+        \ sem lotes vencidos). Drinks baixam os ingredientes da receita. Sem saldo\
+        \ em qualquer item, nada é gravado."
+      operationId: registrar
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoVendaDto"
+        required: true
+      responses:
+        "201":
+          description: Venda registrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaVendaDto"
+        "400":
+          description: "Dados inválidos, pagamento insuficiente ou estoque insuficiente."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Sem permissão REGISTRAR_VENDA ou produto de outro estabelecimento.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Produto não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /vendas/{idVenda}/cancelamento:
+    post:
+      tags:
+      - Vendas
+      summary: Cancelar venda
+      description: "Marca a venda como cancelada, estorna os pagamentos e devolve\
+        \ os itens aos lotes de origem."
+      operationId: cancelar
+      parameters:
+      - name: idVenda
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoCancelamentoVendaDto"
+        required: true
+      responses:
+        "200":
+          description: Venda cancelada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaVendaDto"
+        "400":
+          description: Motivo ausente ou venda já cancelada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Sem permissão CANCELAR_VENDA.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Venda não encontrada.
           content:
             '*/*':
               schema:
@@ -880,6 +1054,62 @@ paths:
                 $ref: "#/components/schemas/ApiErrorResponse"
       security:
       - csrfTokenHeader: []
+  /auth/redefinir-senha:
+    post:
+      tags:
+      - Autenticação
+      summary: Redefinir senha
+      description: Define uma nova senha a partir do token recebido por e-mail. Todas
+        as sessões ativas do usuário são encerradas.
+      operationId: redefinirSenha
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoRedefinicaoSenhaDto"
+        required: true
+      responses:
+        "204":
+          description: Senha redefinida e cookies de sessão removidos.
+          headers:
+            Set-Cookie:
+              description: "Cookies accessToken, refreshToken e XSRF-TOKEN são expirados."
+              style: simple
+        "400":
+          description: "Dados de entrada inválidos ou token inválido, expirado ou\
+            \ já utilizado."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+  /auth/recuperar-senha:
+    post:
+      tags:
+      - Autenticação
+      summary: Solicitar recuperação de senha
+      description: "Envia para o e-mail informado um link de uso único para redefinir\
+        \ a senha. A resposta é sempre a mesma, independentemente de o e-mail estar\
+        \ cadastrado."
+      operationId: solicitarRecuperacaoSenha
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoRecuperacaoSenhaDto"
+        required: true
+      responses:
+        "202":
+          description: Solicitação recebida.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaMensagemDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
   /auth/logout:
     post:
       tags:
@@ -1585,6 +1815,310 @@ paths:
                 $ref: "#/components/schemas/ApiErrorResponse"
       security:
       - accessTokenCookie: []
+  /vendas/{idVenda}:
+    get:
+      tags:
+      - Vendas
+      summary: Consultar venda
+      operationId: obter
+      parameters:
+      - name: idVenda
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: Venda encontrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaVendaDto"
+        "403":
+          description: Sem permissão REGISTRAR_VENDA ou VISUALIZAR_RELATORIOS.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Venda não encontrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /relatorios/ruptura:
+    get:
+      tags:
+      - Relatórios
+      summary: Dias com estoque zerado e venda perdida estimada por produto
+      operationId: rupturas
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RelatorioResponseDtoRuptura"
+      security:
+      - accessTokenCookie: []
+  /relatorios/perdas:
+    get:
+      tags:
+      - Relatórios
+      summary: Perdas a custo por motivo e período
+      operationId: perdas
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PerdasResponseDto"
+      security:
+      - accessTokenCookie: []
+  /relatorios/margem-categorias:
+    get:
+      tags:
+      - Relatórios
+      summary: "Faturamento, CMV e margem bruta por categoria"
+      operationId: margemCategorias
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RelatorioResponseDtoMargemCategoria"
+      security:
+      - accessTokenCookie: []
+  /relatorios/horarios:
+    get:
+      tags:
+      - Relatórios
+      summary: Vendas por dia da semana (0 = segunda) e hora
+      operationId: horarios
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RelatorioResponseDtoHorario"
+      security:
+      - accessTokenCookie: []
+  /relatorios/canais:
+    get:
+      tags:
+      - Relatórios
+      summary: Comparativo de vendas por canal
+      operationId: canais
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RelatorioResponseDtoCanal"
+      security:
+      - accessTokenCookie: []
+  /relatorios/abc:
+    get:
+      tags:
+      - Relatórios
+      summary: Curva ABC de faturamento por produto
+      operationId: curvaAbc
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RelatorioResponseDtoCurvaAbc"
+      security:
+      - accessTokenCookie: []
+  /lotes:
+    get:
+      tags:
+      - Lotes e validade
+      summary: "Listar lotes com saldo, filtrando por produto e situação de validade"
+      operationId: listarLotes
+      parameters:
+      - name: produtoId
+        in: query
+        description: "ID do produto. Omitido: todos os produtos."
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: situacao
+        in: query
+        description: "Situação da validade. Omitido: todas."
+        required: false
+        schema:
+          type: string
+          enum:
+          - VENCIDO
+          - VENCE_EM_7_DIAS
+          - VENCE_EM_30_DIAS
+          - VALIDO
+          - SEM_VALIDADE
+        example: VENCE_EM_7_DIAS
+      - name: venceEmDias
+        in: query
+        description: Só lotes com validade até hoje + N dias (inclui vencidos).
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+        example: 30
+      - name: incluirZerados
+        in: query
+        description: "Inclui lotes já zerados. Padrão: false."
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - name: pagina
+        in: query
+        description: "Número da página, iniciado em 0. Padrão: 0."
+        required: false
+        schema:
+          type: string
+          minimum: 0
+      - name: tamanho
+        in: query
+        description: "Itens por página. Padrão: 20; máximo: 100."
+        required: false
+        schema:
+          type: string
+          maximum: 100
+          minimum: 1
+      - name: ordenarPor
+        in: query
+        description: "Campo de ordenação: validade, codigo, quantidadeAtual ou criadoEm.\
+          \ Padrão: validade."
+        required: false
+        schema:
+          type: string
+      - name: direcao
+        in: query
+        description: "Direção da ordenação: ASC ou DESC. Padrão: ASC."
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: Lotes retornados.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPaginadaDtoLoteResponseDto"
+        "400":
+          description: Parâmetros de consulta inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para visualizar estoque.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /lotes/resumo:
+    get:
+      tags:
+      - Lotes e validade
+      summary: "Indicadores de validade: vencidos, a vencer em 7 e 30 dias e valor\
+        \ em risco (a custo)"
+      operationId: resumir
+      responses:
+        "200":
+          description: Resumo retornado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResumoValidadeLotesResponseDto"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para visualizar estoque.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
   /dashboard/resumo:
     get:
       tags:
@@ -1823,6 +2357,149 @@ components:
           items:
             type: string
           uniqueItems: true
+    Item:
+      type: object
+      properties:
+        produtoId:
+          type: string
+          format: uuid
+        quantidade:
+          type: number
+          description: "Unidades vendidas (garrafas, copos ou drinks)."
+          example: 2
+      required:
+      - produtoId
+      - quantidade
+    Pagamento:
+      type: object
+      properties:
+        forma:
+          type: string
+          enum:
+          - PIX
+          - CARTAO_CREDITO
+          - CARTAO_DEBITO
+          - DINHEIRO
+          example: DINHEIRO
+        valor:
+          type: number
+          description: "Valor recebido nesta forma (em dinheiro, inclui o troco)."
+          example: "50.00"
+      required:
+      - forma
+      - valor
+    RequisicaoVendaDto:
+      type: object
+      description: Venda finalizada no caixa. Os preços vêm do cadastro do produto;
+        o estoque é baixado na mesma transação.
+      properties:
+        canal:
+          type: string
+          enum:
+          - BALCAO
+          - MESA
+          - DELIVERY
+          example: BALCAO
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/Item"
+          maxItems: 200
+          minItems: 0
+        desconto:
+          type: number
+          description: "Desconto sobre o total da venda. Omitido: 0."
+          example: "5.00"
+          minimum: 0.00
+        pagamentos:
+          type: array
+          description: Valores recebidos. A soma deve cobrir o total; a sobra é troco
+            e exige pagamento em dinheiro.
+          items:
+            $ref: "#/components/schemas/Pagamento"
+          maxItems: 10
+          minItems: 0
+        nomeCliente:
+          type: string
+          maxLength: 150
+          minLength: 0
+        documentoCliente:
+          type: string
+          maxLength: 20
+          minLength: 0
+        observacao:
+          type: string
+          description: "Identificação livre da venda, como a mesa ou a comanda."
+          example: Mesa 4
+          maxLength: 500
+          minLength: 0
+      required:
+      - canal
+      - itens
+      - pagamentos
+    RespostaVendaDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        numero:
+          type: integer
+          format: int64
+        canal:
+          type: string
+          enum:
+          - BALCAO
+          - MESA
+          - DELIVERY
+        status:
+          type: string
+          enum:
+          - CONCLUIDO
+          - CANCELADO
+        subtotal:
+          type: number
+        desconto:
+          type: number
+        total:
+          type: number
+        troco:
+          type: number
+        nomeCliente:
+          type: string
+        documentoCliente:
+          type: string
+        observacao:
+          type: string
+        operadorId:
+          type: string
+          format: uuid
+        concluidoEm:
+          type: string
+          format: date-time
+        canceladoEm:
+          type: string
+          format: date-time
+        motivoCancelamento:
+          type: string
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/Item"
+        pagamentos:
+          type: array
+          items:
+            $ref: "#/components/schemas/Pagamento"
+    RequisicaoCancelamentoVendaDto:
+      type: object
+      properties:
+        motivo:
+          type: string
+          example: Pedido lançado errado
+          maxLength: 255
+          minLength: 0
+      required:
+      - motivo
     RequisicaoCriacaoUsuarioDto:
       type: object
       properties:
@@ -2043,18 +2720,58 @@ components:
           type: number
         motivo:
           type: string
+        motivoPerda:
+          type: string
+          description: "Classificação da perda; obrigatória em PERDA e proibida nos\
+            \ demais tipos. Omitida em PERDA (clientes antigos): deduzida do texto\
+            \ do motivo."
+          enum:
+          - QUEBRA
+          - VENCIMENTO
+          - CONSUMO_INTERNO
+          example: VENCIMENTO
         lote:
           type: string
+          description: "Entradas: código do lote que recebe a quantidade (omitido:\
+            \ SEM-LOTE, ou VAL-<validade> se a validade for informada). Saídas: có\
+            digo do lote a consumir (omitido: FEFO)."
+          example: L2611A
           maxLength: 100
           minLength: 0
         numeroNotaFiscal:
           type: string
           maxLength: 50
           minLength: 0
+        validade:
+          type: string
+          format: date
+          description: "Validade do lote, em yyyy-MM-dd. Só em ENTRADA e AJUSTE_POSITIVO."
+          example: 2027-03-31
+        loteId:
+          type: integer
+          format: int64
+          description: "Lote específico a consumir em SAIDA, AJUSTE_NEGATIVO ou PERDA\
+            \ (ex.: baixa de lote vencido). Omitido: FEFO."
+          example: 42
       required:
       - produtoId
       - quantidade
       - tipo
+    MovimentacaoLoteResponseDto:
+      type: object
+      description: Parte da movimentação que entrou em (ou saiu de) um lote. Quantidade
+        na unidade-base do estoque.
+      properties:
+        loteId:
+          type: integer
+          format: int64
+        codigo:
+          type: string
+        validade:
+          type: string
+          format: date
+        quantidade:
+          type: number
     MovimentacaoResponseDto:
       type: object
       properties:
@@ -2088,6 +2805,12 @@ components:
           type: number
         motivo:
           type: string
+        motivoPerda:
+          type: string
+          enum:
+          - QUEBRA
+          - VENCIMENTO
+          - CONSUMO_INTERNO
         lote:
           type: string
         numeroNotaFiscal:
@@ -2100,6 +2823,10 @@ components:
         ocorridoEm:
           type: string
           format: date-time
+        lotes:
+          type: array
+          items:
+            $ref: "#/components/schemas/MovimentacaoLoteResponseDto"
     RawValue: {}
     SaidaDrinkRequestDto:
       type: object
@@ -2176,6 +2903,42 @@ components:
         usuario:
           type: string
           example: Administrador Inicial
+    RequisicaoRedefinicaoSenhaDto:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Token recebido no link de recuperação enviado por e-mail
+          example: q1w2e3r4t5y6u7i8o9p0a1s2d3f4g5h6j7k8l9z0x1c
+          maxLength: 255
+          minLength: 0
+        novaSenha:
+          type: string
+          description: Nova senha do usuário. Deve possuir entre 8 e 72 caracteres
+          example: NovaSenha@123
+          maxLength: 72
+          minLength: 8
+      required:
+      - novaSenha
+      - token
+    RequisicaoRecuperacaoSenhaDto:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          description: E-mail da conta cuja senha será recuperada
+          example: usuario@exemplo.com
+          maxLength: 255
+          minLength: 0
+      required:
+      - email
+    RespostaMensagemDto:
+      type: object
+      properties:
+        mensagem:
+          type: string
+          description: Mensagem descritiva do resultado da operação
     RequisicaoLoginDto:
       type: object
       properties:
@@ -2293,6 +3056,221 @@ components:
           pattern: .*\S.*
         descricao:
           type: string
+    RespostaPaginadaDtoRespostaVendaDto:
+      type: object
+      properties:
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/RespostaVendaDto"
+        pagina:
+          type: integer
+          format: int32
+        tamanho:
+          type: integer
+          format: int32
+        totalItens:
+          type: integer
+          format: int64
+        totalPaginas:
+          type: integer
+          format: int32
+        primeira:
+          type: boolean
+        ultima:
+          type: boolean
+    Referencia:
+      type: object
+      properties:
+        dias:
+          type: integer
+          format: int32
+        de:
+          type: string
+          format: date
+        ate:
+          type: string
+          format: date
+        fusoHorario:
+          type: string
+    RelatorioResponseDtoRuptura:
+      type: object
+      properties:
+        referencia:
+          $ref: "#/components/schemas/Referencia"
+        totais:
+          $ref: "#/components/schemas/Totais"
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/Ruptura"
+    Ruptura:
+      type: object
+      properties:
+        produtoId:
+          type: string
+          format: uuid
+        nome:
+          type: string
+        categoria:
+          type: string
+        dias:
+          type: integer
+          format: int32
+        ocorrencias:
+          type: integer
+          format: int32
+        unidadesPerdidas:
+          type: number
+        vendaPerdida:
+          type: number
+        percentualDias:
+          type: number
+    Totais:
+      type: object
+      properties:
+        vendas:
+          type: integer
+          format: int64
+        faturamento:
+          type: number
+    Perda:
+      type: object
+      properties:
+        periodo:
+          type: string
+          format: date
+        motivo:
+          type: string
+        valor:
+          type: number
+    PerdasResponseDto:
+      type: object
+      properties:
+        referencia:
+          $ref: "#/components/schemas/Referencia"
+        totais:
+          $ref: "#/components/schemas/Totais"
+        granularidade:
+          type: string
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/Perda"
+    MargemCategoria:
+      type: object
+      properties:
+        categoria:
+          type: string
+        quantidade:
+          type: number
+        receita:
+          type: number
+        cmv:
+          type: number
+        lucro:
+          type: number
+        margem:
+          type: number
+        participacao:
+          type: number
+    RelatorioResponseDtoMargemCategoria:
+      type: object
+      properties:
+        referencia:
+          $ref: "#/components/schemas/Referencia"
+        totais:
+          $ref: "#/components/schemas/Totais"
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/MargemCategoria"
+    Horario:
+      type: object
+      properties:
+        diaSemana:
+          type: integer
+          format: int32
+        hora:
+          type: integer
+          format: int32
+        vendas:
+          type: integer
+          format: int64
+        receita:
+          type: number
+    RelatorioResponseDtoHorario:
+      type: object
+      properties:
+        referencia:
+          $ref: "#/components/schemas/Referencia"
+        totais:
+          $ref: "#/components/schemas/Totais"
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/Horario"
+    Canal:
+      type: object
+      properties:
+        canal:
+          type: string
+        vendas:
+          type: integer
+          format: int64
+        faturamento:
+          type: number
+        ticketMedio:
+          type: number
+        participacao:
+          type: number
+        itensPorVenda:
+          type: number
+    RelatorioResponseDtoCanal:
+      type: object
+      properties:
+        referencia:
+          $ref: "#/components/schemas/Referencia"
+        totais:
+          $ref: "#/components/schemas/Totais"
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/Canal"
+    CurvaAbc:
+      type: object
+      properties:
+        produtoId:
+          type: string
+          format: uuid
+        nome:
+          type: string
+        categoria:
+          type: string
+        quantidade:
+          type: number
+        receita:
+          type: number
+        posicao:
+          type: integer
+          format: int32
+        percentual:
+          type: number
+        acumulado:
+          type: number
+        classe:
+          type: string
+    RelatorioResponseDtoCurvaAbc:
+      type: object
+      properties:
+        referencia:
+          $ref: "#/components/schemas/Referencia"
+        totais:
+          $ref: "#/components/schemas/Totais"
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/CurvaAbc"
     RespostaPaginadaDtoProdutoResponseDto:
       type: object
       properties:
@@ -2339,6 +3317,107 @@ components:
           type: boolean
         ultima:
           type: boolean
+    LoteResponseDto:
+      type: object
+      description: Saldo de um lote. Quantidades na unidade-base do estoque (ML para
+        produto fracionado).
+      properties:
+        id:
+          type: integer
+          format: int64
+        produtoId:
+          type: string
+          format: uuid
+        produtoNome:
+          type: string
+        produtoSku:
+          type: string
+        unidadeEstoque:
+          type: string
+        codigo:
+          type: string
+        validade:
+          type: string
+          format: date
+        diasParaVencer:
+          type: integer
+          format: int64
+          description: "Dias até a validade (negativo: vencido há N dias). Nulo quando\
+            \ o lote não tem validade."
+        situacao:
+          type: string
+          enum:
+          - VENCIDO
+          - VENCE_EM_7_DIAS
+          - VENCE_EM_30_DIAS
+          - VALIDO
+          - SEM_VALIDADE
+        quantidadeAtual:
+          type: number
+        custoUnitario:
+          type: number
+          description: "Custo por unidade-base: preço de custo ÷ volume da embalagem\
+            \ para fracionado."
+        valorCusto:
+          type: number
+          description: quantidadeAtual × custoUnitario.
+        entradaEm:
+          type: string
+          format: date-time
+    RespostaPaginadaDtoLoteResponseDto:
+      type: object
+      properties:
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/LoteResponseDto"
+        pagina:
+          type: integer
+          format: int32
+        tamanho:
+          type: integer
+          format: int32
+        totalItens:
+          type: integer
+          format: int64
+        totalPaginas:
+          type: integer
+          format: int32
+        primeira:
+          type: boolean
+        ultima:
+          type: boolean
+    ResumoValidadeLotesResponseDto:
+      type: object
+      description: "Indicadores de validade dos lotes com saldo, de produtos ativos\
+        \ do estabelecimento."
+      properties:
+        referencia:
+          type: string
+          format: date
+        lotesComSaldo:
+          type: integer
+          format: int64
+        vencidos:
+          type: integer
+          format: int64
+        vencemEm7Dias:
+          type: integer
+          format: int64
+          description: Vencem de hoje até 7 dias.
+        vencemEm30Dias:
+          type: integer
+          format: int64
+          description: Vencem de 8 a 30 dias.
+        semValidade:
+          type: integer
+          format: int64
+        valorVencido:
+          type: number
+          description: Valor a custo dos lotes vencidos.
+        valorEmRisco:
+          type: number
+          description: Valor a custo dos lotes vencidos ou que vencem em até 30 dias.
     AlertaEstoqueDashboardResponseDto:
       type: object
       description: Produto com saldo abaixo do estoque mínimo

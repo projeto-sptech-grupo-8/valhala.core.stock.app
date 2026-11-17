@@ -21,7 +21,9 @@ import valhalla.core.stock.app.modules.estoque.dto.SaidaDrinkRequestDto;
 import valhalla.core.stock.app.modules.estoque.entity.ComposicaoDrinkEntity;
 import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.LoteEstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.MotivoPerda;
 import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoEstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoLoteEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
 import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
@@ -40,10 +42,11 @@ import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.Paginacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
 import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -174,9 +177,11 @@ public class MovimentacaoEstoqueService {
 
         EstoqueEntity estoque = estoqueRepository.findByProdutoIdForUpdate(produto.getId())
                 .orElseThrow(() -> new EntityNotFoundException("Estoque do produto não encontrado"));
+        String motivo = normalizar(dto.motivo());
         MovimentacaoCommand command = new MovimentacaoCommand(
-                dto.tipo(), dto.quantidade(), normalizar(dto.motivo()), normalizar(dto.lote()),
-                normalizar(dto.numeroNotaFiscal()), null, null, dto.validade(), dto.loteId()
+                dto.tipo(), dto.quantidade(), motivo, normalizar(dto.lote()),
+                normalizar(dto.numeroNotaFiscal()), null, null, dto.validade(), dto.loteId(),
+                resolverMotivoPerda(dto.tipo(), dto.motivoPerda(), motivo), null
         );
         UUID usuarioId = obterIdUsuarioAutenticado();
         MovimentacaoResponseDto response = aplicarMovimentacao(estoque, command, usuarioId, nomeUsuario(usuarioId));
@@ -197,9 +202,110 @@ public class MovimentacaoEstoqueService {
             throw new IllegalArgumentException("O drink informado está inativo");
         }
 
+        UUID usuarioId = obterIdUsuarioAutenticado();
+        List<MovimentacaoResponseDto> resposta = baixarDrink(
+                drink, dto.quantidade(), normalizar(dto.motivo()), usuarioId, nomeUsuario(usuarioId), null);
+        businessEventLogger.success("stock.drink-output.registered", "product", drink.getId());
+        return resposta;
+    }
+
+    /**
+     * Baixa o estoque de um item vendido, vinculando as movimentações ao item do pedido. Produto padrão sai
+     * por FEFO sem vencidos (garrafas viram ML quando fracionado); drink baixa os ingredientes da receita.
+     * Chamado dentro da transação da venda, que já validou a permissão e o estabelecimento.
+     */
+    @Transactional
+    public void baixarItemVendido(
+            ProdutoEntity produto,
+            BigDecimal quantidadeVendida,
+            Long idItemPedido,
+            String motivo,
+            UUID usuarioId
+    ) {
+        if (produto.getTipo() == ProdutoTipo.DRINK) {
+            try {
+                baixarDrink(produto, quantidadeVendida, motivo, usuarioId, null, idItemPedido);
+            } catch (IllegalArgumentException excecao) {
+                throw new IllegalArgumentException(produto.getNome() + ": " + excecao.getMessage(), excecao);
+            }
+            return;
+        }
+        EstoqueEntity estoque = estoqueRepository.findByProdutoIdForUpdate(produto.getId())
+                .orElseThrow(() -> new EntityNotFoundException("Estoque do produto não encontrado"));
+        BigDecimal quantidadeEstoque = produto.isFracionado()
+                ? quantidadeVendida.multiply(produto.getVolumeEmbalagemMl())
+                : quantidadeVendida;
+        try {
+            aplicarMovimentacao(estoque, new MovimentacaoCommand(
+                    TipoMovimentacaoEstoque.SAIDA, quantidadeEstoque, motivo, null, null, null, null,
+                    null, null, null, idItemPedido
+            ), usuarioId, null);
+        } catch (IllegalArgumentException excecao) {
+            throw new IllegalArgumentException(produto.getNome() + ": " + excecao.getMessage(), excecao);
+        }
+    }
+
+    /**
+     * Devolve ao estoque, nos mesmos lotes de origem, tudo o que foi baixado para os itens informados.
+     * Cada baixa gera um AJUSTE_POSITIVO vinculado ao mesmo item do pedido.
+     */
+    @Transactional
+    public void estornarItensVendidos(Collection<Long> idsItensPedido, String motivo, UUID usuarioId) {
+        if (idsItensPedido.isEmpty()) {
+            return;
+        }
+        List<MovimentacaoEstoqueEntity> baixas = movimentacaoEstoqueRepository
+                .findAllByItemPedidoIdInOrderByIdAsc(idsItensPedido).stream()
+                .filter(movimentacao -> movimentacao.getTipo() == TipoMovimentacaoEstoque.SAIDA
+                        || movimentacao.getTipo() == TipoMovimentacaoEstoque.SAIDA_DRINK)
+                .toList();
+        if (baixas.isEmpty()) {
+            return;
+        }
+        Map<UUID, EstoqueEntity> estoques = estoqueRepository.findAllByProdutoIdInForUpdate(
+                        baixas.stream().map(baixa -> baixa.getEstoque().getProduto().getId()).distinct().toList())
+                .stream()
+                .collect(Collectors.toMap(estoque -> estoque.getProduto().getId(), Function.identity()));
+        Map<Long, List<MovimentacaoLoteEntity>> lotesPorBaixa = movimentacaoLoteRepository
+                .findAllByMovimentacaoIdInOrderByIdAsc(baixas.stream().map(MovimentacaoEstoqueEntity::getId).toList())
+                .stream()
+                .collect(Collectors.groupingBy(vinculo -> vinculo.getMovimentacao().getId()));
+
+        EstrategiaMovimentacaoEstoque estrategia = estrategiaPara(TipoMovimentacaoEstoque.AJUSTE_POSITIVO);
+        for (MovimentacaoEstoqueEntity baixa : baixas) {
+            EstoqueEntity estoque = estoques.get(baixa.getEstoque().getProduto().getId());
+            MovimentacaoCommand command = new MovimentacaoCommand(
+                    TipoMovimentacaoEstoque.AJUSTE_POSITIVO, baixa.getQuantidade(), motivo, null, null,
+                    null, null, null, null, null, baixa.getItemPedidoId());
+            estrategia.validar(command);
+            BigDecimal saldoAnterior = estoque.getQuantidadeAtual();
+            BigDecimal saldoPosterior = estrategia.calcularSaldoPosterior(saldoAnterior, baixa.getQuantidade());
+            // lotes antes do saldo, como em aplicarMovimentacao
+            List<Alocacao> alocacoes = controleLotes.devolver(estoque,
+                    lotesPorBaixa.getOrDefault(baixa.getId(), List.of()).stream()
+                            .map(vinculo -> new Alocacao(vinculo.getLote(), vinculo.getQuantidade()))
+                            .toList(),
+                    baixa.getQuantidade());
+            estoque.setQuantidadeAtual(saldoPosterior);
+            estoqueRepository.save(estoque);
+            MovimentacaoEstoqueEntity estorno = salvarHistorico(estoque, command, saldoAnterior, saldoPosterior,
+                    usuarioId, ControleLotesEstoque.descreverCodigos(alocacoes));
+            controleLotes.vincular(estorno, alocacoes);
+        }
+    }
+
+    private List<MovimentacaoResponseDto> baixarDrink(
+            ProdutoEntity drink,
+            BigDecimal quantidadeDrinks,
+            String motivo,
+            UUID usuarioId,
+            String usuarioNome,
+            Long idItemPedido
+    ) {
+        UUID idEstabelecimento = drink.getEstabelecimentoId();
         List<ComposicaoDrinkEntity> receita = composicaoDrinkRepository.findAllByDrinkIdOrderByIdAsc(drink.getId());
         if (receita.isEmpty()) {
-            throw new IllegalArgumentException("O drink não possui ingredientes cadastrados");
+            throw new IllegalArgumentException("O drink %s não possui ingredientes cadastrados".formatted(drink.getNome()));
         }
         validarReceitaParaSaida(receita, idEstabelecimento);
 
@@ -211,15 +317,15 @@ public class MovimentacaoEstoqueService {
             throw new EntityNotFoundException("Estoque de um ingrediente não encontrado");
         }
 
-        JsonNode receitaAplicada = criarSnapshotReceita(drink, receita, dto.quantidade());
+        JsonNode receitaAplicada = criarSnapshotReceita(drink, receita, quantidadeDrinks);
         List<ItemSaidaDrink> itens = receita.stream()
                 .map(item -> new ItemSaidaDrink(
                         estoques.get(item.getProduto().getId()),
-                        item.getQuantidade().multiply(dto.quantidade())
+                        item.getQuantidade().multiply(quantidadeDrinks)
                 ))
                 .toList();
         MovimentacaoCommand commandBase = new MovimentacaoCommand(
-                TipoMovimentacaoEstoque.SAIDA_DRINK, null, normalizar(dto.motivo()), null, null,
+                TipoMovimentacaoEstoque.SAIDA_DRINK, null, motivo, null, null,
                 drink.getId(), receitaAplicada
         );
 
@@ -229,17 +335,24 @@ public class MovimentacaoEstoqueService {
                 item.estoque().getQuantidadeAtual(), item.quantidade()
         ));
 
-        UUID usuarioId = obterIdUsuarioAutenticado();
-        String usuarioNome = nomeUsuario(usuarioId);
-        List<MovimentacaoResponseDto> resposta = itens.stream()
+        return itens.stream()
                 .map(item -> aplicarMovimentacao(item.estoque(), new MovimentacaoCommand(
                         TipoMovimentacaoEstoque.SAIDA_DRINK,
                         item.quantidade(),
-                        commandBase.motivo(), null, null, drink.getId(), receitaAplicada.deepCopy()
+                        commandBase.motivo(), null, null, drink.getId(), receitaAplicada.deepCopy(),
+                        null, null, null, idItemPedido
                 ), usuarioId, usuarioNome))
                 .toList();
-        businessEventLogger.success("stock.drink-output.registered", "product", drink.getId());
-        return resposta;
+    }
+
+    private MotivoPerda resolverMotivoPerda(TipoMovimentacaoEstoque tipo, MotivoPerda informado, String motivo) {
+        if (tipo != TipoMovimentacaoEstoque.PERDA) {
+            if (informado != null) {
+                throw new IllegalArgumentException("O motivo da perda só se aplica a movimentações do tipo PERDA");
+            }
+            return null;
+        }
+        return informado != null ? informado : MotivoPerda.inferir(motivo);
     }
 
     @Transactional
@@ -307,11 +420,13 @@ public class MovimentacaoEstoqueService {
         movimentacao.setSaldoAnterior(saldoAnterior);
         movimentacao.setSaldoPosterior(saldoPosterior);
         movimentacao.setMotivo(command.motivo());
+        movimentacao.setMotivoPerda(command.motivoPerda());
+        movimentacao.setItemPedidoId(command.itemPedidoId());
         movimentacao.setLote(codigosLotes != null ? codigosLotes : command.lote());
         movimentacao.setNumeroNotaFiscal(command.numeroNotaFiscal());
         movimentacao.setOrigemDrinkId(command.origemDrinkId());
         movimentacao.setReceitaAplicada(command.receitaAplicada());
-        movimentacao.setOcorridoEm(LocalDateTime.now());
+        movimentacao.setOcorridoEm(FusoHorarioOperacao.agora());
         return movimentacaoEstoqueRepository.save(movimentacao);
     }
 
@@ -392,7 +507,7 @@ public class MovimentacaoEstoqueService {
                 produto.isFracionado() ? "ML" : produto.getUnidadeMedida(),
                 movimentacao.getTipo(), movimentacao.getQuantidade(),
                 movimentacao.getSaldoAnterior(), movimentacao.getSaldoPosterior(),
-                movimentacao.getMotivo(), movimentacao.getLote(), movimentacao.getNumeroNotaFiscal(),
+                movimentacao.getMotivo(), movimentacao.getMotivoPerda(), movimentacao.getLote(), movimentacao.getNumeroNotaFiscal(),
                 movimentacao.getOrigemDrinkId(), receitaAplicadaParaResposta(movimentacao.getReceitaAplicada()), movimentacao.getOcorridoEm(),
                 lotes
         );
