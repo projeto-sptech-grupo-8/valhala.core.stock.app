@@ -65,7 +65,8 @@ public class NotaFiscalEntity {
     @Column(name = "serie", length = 10)
     private String serie = "1";
 
-    @Column(name = "chave_acesso", length = 44, unique = true)
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "chave_acesso", length = 44, columnDefinition = "CHAR(44)", unique = true)
     private String chaveAcesso;
 
     @Column(name = "protocolo_autorizacao", length = 50)
