@@ -1,5 +1,6 @@
 package valhalla.core.stock.app.modules.caixa.pedido.mapper;
 
+import valhalla.core.stock.app.modules.caixa.fiscal.dto.NotaFiscalPedidoVinculadaDto;
 import valhalla.core.stock.app.modules.caixa.pedido.dto.ItemPedidoCaixaResponseDto;
 import valhalla.core.stock.app.modules.caixa.pedido.dto.PagamentoPedidoResponseDto;
 import valhalla.core.stock.app.modules.caixa.pedido.dto.PedidoCaixaDetalheResponseDto;
@@ -40,6 +41,16 @@ public final class PedidoCaixaMapper {
             int quantidadeItens,
             List<PagamentoPedidoEntity> pagamentos
     ) {
+        return paraResumo(pedido, operadorNome, quantidadeItens, pagamentos, null);
+    }
+
+    public static PedidoCaixaResumoResponseDto paraResumo(
+            PedidoEntity pedido,
+            String operadorNome,
+            int quantidadeItens,
+            List<PagamentoPedidoEntity> pagamentos,
+            NotaFiscalPedidoVinculadaDto notaFiscal
+    ) {
         BigDecimal totalPago = calcularTotalPagoAprovado(pagamentos);
         BigDecimal saldoRestante = calcularSaldoRestante(pedido.getTotal(), totalPago);
         return new PedidoCaixaResumoResponseDto(
@@ -65,7 +76,8 @@ public final class PedidoCaixaMapper {
                 pedido.getAtualizadoEm(),
                 pedido.getConcluidoEm(),
                 pedido.getCanceladoEm(),
-                pedido.getEstornadoEm()
+                pedido.getEstornadoEm(),
+                notaFiscal
         );
     }
 
@@ -75,6 +87,17 @@ public final class PedidoCaixaMapper {
             String descontoDecididoPorNome,
             List<ItemPedidoEntity> itens,
             List<PagamentoPedidoEntity> pagamentos
+    ) {
+        return paraDetalhe(pedido, operadorNome, descontoDecididoPorNome, itens, pagamentos, null);
+    }
+
+    public static PedidoCaixaDetalheResponseDto paraDetalhe(
+            PedidoEntity pedido,
+            String operadorNome,
+            String descontoDecididoPorNome,
+            List<ItemPedidoEntity> itens,
+            List<PagamentoPedidoEntity> pagamentos,
+            NotaFiscalPedidoVinculadaDto notaFiscal
     ) {
         BigDecimal totalPago = calcularTotalPagoAprovado(pagamentos);
         BigDecimal saldoRestante = calcularSaldoRestante(pedido.getTotal(), totalPago);
@@ -119,7 +142,8 @@ public final class PedidoCaixaMapper {
                 pedido.getCanceladoEm(),
                 pedido.getEstornadoEm(),
                 itensDto,
-                pagamentosDto
+                pagamentosDto,
+                notaFiscal
         );
     }
 

@@ -55,6 +55,12 @@ class ApplicationTests {
 				.andExpect(jsonPath("$.paths['/categorias/{id}'].get").exists())
 				.andExpect(jsonPath("$.paths['/categorias/{id}'].patch").exists())
 				.andExpect(jsonPath("$.paths['/categorias/{id}'].delete").exists())
+				.andExpect(jsonPath("$.paths['/caixa/notas-fiscais/emitir'].post").exists())
+				.andExpect(jsonPath("$.paths['/caixa/notas-fiscais'].get").exists())
+				.andExpect(jsonPath("$.paths['/caixa/notas-fiscais/pedidos-elegiveis'].get").exists())
+				.andExpect(jsonPath("$.paths['/caixa/notas-fiscais/{id}'].get").exists())
+				.andExpect(jsonPath("$.paths['/caixa/notas-fiscais/{id}/xml'].get").exists())
+				.andExpect(jsonPath("$.paths['/caixa/notas-fiscais/{id}/cancelamento'].post").exists())
 				.andExpect(jsonPath("$.components.schemas.RespostaUsuarioDto.properties.nome").exists())
 				.andExpect(jsonPath("$.components.schemas.RequisicaoCriacaoUsuarioDto.properties.senha").exists())
 				.andExpect(jsonPath("$.components.schemas.RespostaPermissoesUsuarioDto.properties.permissoesEfetivas").exists());
