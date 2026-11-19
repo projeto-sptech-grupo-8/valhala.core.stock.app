@@ -35,6 +35,8 @@ public final class EventoAuditoriaCaixa {
     public static final String CONCILIACAO_MANUAL = "CONCILIACAO_MANUAL";
     public static final String PAGAMENTO_CANCELADO = "PAGAMENTO_CANCELADO";
     public static final String PAGAMENTO_ESTORNADO = "PAGAMENTO_ESTORNADO";
+    public static final String NFCE_EMITIDA = "NFCE_EMITIDA";
+    public static final String NFCE_CANCELADA = "NFCE_CANCELADA";
 
     public static final String ENTIDADE_SESSAO_CAIXA = "SESSAO_CAIXA";
     public static final String ENTIDADE_CONFIGURACAO_CAIXA = "CONFIGURACAO_CAIXA";
@@ -43,6 +45,7 @@ public final class EventoAuditoriaCaixa {
     public static final String ENTIDADE_TAXA_PAGAMENTO = "TAXA_PAGAMENTO";
     public static final String ENTIDADE_PEDIDO = "PEDIDO";
     public static final String ENTIDADE_PAGAMENTO_PEDIDO = "PAGAMENTO_PEDIDO";
+    public static final String ENTIDADE_NOTA_FISCAL = "NOTA_FISCAL";
 
     private EventoAuditoriaCaixa() {
     }

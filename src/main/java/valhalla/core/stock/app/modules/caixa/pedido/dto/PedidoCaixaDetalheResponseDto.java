@@ -1,6 +1,7 @@
 package valhalla.core.stock.app.modules.caixa.pedido.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import valhalla.core.stock.app.modules.caixa.fiscal.dto.NotaFiscalPedidoVinculadaDto;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.CanalPedidoCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusDescontoPedido;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPedidoCaixa;
@@ -45,6 +46,7 @@ public record PedidoCaixaDetalheResponseDto(
         @Schema(description = "Data/hora de cancelamento", nullable = true) LocalDateTime canceladoEm,
         @Schema(description = "Data/hora de estorno", nullable = true) LocalDateTime estornadoEm,
         @Schema(description = "Itens do pedido") List<ItemPedidoCaixaResponseDto> itens,
-        @Schema(description = "Pagamentos e tentativas registradas para o pedido") List<PagamentoPedidoResponseDto> pagamentos
+        @Schema(description = "Pagamentos e tentativas registradas para o pedido") List<PagamentoPedidoResponseDto> pagamentos,
+        @Schema(description = "Última NFC-e vinculada ao pedido (se houver)", nullable = true) NotaFiscalPedidoVinculadaDto notaFiscal
 ) {
 }

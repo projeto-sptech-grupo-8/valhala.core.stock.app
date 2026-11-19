@@ -72,6 +72,9 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import valhalla.core.stock.app.modules.caixa.fiscal.entity.NotaFiscalEntity;
+import valhalla.core.stock.app.modules.caixa.fiscal.mapper.NotaFiscalMapper;
+import valhalla.core.stock.app.modules.caixa.fiscal.service.NotaFiscalCaixaService;
 import valhalla.core.stock.app.modules.caixa.pedido.strategy.ProcessadorPagamento;
 import valhalla.core.stock.app.modules.caixa.point.service.OrquestradorPagamentoPointService;
 import valhalla.core.stock.app.modules.caixa.security.AutorizadorOperacaoCaixaService;
@@ -103,6 +106,7 @@ public class PedidoCaixaService {
     private final List<ProcessadorPagamento> processadoresPagamento;
     private final OrquestradorPagamentoPointService orquestradorPagamentoPointService;
     private final ReservaEstoqueService reservaEstoqueService;
+    private final NotaFiscalCaixaService notaFiscalCaixaService;
     private final TransactionTemplate transactionTemplate;
     private final BusinessEventLogger businessEventLogger;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -123,6 +127,7 @@ public class PedidoCaixaService {
             List<ProcessadorPagamento> processadoresPagamento,
             OrquestradorPagamentoPointService orquestradorPagamentoPointService,
             ReservaEstoqueService reservaEstoqueService,
+            NotaFiscalCaixaService notaFiscalCaixaService,
             TransactionTemplate transactionTemplate,
             BusinessEventLogger businessEventLogger
     ) {
@@ -141,6 +146,7 @@ public class PedidoCaixaService {
         this.processadoresPagamento = processadoresPagamento;
         this.orquestradorPagamentoPointService = orquestradorPagamentoPointService;
         this.reservaEstoqueService = reservaEstoqueService;
+        this.notaFiscalCaixaService = notaFiscalCaixaService;
         this.transactionTemplate = transactionTemplate;
         this.businessEventLogger = businessEventLogger;
     }
@@ -300,6 +306,9 @@ public class PedidoCaixaService {
                 : pagamentoPedidoRepository.findByPedidoIdInOrderByCriadoEmAsc(pedidoIds).stream()
                 .collect(Collectors.groupingBy(PagamentoPedidoEntity::getPedidoId));
 
+        Map<UUID, NotaFiscalEntity> ultimaNotaPorPedido =
+                notaFiscalCaixaService.carregarUltimaNotaPorPedido(pedidoIds);
+
         Map<UUID, String> nomesUsuarios = carregarNomesUsuarios(
                 pedidos.stream().map(PedidoEntity::getOperadorUsuarioId).collect(Collectors.toSet())
         );
@@ -310,7 +319,8 @@ public class PedidoCaixaService {
                         pedido,
                         nomesUsuarios.getOrDefault(pedido.getOperadorUsuarioId(), "Operador"),
                         itensPorPedido.getOrDefault(pedido.getId(), List.of()).size(),
-                        pagamentosPorPedido.getOrDefault(pedido.getId(), List.of())
+                        pagamentosPorPedido.getOrDefault(pedido.getId(), List.of()),
+                        NotaFiscalMapper.paraVinculoPedido(ultimaNotaPorPedido.get(pedido.getId()))
                 )
         );
     }
@@ -1114,6 +1124,14 @@ public class PedidoCaixaService {
 
         PedidoEntity pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
 
+        notaFiscalCaixaService.cancelarAutomaticamenteNoEstornoDoPedido(
+                pedidoSalvo,
+                motivo,
+                usuarioId,
+                autorizador.usuarioId(),
+                autorizador.nome()
+        );
+
         auditoriaCaixaService.registrar(
                 estabelecimentoId,
                 usuarioId,
@@ -1553,12 +1571,17 @@ public class PedidoCaixaService {
                 ? null
                 : nomes.get(pedido.getDescontoDecididoPorUsuarioId());
 
+        NotaFiscalEntity ultimaNota = notaFiscalCaixaService
+                .carregarUltimaNotaPorPedido(List.of(pedido.getId()))
+                .get(pedido.getId());
+
         return PedidoCaixaMapper.paraDetalhe(
                 pedido,
                 operadorNome,
                 autorizadorDescontoNome,
                 itens,
-                pagamentos
+                pagamentos,
+                NotaFiscalMapper.paraVinculoPedido(ultimaNota)
         );
     }
 

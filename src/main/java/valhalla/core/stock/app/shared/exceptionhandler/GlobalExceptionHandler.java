@@ -24,6 +24,8 @@ import valhalla.core.stock.app.modules.caixa.exception.CaixaJaExisteException;
 import valhalla.core.stock.app.modules.caixa.exception.ConfiguracaoCaixaInvalidaException;
 import valhalla.core.stock.app.modules.caixa.exception.EstoqueInsuficientePedidoException;
 import valhalla.core.stock.app.modules.caixa.exception.IntegracaoMercadoPagoException;
+import valhalla.core.stock.app.modules.caixa.exception.NotaFiscalEstadoInvalidoException;
+import valhalla.core.stock.app.modules.caixa.exception.NotaFiscalJaEmitidaException;
 import valhalla.core.stock.app.modules.caixa.exception.PagamentoPendenteFechamentoException;
 import valhalla.core.stock.app.modules.caixa.exception.PedidoEstadoInvalidoException;
 import valhalla.core.stock.app.modules.caixa.exception.RateLimitExcedidoException;
@@ -186,6 +188,20 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(PedidoEstadoInvalidoException.class)
     public ResponseEntity<ApiErrorResponse> handlePedidoEstadoInvalido(
             PedidoEstadoInvalidoException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(NotaFiscalEstadoInvalidoException.class)
+    public ResponseEntity<ApiErrorResponse> handleNotaFiscalEstadoInvalido(
+            NotaFiscalEstadoInvalidoException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(NotaFiscalJaEmitidaException.class)
+    public ResponseEntity<ApiErrorResponse> handleNotaFiscalJaEmitida(
+            NotaFiscalJaEmitidaException exception
     ) {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
     }
