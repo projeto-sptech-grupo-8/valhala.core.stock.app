@@ -12,6 +12,7 @@ import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 
 import java.math.BigDecimal;
 import java.time.YearMonth;
+import java.time.ZoneId;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -39,7 +40,7 @@ class DashboardResumoIntegrationTest extends EstoqueIntegrationTestSupport {
         registrarMovimentacao(critico, operador, "SAIDA", "1");
         registrarMovimentacao(saudavel, operador, "ENTRADA", "1");
 
-        String mesAtual = YearMonth.now().toString();
+        String mesAtual = YearMonth.now(ZoneId.of("America/Sao_Paulo")).toString();
         mockMvc.perform(get("/dashboard/resumo").cookie(operador))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.referencia.fusoHorario").value("America/Sao_Paulo"))
