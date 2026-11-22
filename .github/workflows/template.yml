@@ -14,6 +14,7 @@ on:
 
 env:
   TZ: America/Sao_Paulo
+  MAVEN_OPTS: "-Daether.connector.http.retryHandler.count=5 -Daether.connector.http.retryHandler.interval=2000"
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -30,8 +31,24 @@ jobs:
           java-version: '21'
           cache: 'maven'
 
+      - name: Configurar mirror Google Maven Central
+        run: |
+          mkdir -p ~/.m2
+          cat << 'EOF' > ~/.m2/settings.xml
+          <settings>
+            <mirrors>
+              <mirror>
+                <id>google-maven-central</id>
+                <name>Google Maven Central Mirror</name>
+                <url>https://maven-central.storage-download.googleapis.com/maven2/</url>
+                <mirrorOf>central</mirrorOf>
+              </mirror>
+            </mirrors>
+          </settings>
+          EOF
+
       - name: Compilar aplicação e testes
-        run: mvn -B test-compile -DskipTests
+        run: mvn -B test-compile dependency:resolve-plugins -DskipTests
 
   test:
     needs: build # Só roda depois que o job 'build' terminar com sucesso
@@ -46,6 +63,22 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
           cache: 'maven'
+
+      - name: Configurar mirror Google Maven Central
+        run: |
+          mkdir -p ~/.m2
+          cat << 'EOF' > ~/.m2/settings.xml
+          <settings>
+            <mirrors>
+              <mirror>
+                <id>google-maven-central</id>
+                <name>Google Maven Central Mirror</name>
+                <url>https://maven-central.storage-download.googleapis.com/maven2/</url>
+                <mirrorOf>central</mirrorOf>
+              </mirror>
+            </mirrors>
+          </settings>
+          EOF
 
       - name: Executar testes e validar cobertura JaCoCo
         run: mvn -B verify
