@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -39,11 +40,19 @@ public class HttpMercadoPagoPointClient implements MercadoPagoPointClient {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @Autowired
     public HttpMercadoPagoPointClient(MercadoPagoPointProperties properties) {
+        this(
+                properties,
+                HttpClient.newBuilder()
+                        .connectTimeout(Duration.ofMillis(properties.httpConnectTimeoutMs()))
+                        .build()
+        );
+    }
+
+    HttpMercadoPagoPointClient(MercadoPagoPointProperties properties, HttpClient httpClient) {
         this.properties = properties;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofMillis(properties.httpConnectTimeoutMs()))
-                .build();
+        this.httpClient = httpClient;
     }
 
     @Override

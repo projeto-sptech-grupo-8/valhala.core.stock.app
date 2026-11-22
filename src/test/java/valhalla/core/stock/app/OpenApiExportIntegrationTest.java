@@ -54,6 +54,7 @@ class OpenApiExportIntegrationTest {
                 .contains("/caixa/pedidos/{pedidoId}/pagamentos/{pagamentoId}/sincronizar:")
                 .contains("/webhooks/mercado-pago/point:")
                 .contains("/auth/csrf:")
+                .contains("/estabelecimento:")
                 .contains("csrfTokenHeader:")
                 .doesNotContain("/dev/mercado-pago/point/");
 

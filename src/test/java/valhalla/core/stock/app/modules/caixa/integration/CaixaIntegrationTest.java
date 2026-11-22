@@ -230,6 +230,22 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.ativo").value(false));
 
+        mockMvc.perform(get("/caixa/caixas")
+                        .cookie(gerente.accessToken())
+                        .param("busca", "Principal")
+                        .param("ativo", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItens").value(1))
+                .andExpect(jsonPath("$.itens[0].id").value(caixaId));
+
+        mockMvc.perform(patch("/caixa/caixas/{id}", caixaId)
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\"Caixa Balcão 1\",\"ativo\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nome").value("Caixa Balcão 1"));
+
         // Tentar inativar a última maquininha ativa com a Point habilitada é bloqueado.
         mockMvc.perform(patch("/caixa/caixas/{caixaId}/terminais/{terminalId}", caixaId, term2Id)
                         .cookie(gerente.accessToken())

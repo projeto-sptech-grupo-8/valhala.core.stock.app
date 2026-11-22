@@ -23,6 +23,15 @@ public class EstablishmentEntity {
     @Column(nullable = false, unique = true, length = 14)
     private String cnpj;
 
+    @Column(name = "email_contato", length = 255)
+    private String contactEmail;
+
+    @Column(name = "telefone", length = 20)
+    private String phone;
+
+    @Column(name = "logradouro", length = 150)
+    private String address;
+
     @Column(name = "ativo", nullable = false)
     private Boolean active;
 

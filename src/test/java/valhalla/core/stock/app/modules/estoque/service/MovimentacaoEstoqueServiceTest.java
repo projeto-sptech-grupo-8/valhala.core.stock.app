@@ -1,5 +1,12 @@
 package valhalla.core.stock.app.modules.estoque.service;
 
+import jakarta.persistence.EntityNotFoundException;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.Path;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,6 +64,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -587,6 +595,122 @@ class MovimentacaoEstoqueServiceTest {
         assertThat(proximo.getQuantidadeAtual()).isEqualByComparingTo("2");
         assertThat(distante.getQuantidadeAtual()).isEqualByComparingTo("5");
         assertThat(vencido.getQuantidadeAtual()).isEqualByComparingTo("3");
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void avaliaTodosOsFiltrosDaEspecificacaoDeMovimentacoes() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        UUID produtoId = UUID.randomUUID();
+        UUID usuarioId = UUID.randomUUID();
+        autenticar(estabelecimentoId);
+
+        when(movimentacaoEstoqueRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+
+        movimentacaoEstoqueService.listarMovimentacoes(
+                produtoId, TipoMovimentacaoEstoque.ENTRADA, usuarioId,
+                LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 20),
+                0, 20, "ocorridoEm", DirecaoOrdenacao.DESC
+        );
+
+        ArgumentCaptor<Specification<MovimentacaoEstoqueEntity>> specCaptor = ArgumentCaptor.forClass(Specification.class);
+        verify(movimentacaoEstoqueRepository).findAll(specCaptor.capture(), any(Pageable.class));
+
+        Predicate predicate = org.mockito.Mockito.mock(Predicate.class);
+        Path path = org.mockito.Mockito.mock(Path.class, inv ->
+                Path.class.isAssignableFrom(inv.getMethod().getReturnType()) ? inv.getMock() : null);
+        Join join = org.mockito.Mockito.mock(Join.class, inv -> {
+            Class<?> rt = inv.getMethod().getReturnType();
+            if (Join.class.isAssignableFrom(rt)) return inv.getMock();
+            if (Path.class.isAssignableFrom(rt)) return path;
+            return null;
+        });
+        Root<MovimentacaoEstoqueEntity> root = org.mockito.Mockito.mock(Root.class, inv -> {
+            Class<?> rt = inv.getMethod().getReturnType();
+            if (Join.class.isAssignableFrom(rt)) return join;
+            if (Path.class.isAssignableFrom(rt)) return path;
+            return null;
+        });
+        CriteriaQuery<?> query = org.mockito.Mockito.mock(CriteriaQuery.class);
+        CriteriaBuilder builder = org.mockito.Mockito.mock(CriteriaBuilder.class, inv ->
+                Predicate.class.isAssignableFrom(inv.getMethod().getReturnType()) ? predicate : null);
+
+        assertThat(specCaptor.getValue().toPredicate(root, query, builder)).isNotNull();
+    }
+
+    @Test
+    void validaErrosEmSaidaDrinkDisponibilidadeEBaixaPedidoComFefo() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        autenticar(estabelecimentoId);
+
+        ProdutoEntity padrao = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Cerveja");
+        when(produtoRepository.findById(padrao.getId())).thenReturn(Optional.of(padrao));
+        assertThatThrownBy(() -> movimentacaoEstoqueService.registrarSaidaDrink(
+                new SaidaDrinkRequestDto(padrao.getId(), BigDecimal.ONE, null)
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("O produto informado não é um drink");
+
+        ProdutoEntity drinkInativo = produto(estabelecimentoId, ProdutoTipo.DRINK, false, "Negroni");
+        drinkInativo.setAtivo(false);
+        when(produtoRepository.findById(drinkInativo.getId())).thenReturn(Optional.of(drinkInativo));
+        assertThatThrownBy(() -> movimentacaoEstoqueService.registrarSaidaDrink(
+                new SaidaDrinkRequestDto(drinkInativo.getId(), BigDecimal.ONE, null)
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("O drink informado está inativo");
+
+        ProdutoEntity drinkSemReceita = produto(estabelecimentoId, ProdutoTipo.DRINK, false, "Mojito");
+        when(produtoRepository.findById(drinkSemReceita.getId())).thenReturn(Optional.of(drinkSemReceita));
+        when(composicaoDrinkRepository.findAllByDrinkIdOrderByIdAsc(drinkSemReceita.getId())).thenReturn(List.of());
+        assertThatThrownBy(() -> movimentacaoEstoqueService.registrarSaidaDrink(
+                new SaidaDrinkRequestDto(drinkSemReceita.getId(), BigDecimal.ONE, null)
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("O drink não possui ingredientes cadastrados");
+
+        ProdutoEntity ingrediente = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Rum");
+        when(composicaoDrinkRepository.findAllByDrinkIdOrderByIdAsc(drinkSemReceita.getId()))
+                .thenReturn(List.of(composicao(drinkSemReceita, ingrediente, "1", UnidadeConsumoDrink.UN)));
+        when(estoqueRepository.findAllByProdutoIdInForUpdate(any())).thenReturn(List.of());
+        assertThatThrownBy(() -> movimentacaoEstoqueService.registrarSaidaDrink(
+                new SaidaDrinkRequestDto(drinkSemReceita.getId(), BigDecimal.ONE, null)
+        )).isInstanceOf(EntityNotFoundException.class)
+                .hasMessage("Estoque de um ingrediente não encontrado");
+
+        // validarDisponibilidadeItens com produto inativo e drink sem receita
+        padrao.setAtivo(false);
+        assertThatThrownBy(() -> movimentacaoEstoqueService.validarDisponibilidadeItens(
+                estabelecimentoId,
+                List.of(new MovimentacaoEstoqueService.ItemConsumoValidacao(padrao.getId(), BigDecimal.ONE))
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("está inativo");
+
+        when(composicaoDrinkRepository.findAllByDrinkIdOrderByIdAsc(drinkSemReceita.getId())).thenReturn(List.of());
+        assertThatThrownBy(() -> movimentacaoEstoqueService.validarDisponibilidadeItens(
+                estabelecimentoId,
+                List.of(new MovimentacaoEstoqueService.ItemConsumoValidacao(drinkSemReceita.getId(), BigDecimal.ONE))
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("não possui ingredientes cadastrados");
+
+        // registrarBaixaPedidoComFefo: tipo inválido, saldo negativo e falha no controle de lotes
+        EstoqueEntity estoquePadrao = estoque(padrao, "5");
+        estoquePadrao.setId(55);
+        assertThatThrownBy(() -> movimentacaoEstoqueService.registrarBaixaPedidoComFefo(
+                estoquePadrao, TipoMovimentacaoEstoque.ENTRADA, BigDecimal.ONE,
+                "Teste", "PEDIDO", UUID.randomUUID(), 1L, null, null, LocalDateTime.now()
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Tipo de movimentação inválido");
+
+        assertThatThrownBy(() -> movimentacaoEstoqueService.registrarBaixaPedidoComFefo(
+                estoquePadrao, TipoMovimentacaoEstoque.SAIDA, new BigDecimal("6"),
+                "Teste", "PEDIDO", UUID.randomUUID(), 1L, null, null, LocalDateTime.now()
+        )).isInstanceOf(EstoqueInsuficientePedidoException.class);
+
+        LoteEstoqueEntity loteVencido = lote(estoquePadrao, 10L, "L-VENC", LocalDate.now().minusDays(1), "5");
+        when(loteEstoqueRepository.findAllByEstoqueId(55)).thenReturn(List.of(loteVencido));
+        assertThatThrownBy(() -> movimentacaoEstoqueService.registrarBaixaPedidoComFefo(
+                estoquePadrao, TipoMovimentacaoEstoque.SAIDA, BigDecimal.ONE,
+                "Teste", "PEDIDO", UUID.randomUUID(), 1L, null, null, LocalDateTime.now()
+        )).isInstanceOf(EstoqueInsuficientePedidoException.class);
     }
 
     private LoteEstoqueEntity lote(

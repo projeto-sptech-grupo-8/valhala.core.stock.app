@@ -16,6 +16,12 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Expression;
+import jakarta.persistence.criteria.Path;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoAtualizacaoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoResponseDto;
@@ -380,6 +386,147 @@ class ProdutoServiceTest {
         ));
         assertThat(atualizado.fardo()).isFalse();
         assertThat(atualizado.unidadesPorFardo()).isNull();
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void avaliaEspecificacaoDeProdutosEExportacao() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        autenticarNoEstabelecimento(estabelecimentoId);
+        CategoriaEntity categoria = categoria(estabelecimentoId, true);
+        ProdutoEntity vodka = produto(estabelecimentoId, categoria, "PRD-AAAA0001", "Vodka", ProdutoTipo.PADRAO, true);
+        UUID idFiltro = vodka.getId();
+
+        when(produtoRepository.findAll(any(Specification.class), any(org.springframework.data.domain.Sort.class)))
+                .thenReturn(List.of(vodka));
+        when(estoqueRepository.findAllByProdutoIdIn(anyCollection())).thenReturn(List.of());
+
+        List<ProdutoResponseDto> exportados = produtoService.listarProdutosParaExportacao(
+                "  VODKA  ", List.of(1), ProdutoTipo.PADRAO, true, List.of(idFiltro), "nome", DirecaoOrdenacao.DESC
+        );
+        assertThat(exportados).hasSize(1);
+
+        ArgumentCaptor<Specification<ProdutoEntity>> specCaptor = ArgumentCaptor.forClass(Specification.class);
+        verify(produtoRepository).findAll(specCaptor.capture(), any(org.springframework.data.domain.Sort.class));
+
+        Predicate predicate = org.mockito.Mockito.mock(Predicate.class);
+        Expression expr = org.mockito.Mockito.mock(Expression.class);
+        Path path = org.mockito.Mockito.mock(Path.class, inv -> {
+            Class<?> rt = inv.getMethod().getReturnType();
+            if (Path.class.isAssignableFrom(rt)) return inv.getMock();
+            if (Predicate.class.isAssignableFrom(rt)) return predicate;
+            return null;
+        });
+        Root<ProdutoEntity> root = org.mockito.Mockito.mock(Root.class, inv ->
+                Path.class.isAssignableFrom(inv.getMethod().getReturnType()) ? path : null);
+        CriteriaQuery<?> query = org.mockito.Mockito.mock(CriteriaQuery.class);
+        CriteriaBuilder builder = org.mockito.Mockito.mock(CriteriaBuilder.class, inv -> {
+            Class<?> rt = inv.getMethod().getReturnType();
+            if (Predicate.class.isAssignableFrom(rt)) return predicate;
+            if (Expression.class.isAssignableFrom(rt)) return expr;
+            return null;
+        });
+
+        assertThat(specCaptor.getValue().toPredicate(root, query, builder)).isNotNull();
+    }
+
+    @Test
+    void validaRegrasDeAlteracaoDeFracionamentoFardoVolumeEEstoqueMinimo() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        CategoriaEntity categoria = categoria(estabelecimentoId, true);
+        autenticarNoEstabelecimento(estabelecimentoId);
+
+        ProdutoEntity drink = produto(estabelecimentoId, categoria, "PRD-DRINK01", "Gin Tônica", ProdutoTipo.DRINK, true);
+        when(produtoRepository.findById(drink.getId())).thenReturn(Optional.of(drink));
+
+        assertThatThrownBy(() -> produtoService.atualizarProduto(drink.getId(), new ProdutoAtualizacaoRequestDto(
+                null, null, null, null, null, true, null, null, null, null, null
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Drink não possui características de fracionamento próprias");
+
+        assertThatThrownBy(() -> produtoService.atualizarProduto(drink.getId(), new ProdutoAtualizacaoRequestDto(
+                null, null, null, null, null, null, null, null, true, 6, null
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Drink não possui configuração de fardo");
+
+        assertThatThrownBy(() -> produtoService.atualizarProduto(drink.getId(), new ProdutoAtualizacaoRequestDto(
+                null, null, null, null, null, null, new BigDecimal("750"), null, null, null, null
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Drink não possui características de fracionamento próprias");
+
+        assertThatThrownBy(() -> produtoService.atualizarProduto(drink.getId(), new ProdutoAtualizacaoRequestDto(
+                null, null, null, null, null, null, null, new BigDecimal("5"), null, null, null
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Drink não possui estoque mínimo próprio");
+
+        ProdutoEntity padraoSemEstoque = produto(estabelecimentoId, categoria, "PRD-PAD01", "Whisky", ProdutoTipo.PADRAO, true);
+        when(produtoRepository.findById(padraoSemEstoque.getId())).thenReturn(Optional.of(padraoSemEstoque));
+        when(estoqueRepository.findByProdutoId(padraoSemEstoque.getId())).thenReturn(Optional.empty());
+        when(movimentacaoEstoqueRepository.existsByEstoqueProdutoId(padraoSemEstoque.getId())).thenReturn(false);
+
+        assertThatThrownBy(() -> produtoService.atualizarProduto(padraoSemEstoque.getId(), new ProdutoAtualizacaoRequestDto(
+                null, null, null, null, null, true, null, null, null, null, null
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Produto fracionado deve informar o volume da embalagem em mililitros");
+
+        assertThatThrownBy(() -> produtoService.atualizarProduto(padraoSemEstoque.getId(), new ProdutoAtualizacaoRequestDto(
+                null, null, null, null, null, null, null, null, false, 6, null
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Unidades por fardo só pode ser informado quando fardo estiver ativo");
+
+        assertThatThrownBy(() -> produtoService.atualizarProduto(padraoSemEstoque.getId(), new ProdutoAtualizacaoRequestDto(
+                null, null, null, null, null, null, null, null, true, 1, null
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Um fardo deve possuir ao menos 2 unidades");
+
+        // Produto já possui movimentações mesmo sem estoque encontrado
+        when(movimentacaoEstoqueRepository.existsByEstoqueProdutoId(padraoSemEstoque.getId())).thenReturn(true);
+        assertThatThrownBy(() -> produtoService.atualizarProduto(padraoSemEstoque.getId(), new ProdutoAtualizacaoRequestDto(
+                null, null, null, null, null, null, new BigDecimal("1000"), null, null, null, null
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Não é permitido alterar fracionamento ou volume de produto que já possui estoque ou movimentações");
+
+        // Atualização de estoque mínimo e categoria válida
+        EstoqueEntity estoque = new EstoqueEntity();
+        estoque.setProduto(padraoSemEstoque);
+        estoque.setQuantidadeAtual(BigDecimal.TEN);
+        when(estoqueRepository.findByProdutoId(padraoSemEstoque.getId())).thenReturn(Optional.of(estoque));
+        when(categoriaRepository.findById(1)).thenReturn(Optional.of(categoria));
+        when(produtoRepository.saveAndFlush(any(ProdutoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ProdutoResponseDto atualizado = produtoService.atualizarProduto(padraoSemEstoque.getId(), new ProdutoAtualizacaoRequestDto(
+                "Whisky 12 Anos", 1, "un", new BigDecimal("150.00"), new BigDecimal("90.00"),
+                false, null, new BigDecimal("4"), true, 6, true
+        ));
+        assertThat(atualizado.estoqueMinimo()).isEqualByComparingTo("4");
+        verify(estoqueRepository).save(estoque);
+    }
+
+    @Test
+    void lancaErroAoFalharGeracaoDeSkuUnicoOuCategoriaInativaEAutenticacaoInvalida() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        CategoriaEntity inativa = categoria(estabelecimentoId, false);
+        autenticarNoEstabelecimento(estabelecimentoId);
+
+        when(categoriaRepository.findById(1)).thenReturn(Optional.of(inativa));
+        assertThatThrownBy(() -> produtoService.criarProduto(new ProdutoRequestDto(
+                "Cerveja", 1, "un", BigDecimal.TEN, BigDecimal.ONE, ProdutoTipo.PADRAO,
+                false, null, null, null
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("A categoria informada está inativa");
+
+        CategoriaEntity ativa = categoria(estabelecimentoId, true);
+        when(categoriaRepository.findById(1)).thenReturn(Optional.of(ativa));
+        when(produtoRepository.existsByEstabelecimentoIdAndSku(any(), anyString())).thenReturn(true);
+        assertThatThrownBy(() -> produtoService.criarProduto(new ProdutoRequestDto(
+                "Cerveja", 1, "un", BigDecimal.TEN, BigDecimal.ONE, ProdutoTipo.PADRAO,
+                false, null, null, null
+        ))).isInstanceOf(IllegalStateException.class)
+                .hasMessage("Não foi possível gerar um SKU único para o produto");
+
+        SecurityContextHolder.clearContext();
+        assertThatThrownBy(() -> produtoService.listarProdutos(null, (Integer) null, null, null, 0, 20, "nome", DirecaoOrdenacao.ASC))
+                .isInstanceOf(AccessDeniedException.class);
     }
 
     private CategoriaEntity categoria(UUID estabelecimentoId, boolean ativa) {
