@@ -43,6 +43,7 @@ public class UserService {
     private final TokenStateService tokenStateService;
     private final ServicoPermissoes servicoPermissoes;
     private final BusinessEventLogger businessEventLogger;
+    private final UserAccessHistoryService userAccessHistoryService;
 
     @Transactional
     @PreAuthorize("@permissionAuthorizationService.hasPermission('USUARIOS_CRIAR', authentication)")
@@ -113,6 +114,7 @@ public class UserService {
         boolean canEditUsers = userAuthorizationService
                 .hasPermission(authentication, "USUARIOS_EDITAR");
         boolean authenticationChanged = false;
+        boolean passwordChanged = false;
 
         if (!canEditUsers && (updateDto.nomePerfil() != null || updateDto.ativo() != null)) {
             throw new AccessDeniedException(
@@ -149,6 +151,7 @@ public class UserService {
 
             user.setPasswordHash(senhaCriptografada);
             authenticationChanged = true;
+            passwordChanged = true;
         }
 
         if (StringUtils.hasText(updateDto.nomePerfil())) {
@@ -185,6 +188,10 @@ public class UserService {
 
         if (authenticationChanged) {
             tokenStateService.revokeAll(savedUser.getId());
+        }
+
+        if (passwordChanged) {
+            userAccessHistoryService.registrarSenhaAlterada(savedUser);
         }
 
         businessEventLogger.success("user.updated", "user", savedUser.getId());

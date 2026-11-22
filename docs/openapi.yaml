@@ -3686,6 +3686,104 @@ paths:
                 $ref: "#/components/schemas/ApiErrorResponse"
       security:
       - accessTokenCookie: []
+  /usuario/{id}/acessos:
+    get:
+      tags:
+      - Usuários
+      summary: Listar últimos acessos de um usuário por ID
+      description: Retorna o histórico recente de acessos do próprio usuário ou de
+        outro usuário quando houver USUARIOS_VISUALIZAR.
+      operationId: listarAcessosPorUsuario
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: limite
+        in: query
+        description: Quantidade máxima de registros retornados (entre 1 e 50).
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+      responses:
+        "200":
+          description: Histórico de acessos retornado com sucesso.
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RespostaHistoricoAcessoDto"
+        "400":
+          description: Parâmetro de limite inválido.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Usuário não encontrado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /usuario/me/acessos:
+    get:
+      tags:
+      - Usuários
+      summary: Listar últimos acessos do usuário autenticado
+      description: "Retorna o histórico recente de logins, tentativas com senha incorreta\
+        \ e trocas de senha da própria conta."
+      operationId: listarMeusAcessos
+      parameters:
+      - name: limite
+        in: query
+        description: Quantidade máxima de registros retornados (entre 1 e 50).
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+      responses:
+        "200":
+          description: Histórico de acessos retornado com sucesso.
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RespostaHistoricoAcessoDto"
+        "400":
+          description: Parâmetro de limite inválido.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: Usuário não autenticado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
   /produtos/exportar:
     get:
       tags:
@@ -6832,6 +6930,36 @@ components:
           pattern: .*\S.*
         descricao:
           type: string
+    RespostaHistoricoAcessoDto:
+      type: object
+      description: Registro de evento de acesso ou segurança da conta do usuário.
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Identificador único do registro de acesso.
+          example: 42
+        tipoEvento:
+          type: string
+          description: Tipo do evento registrado na conta.
+          enum:
+          - LOGIN_SUCESSO
+          - SENHA_INCORRETA
+          - SENHA_ALTERADA
+          example: LOGIN_SUCESSO
+        ipOrigem:
+          type: string
+          description: Endereço IP de origem da requisição.
+          example: 10.0.0.24
+        dispositivo:
+          type: string
+          description: Resumo do sistema operacional e navegador identificados.
+          example: Windows · Chrome
+        ocorridoEm:
+          type: string
+          format: date-time
+          description: Data e hora em que o evento ocorreu.
+          example: 2026-11-22T14:32:00
     RespostaPaginadaDtoProdutoResponseDto:
       type: object
       properties:

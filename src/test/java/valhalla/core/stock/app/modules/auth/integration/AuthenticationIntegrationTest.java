@@ -29,6 +29,7 @@ import java.util.UUID;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -828,6 +829,108 @@ class AuthenticationIntegrationTest {
                         .cookie(accessToken).with(csrf(accessToken)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Usuário não encontrado"));
+    }
+
+    @Test
+    void deveRegistrarHistoricoDeLoginFalhaETrocaDeSenha() throws Exception {
+        String userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36";
+
+        mockMvc.perform(post("/auth/login")
+                        .header("User-Agent", userAgent)
+                        .header("X-Forwarded-For", "10.0.0.24")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginJson("atendente@meraki.com", "senha-errada")))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/auth/login")
+                        .header("User-Agent", userAgent)
+                        .header("X-Forwarded-For", "10.0.0.24")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginJson("naoexiste@meraki.com", "qualquer-senha")))
+                .andExpect(status().isUnauthorized());
+
+        MvcResult firstLogin = mockMvc.perform(post("/auth/login")
+                        .header("User-Agent", userAgent)
+                        .header("X-Forwarded-For", "10.0.0.24")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginJson("atendente@meraki.com", "senha-atendente")))
+                .andExpect(status().isOk())
+                .andReturn();
+        Cookie firstAccess = requireCookie(firstLogin, "accessToken");
+        MvcResult csrfResult = mockMvc.perform(get("/auth/csrf").cookie(firstAccess))
+                .andExpect(status().isOk())
+                .andReturn();
+        tokensCsrfPorAccessToken.put(firstAccess.getValue(),
+                JsonPath.read(csrfResult.getResponse().getContentAsString(), "$.token"));
+
+        UserEntity reloadedUser = userRepository.findById(atendenteUser.getId()).orElseThrow();
+        assertNotNull(reloadedUser.getLastLoginAt());
+        assertEquals(0, reloadedUser.getLoginAttempts());
+
+        mockMvc.perform(patch("/usuario/me")
+                        .cookie(firstAccess)
+                        .with(csrf(firstAccess))
+                        .header("User-Agent", userAgent)
+                        .header("X-Forwarded-For", "10.0.0.24")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"nova-senha-atendente\"}"))
+                .andExpect(status().isOk());
+
+        Cookie secondAccess = login("atendente@meraki.com", "nova-senha-atendente");
+
+        mockMvc.perform(get("/usuario/me/acessos").cookie(secondAccess))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(4))
+                .andExpect(jsonPath("$[0].tipoEvento").value("LOGIN_SUCESSO"))
+                .andExpect(jsonPath("$[1].tipoEvento").value("SENHA_ALTERADA"))
+                .andExpect(jsonPath("$[1].ipOrigem").value("10.0.0.24"))
+                .andExpect(jsonPath("$[1].dispositivo").value("Windows · Chrome"))
+                .andExpect(jsonPath("$[2].tipoEvento").value("LOGIN_SUCESSO"))
+                .andExpect(jsonPath("$[2].ipOrigem").value("10.0.0.24"))
+                .andExpect(jsonPath("$[2].dispositivo").value("Windows · Chrome"))
+                .andExpect(jsonPath("$[3].tipoEvento").value("SENHA_INCORRETA"))
+                .andExpect(jsonPath("$[3].ipOrigem").value("10.0.0.24"))
+                .andExpect(jsonPath("$[3].dispositivo").value("Windows · Chrome"))
+                .andExpect(jsonPath("$[3].ocorridoEm").isNotEmpty());
+
+        mockMvc.perform(get("/usuario/me/acessos").param("limite", "2").cookie(secondAccess))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].tipoEvento").value("LOGIN_SUCESSO"))
+                .andExpect(jsonPath("$[1].tipoEvento").value("SENHA_ALTERADA"));
+    }
+
+    @Test
+    void atendenteNaoDeveConsultarHistoricoDeAcessosDeOutroUsuarioMasGerentePode() throws Exception {
+        Cookie atendenteAccess = login("atendente@meraki.com", "senha-atendente");
+        Cookie gerenteAccess = login("gerente@meraki.com", "senha-gerente");
+
+        mockMvc.perform(get("/usuario/{id}/acessos", gerenteUser.getId()).cookie(atendenteAccess))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Acesso negado"));
+
+        mockMvc.perform(get("/usuario/{id}/acessos", atendenteUser.getId()).cookie(atendenteAccess))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].tipoEvento").value("LOGIN_SUCESSO"));
+
+        mockMvc.perform(get("/usuario/{id}/acessos", atendenteUser.getId()).cookie(gerenteAccess))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].tipoEvento").value("LOGIN_SUCESSO"));
+    }
+
+    @Test
+    void deveRejeitarLimiteInvalidoAoListarAcessos() throws Exception {
+        Cookie atendenteAccess = login("atendente@meraki.com", "senha-atendente");
+
+        mockMvc.perform(get("/usuario/me/acessos").param("limite", "0").cookie(atendenteAccess))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("O limite deve estar entre 1 e 50"));
+
+        mockMvc.perform(get("/usuario/me/acessos").param("limite", "51").cookie(atendenteAccess))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("O limite deve estar entre 1 e 50"));
     }
 
     private UserEntity saveUser(String email, String password, ProfileEntity profile) {

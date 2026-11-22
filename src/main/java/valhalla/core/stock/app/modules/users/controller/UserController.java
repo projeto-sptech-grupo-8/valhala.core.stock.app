@@ -1,6 +1,7 @@
 package valhalla.core.stock.app.modules.users.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -15,7 +16,9 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import valhalla.core.stock.app.modules.users.dto.RequisicaoAtualizacaoUsuarioDto;
 import valhalla.core.stock.app.modules.users.dto.RequisicaoCriacaoUsuarioDto;
+import valhalla.core.stock.app.modules.users.dto.RespostaHistoricoAcessoDto;
 import valhalla.core.stock.app.modules.users.dto.RespostaUsuarioDto;
+import valhalla.core.stock.app.modules.users.service.UserAccessHistoryService;
 import valhalla.core.stock.app.modules.users.service.UserService;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 
@@ -33,9 +36,11 @@ import java.util.UUID;
 public class UserController {
 
     private final UserService userService;
+    private final UserAccessHistoryService userAccessHistoryService;
 
-    public UserController(UserService userService) {
+    public UserController(UserService userService, UserAccessHistoryService userAccessHistoryService) {
         this.userService = userService;
+        this.userAccessHistoryService = userAccessHistoryService;
     }
 
     @PostMapping
@@ -189,6 +194,79 @@ public class UserController {
                 userService.buscarUsuario(userIdFrom(jwt));
 
         return ResponseEntity.ok(usuario);
+    }
+
+    @GetMapping("/me/acessos")
+    @Operation(
+            summary = "Listar últimos acessos do usuário autenticado",
+            description = "Retorna o histórico recente de logins, tentativas com senha incorreta e trocas de senha da própria conta."
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Histórico de acessos retornado com sucesso."
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Parâmetro de limite inválido.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "Usuário não autenticado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            )
+    })
+    public ResponseEntity<List<RespostaHistoricoAcessoDto>> listarMeusAcessos(
+            @AuthenticationPrincipal Jwt jwt,
+            @Parameter(description = "Quantidade máxima de registros retornados (entre 1 e 50).")
+            @RequestParam(name = "limite", defaultValue = "10") int limite
+    ) {
+        return ResponseEntity.ok(
+                userAccessHistoryService.listarUltimosAcessos(userIdFrom(jwt), limite)
+        );
+    }
+
+    @GetMapping("/{id}/acessos")
+    @PreAuthorize("@userAuthorizationService.canView(#idUsuario, authentication)")
+    @Operation(
+            summary = "Listar últimos acessos de um usuário por ID",
+            description = "Retorna o histórico recente de acessos do próprio usuário ou de outro usuário quando houver USUARIOS_VISUALIZAR."
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Histórico de acessos retornado com sucesso."
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Parâmetro de limite inválido.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "Sessão ausente, inválida ou expirada.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "Usuário sem permissão.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Usuário não encontrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            )
+    })
+    public ResponseEntity<List<RespostaHistoricoAcessoDto>> listarAcessosPorUsuario(
+            @PathVariable("id") UUID idUsuario,
+            @Parameter(description = "Quantidade máxima de registros retornados (entre 1 e 50).")
+            @RequestParam(name = "limite", defaultValue = "10") int limite
+    ) {
+        return ResponseEntity.ok(
+                userAccessHistoryService.listarUltimosAcessos(idUsuario, limite)
+        );
     }
 
     @PatchMapping("/me")
