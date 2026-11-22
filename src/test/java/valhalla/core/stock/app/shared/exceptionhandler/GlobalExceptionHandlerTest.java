@@ -33,6 +33,7 @@ import valhalla.core.stock.app.modules.estoque.exception.CategoriaJaExisteExcept
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaPossuiProdutosException;
 import valhalla.core.stock.app.modules.estoque.exception.ProdutoPossuiMovimentacoesException;
 import valhalla.core.stock.app.shared.error.AccessConfigurationConflictException;
+import valhalla.core.stock.app.shared.error.CnpjAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.InvalidRefreshTokenException;
 import valhalla.core.stock.app.shared.error.InvalidUserUpdateException;
@@ -63,6 +64,11 @@ class GlobalExceptionHandlerTest {
                 handler.handleEmailAlreadyExists(new EmailAlreadyExistsException("E-mail duplicado")),
                 HttpStatus.CONFLICT,
                 "E-mail duplicado"
+        );
+        assertStatus(
+                handler.handleCnpjAlreadyExists(new CnpjAlreadyExistsException("CNPJ duplicado")),
+                HttpStatus.CONFLICT,
+                "CNPJ duplicado"
         );
         assertStatus(
                 handler.handleProfileNotFound(new ProfileNotFoundException("Perfil não encontrado")),

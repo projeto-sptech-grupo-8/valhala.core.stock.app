@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import valhalla.core.stock.app.shared.error.CnpjAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.EmailAlreadyExistsException;
 import valhalla.core.stock.app.shared.error.InvalidRefreshTokenException;
 import valhalla.core.stock.app.shared.error.InvalidUserUpdateException;
@@ -77,6 +78,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(EmailAlreadyExistsException.class)
     public ResponseEntity<ApiErrorResponse> handleEmailAlreadyExists(
             EmailAlreadyExistsException exception
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(CnpjAlreadyExistsException.class)
+    public ResponseEntity<ApiErrorResponse> handleCnpjAlreadyExists(
+            CnpjAlreadyExistsException exception
     ) {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
     }
