@@ -51,6 +51,7 @@ class UserServiceTest {
     @Mock private UserAuthorizationService userAuthorizationService;
     @Mock private TokenStateService tokenStateService;
     @Mock private ServicoPermissoes servicoPermissoes;
+    @Mock private UserAccessHistoryService userAccessHistoryService;
 
     private UserService userService;
     private UUID establishmentId;
@@ -60,7 +61,7 @@ class UserServiceTest {
         userService = new UserService(
                 userRepository, profileRepository, passwordEncoder,
                 userAuthorizationService, tokenStateService, servicoPermissoes,
-                new BusinessEventLogger()
+                new BusinessEventLogger(), userAccessHistoryService
         );
         establishmentId = UUID.randomUUID();
         Jwt jwt = Jwt.withTokenValue("test").header("alg", "none")
@@ -224,6 +225,7 @@ class UserServiceTest {
 
         assertThat(resposta.nome()).isEqualTo("Novo Nome");
         assertThat(u.getPhone()).isEqualTo("11988887777");
+        verify(userAccessHistoryService, never()).registrarSenhaAlterada(any());
     }
 
     @Test
@@ -250,6 +252,7 @@ class UserServiceTest {
         assertThat(u.getStatus()).isEqualTo(UserStatus.INATIVO);
         verify(servicoPermissoes).garantirAlteracaoUsuarioMantemAdministrador(u);
         verify(tokenStateService).revokeAll(id);
+        verify(userAccessHistoryService).registrarSenhaAlterada(u);
     }
 
     @Test

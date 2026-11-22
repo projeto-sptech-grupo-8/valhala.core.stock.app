@@ -3,8 +3,10 @@ package valhalla.core.stock.app.modules.auth.service;
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtException;
@@ -16,6 +18,7 @@ import valhalla.core.stock.app.modules.auth.security.CsrfTokenStore;
 import valhalla.core.stock.app.modules.auth.security.JwtService;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
+import valhalla.core.stock.app.modules.users.service.UserAccessHistoryService;
 import valhalla.core.stock.app.shared.error.InvalidRefreshTokenException;
 import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
@@ -34,6 +37,7 @@ public class AuthService {
     private final JwtDecoder refreshTokenDecoder;
     private final CsrfTokenStore csrfTokenStore;
     private final BusinessEventLogger businessEventLogger;
+    private final UserAccessHistoryService userAccessHistoryService;
 
     public AuthService(
             AuthenticationManager authenticationManager,
@@ -43,7 +47,8 @@ public class AuthService {
             @Qualifier("jwtDecoder") JwtDecoder accessTokenDecoder,
             @Qualifier("refreshTokenDecoder") JwtDecoder refreshTokenDecoder,
             CsrfTokenStore csrfTokenStore,
-            BusinessEventLogger businessEventLogger
+            BusinessEventLogger businessEventLogger,
+            UserAccessHistoryService userAccessHistoryService
     ) {
         this.authenticationManager = authenticationManager;
         this.jwtService = jwtService;
@@ -53,17 +58,24 @@ public class AuthService {
         this.refreshTokenDecoder = refreshTokenDecoder;
         this.csrfTokenStore = csrfTokenStore;
         this.businessEventLogger = businessEventLogger;
+        this.userAccessHistoryService = userAccessHistoryService;
     }
 
-    @Transactional
+    @Transactional(dontRollbackOn = AuthenticationException.class)
     public RespostaTokenDto login(RequisicaoLoginDto request) {
         String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
-        Authentication authentication = authenticationManager.authenticate(
-                UsernamePasswordAuthenticationToken.unauthenticated(
-                        normalizedEmail,
-                        request.senha()
-                )
-        );
+        Authentication authentication;
+        try {
+            authentication = authenticationManager.authenticate(
+                    UsernamePasswordAuthenticationToken.unauthenticated(
+                            normalizedEmail,
+                            request.senha()
+                    )
+            );
+        } catch (BadCredentialsException exception) {
+            userAccessHistoryService.registrarSenhaIncorreta(normalizedEmail);
+            throw exception;
+        }
 
         UserEntity user = userRepository.findByEmailIgnoreCase(normalizedEmail)
                 .orElseThrow(() -> new IllegalStateException(
@@ -71,6 +83,7 @@ public class AuthService {
                 ));
 
         RespostaTokenDto response = issueTokens(authentication, user);
+        userAccessHistoryService.registrarLoginSucesso(user);
         businessEventLogger.authenticationSuccess("auth.login.succeeded", user.getId(), user.getEstablishment().getId());
         return response;
     }
