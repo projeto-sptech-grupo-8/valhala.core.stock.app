@@ -34,6 +34,7 @@
 		<!-- Meta mínima de cobertura do backend (todos os testes: unitários + integração) -->
 		<jacoco.minimo.linhas>0.90</jacoco.minimo.linhas>
 		<jacoco.minimo.instrucoes>0.90</jacoco.minimo.instrucoes>
+		<jacoco.minimo.branches>0.75</jacoco.minimo.branches>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -178,6 +179,9 @@
 						<goals>
 							<goal>prepare-agent</goal>
 						</goals>
+						<configuration>
+							<append>false</append>
+						</configuration>
 					</execution>
 					<execution>
 						<id>jacoco-report</id>
@@ -206,6 +210,11 @@
 											<counter>INSTRUCTION</counter>
 											<value>COVEREDRATIO</value>
 											<minimum>${jacoco.minimo.instrucoes}</minimum>
+										</limit>
+										<limit>
+											<counter>BRANCH</counter>
+											<value>COVEREDRATIO</value>
+											<minimum>${jacoco.minimo.branches}</minimum>
 										</limit>
 									</limits>
 								</rule>

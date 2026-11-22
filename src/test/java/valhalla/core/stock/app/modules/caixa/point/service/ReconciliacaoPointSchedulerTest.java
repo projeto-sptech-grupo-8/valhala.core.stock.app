@@ -1,0 +1,148 @@
+package valhalla.core.stock.app.modules.caixa.point.service;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import valhalla.core.stock.app.modules.caixa.exception.IntegracaoMercadoPagoException;
+import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity;
+import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPagamentoPedido;
+import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusReservaEstoque;
+import valhalla.core.stock.app.modules.caixa.pedido.repository.PagamentoPedidoRepository;
+import valhalla.core.stock.app.modules.caixa.pedido.repository.ReservaEstoqueRepository;
+import valhalla.core.stock.app.modules.caixa.pedido.service.ReservaEstoqueService;
+import valhalla.core.stock.app.modules.caixa.point.client.MercadoPagoPointClient;
+import valhalla.core.stock.app.modules.caixa.point.client.dto.OrderPointResultado;
+import valhalla.core.stock.app.modules.caixa.point.config.MercadoPagoPointProperties;
+import valhalla.core.stock.app.modules.caixa.point.config.ModoMercadoPagoPoint;
+import valhalla.core.stock.app.modules.caixa.sessao.enums.OrigemAuditoriaCaixa;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class ReconciliacaoPointSchedulerTest {
+
+    @Mock private PagamentoPedidoRepository pagamentoPedidoRepository;
+    @Mock private ReservaEstoqueRepository reservaEstoqueRepository;
+    @Mock private MercadoPagoPointClient mercadoPagoPointClient;
+    @Mock private TransicaoPagamentoPointService transicaoPagamentoPointService;
+    @Mock private ReservaEstoqueService reservaEstoqueService;
+
+    private MercadoPagoPointProperties props(boolean habilitada) {
+        return new MercadoPagoPointProperties(
+                ModoMercadoPagoPoint.MOCK, null, null, true, 300L, null,
+                3000L, 8000L, "PT5M", 300L, 20L, 15000L, habilitada, 300, 30
+        );
+    }
+
+    @Test
+    void executarCicloReconciliacaoRespeitaFlagEReconciliaPendentes() {
+        ReconciliacaoPointScheduler desabilitado = new ReconciliacaoPointScheduler(
+                props(false), pagamentoPedidoRepository, reservaEstoqueRepository,
+                mercadoPagoPointClient, transicaoPagamentoPointService, reservaEstoqueService
+        );
+        desabilitado.executarCicloReconciliacao();
+        verify(pagamentoPedidoRepository, never()).buscarPagamentosPointParaReconciliacao(any(), any());
+
+        ReconciliacaoPointScheduler scheduler = new ReconciliacaoPointScheduler(
+                props(true), pagamentoPedidoRepository, reservaEstoqueRepository,
+                mercadoPagoPointClient, transicaoPagamentoPointService, reservaEstoqueService
+        );
+
+        PagamentoPedidoEntity semOrder = new PagamentoPedidoEntity();
+        semOrder.setId(UUID.randomUUID());
+        PagamentoPedidoEntity comOrderOk = new PagamentoPedidoEntity();
+        comOrderOk.setId(UUID.randomUUID());
+        comOrderOk.setOrderExternaId("ORD-OK");
+        PagamentoPedidoEntity comOrderErro = new PagamentoPedidoEntity();
+        comOrderErro.setId(UUID.randomUUID());
+        comOrderErro.setOrderExternaId("ORD-ERR");
+
+        when(pagamentoPedidoRepository.buscarPagamentosPointParaReconciliacao(any(), any()))
+                .thenReturn(List.of(semOrder, comOrderOk, comOrderErro));
+
+        OrderPointResultado resOk = new OrderPointResultado(
+                "ORD-OK", "processed", "accredited", "PAY-1", "accredited", "REF-1", BigDecimal.TEN, "{}"
+        );
+        when(mercadoPagoPointClient.consultarOrder("ORD-OK")).thenReturn(resOk);
+        when(mercadoPagoPointClient.consultarOrder("ORD-ERR"))
+                .thenThrow(new RuntimeException("Erro rede"));
+        when(reservaEstoqueRepository.listarPedidosComReservasExpiradas(any())).thenReturn(List.of());
+
+        scheduler.executarCicloReconciliacao();
+
+        verify(transicaoPagamentoPointService).aplicarResultadoOrder(
+                comOrderOk.getId(), resOk, OrigemAuditoriaCaixa.SISTEMA, null
+        );
+    }
+
+    @Test
+    void expirarReservasVencidasConsultaAntesDeExpirarELiberaReservasOrfas() {
+        ReconciliacaoPointScheduler scheduler = new ReconciliacaoPointScheduler(
+                props(true), pagamentoPedidoRepository, reservaEstoqueRepository,
+                mercadoPagoPointClient, transicaoPagamentoPointService, reservaEstoqueService
+        );
+
+        UUID pedidoJaPago = UUID.randomUUID();
+        UUID pedidoExpirar = UUID.randomUUID();
+        UUID pedidoOrfao = UUID.randomUUID();
+        when(reservaEstoqueRepository.listarPedidosComReservasExpiradas(any()))
+                .thenReturn(List.of(pedidoJaPago, pedidoExpirar, pedidoOrfao));
+
+        // 1. Pedido que na consulta prévia já está aprovado -> não cancela nem expira
+        PagamentoPedidoEntity pagPago = new PagamentoPedidoEntity();
+        pagPago.setId(UUID.randomUUID());
+        pagPago.setProvedor("MERCADO_PAGO");
+        pagPago.setStatus(StatusPagamentoPedido.EM_TERMINAL);
+        pagPago.setOrderExternaId("ORD-PAGO");
+        PagamentoPedidoEntity pagAtualizadoAprovado = new PagamentoPedidoEntity();
+        pagAtualizadoAprovado.setId(pagPago.getId());
+        pagAtualizadoAprovado.setProvedor("MERCADO_PAGO");
+        pagAtualizadoAprovado.setStatus(StatusPagamentoPedido.APROVADO);
+
+        OrderPointResultado resPago = new OrderPointResultado(
+                "ORD-PAGO", "processed", "accredited", "PAY-1", "accredited", "REF", BigDecimal.TEN, "{}"
+        );
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoJaPago))
+                .thenReturn(List.of(pagPago), List.of(pagAtualizadoAprovado));
+        when(mercadoPagoPointClient.consultarOrder("ORD-PAGO")).thenReturn(resPago);
+        when(transicaoPagamentoPointService.aplicarResultadoOrder(
+                pagPago.getId(), resPago, OrigemAuditoriaCaixa.SISTEMA, null
+        )).thenReturn(pagAtualizadoAprovado);
+
+        // 2. Pedido onde consulta e cancelamento falham -> força timeout local
+        PagamentoPedidoEntity pagExp = new PagamentoPedidoEntity();
+        pagExp.setId(UUID.randomUUID());
+        pagExp.setProvedor("MERCADO_PAGO");
+        pagExp.setStatus(StatusPagamentoPedido.PENDENTE_NA_POINT);
+        pagExp.setOrderExternaId("ORD-EXP");
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoExpirar))
+                .thenReturn(List.of(pagExp), List.of(pagExp));
+        when(mercadoPagoPointClient.consultarOrder("ORD-EXP")).thenThrow(new RuntimeException("Timeout consulta"));
+        when(mercadoPagoPointClient.cancelarOrder("ORD-EXP", "EXP-" + pagExp.getId()))
+                .thenThrow(new IntegracaoMercadoPagoException("Falha cancel", HttpStatus.BAD_GATEWAY, true));
+
+        // 3. Pedido com reserva órfã (sem pagamento ativo) -> libera reservas
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoOrfao)).thenReturn(List.of());
+
+        int tratados = scheduler.expirarReservasVencidas();
+        assertThat(tratados).isEqualTo(3);
+
+        verify(transicaoPagamentoPointService).expirarPagamentoPorTimeout(
+                eq(pagExp.getId()), any()
+        );
+        verify(reservaEstoqueService).liberarReservasAtivasDoPedido(
+                eq(pedidoOrfao), eq(StatusReservaEstoque.EXPIRADA), any()
+        );
+    }
+}

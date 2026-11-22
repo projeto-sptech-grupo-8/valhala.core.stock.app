@@ -1,60 +1,55 @@
 package valhalla.core.stock.app.modules.caixa.point.client;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
+import valhalla.core.stock.app.modules.caixa.exception.IntegracaoMercadoPagoException;
 import valhalla.core.stock.app.modules.caixa.point.client.dto.CriarOrderPointCommand;
 import valhalla.core.stock.app.modules.caixa.point.client.dto.ModoOperacaoTerminalPoint;
 import valhalla.core.stock.app.modules.caixa.point.client.dto.OrderPointResultado;
 import valhalla.core.stock.app.modules.caixa.point.client.dto.TerminalMercadoPagoDto;
 import valhalla.core.stock.app.modules.caixa.point.config.MercadoPagoPointProperties;
 import valhalla.core.stock.app.modules.caixa.point.config.ModoMercadoPagoPoint;
-import valhalla.core.stock.app.modules.caixa.exception.IntegracaoMercadoPagoException;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.math.BigDecimal;
-import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Flow;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
 class HttpMercadoPagoPointClientTest {
 
-    private HttpServer server;
-    private String baseUrl;
+    @Mock
+    private HttpClient httpClient;
 
-    @BeforeEach
-    void iniciarServidor() throws IOException {
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.start();
-        baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-    }
-
-    @AfterEach
-    void pararServidor() {
-        if (server != null) {
-            server.stop(0);
-        }
-    }
-
-    private HttpMercadoPagoPointClient criarClient(long readTimeoutMs, String customBaseUrl) {
-        MercadoPagoPointProperties props = new MercadoPagoPointProperties(
+    private MercadoPagoPointProperties propriedadesPadrao() {
+        return new MercadoPagoPointProperties(
                 ModoMercadoPagoPoint.HOMOLOGACAO,
                 "APP_USR-TOKEN-TESTE",
                 "secret-teste",
                 true,
                 300L,
-                customBaseUrl,
+                "https://api.mercadopago.test",
                 1000L,
-                readTimeoutMs,
+                2000L,
                 "PT5M",
                 300L,
                 20L,
@@ -63,86 +58,103 @@ class HttpMercadoPagoPointClientTest {
                 300,
                 30
         );
-        return new HttpMercadoPagoPointClient(props);
+    }
+
+    private HttpMercadoPagoPointClient criarClient() {
+        return new HttpMercadoPagoPointClient(propriedadesPadrao(), httpClient);
+    }
+
+    @SuppressWarnings("unchecked")
+    private HttpResponse<String> respostaHttp(int statusCode, String body) {
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(statusCode);
+        when(response.body()).thenReturn(body);
+        return response;
     }
 
     @Test
-    void criaConsultaECancelaOrderPointEGereTerminaisViaHttp() {
-        AtomicReference<String> authHeader = new AtomicReference<>();
-        AtomicReference<String> idempotencyHeader = new AtomicReference<>();
+    @SuppressWarnings("unchecked")
+    void criaConsultaECancelaOrderPointEGereTerminaisViaHttp() throws Exception {
+        AtomicReference<HttpRequest> ultimaRequisicao = new AtomicReference<>();
 
-        server.createContext("/v1/orders", exchange -> {
-            authHeader.set(exchange.getRequestHeaders().getFirst("Authorization"));
-            if ("POST".equals(exchange.getRequestMethod()) && "/v1/orders".equals(exchange.getRequestURI().getPath())) {
-                idempotencyHeader.set(exchange.getRequestHeaders().getFirst("X-Idempotency-Key"));
-                responderJson(exchange, 201, """
-                        {
-                          "id": "ORD-HTTP-01",
-                          "status": "created",
-                          "status_detail": "waiting_terminal",
-                          "external_reference": "VHL-01",
-                          "transactions": {
-                            "payments": [
-                              {"id": "PAY-HTTP-01", "status": "created", "amount": "55.90"}
-                            ]
-                          }
-                        }
-                        """);
-            } else if ("GET".equals(exchange.getRequestMethod()) && "/v1/orders/ORD-HTTP-01".equals(exchange.getRequestURI().getPath())) {
-                responderJson(exchange, 200, """
-                        {
-                          "id": "ORD-HTTP-01",
-                          "status": "processed",
-                          "status_detail": "accredited",
-                          "external_reference": "VHL-01",
-                          "total_amount": "55.90",
-                          "transactions": {
-                            "payments": [
-                              {"id": "PAY-HTTP-01", "status": "accredited", "amount": "55.90"}
-                            ]
-                          }
-                        }
-                        """);
-            } else if ("POST".equals(exchange.getRequestMethod()) && "/v1/orders/ORD-HTTP-01/cancel".equals(exchange.getRequestURI().getPath())) {
-                responderJson(exchange, 200, """
-                        {"id":"ORD-HTTP-01","status":"canceled","status_detail":"canceled_by_user","external_reference":"VHL-01","total_amount":"55.90"}
-                        """);
-            } else {
-                responderJson(exchange, 404, "{\"message\":\"Order não encontrada\"}");
-            }
-        });
-
-        server.createContext("/terminals/v1/list", exchange -> responderJson(exchange, 200, """
-                {
-                  "data": {
-                    "terminals": [
-                      {
-                        "id": "PAX_A910__01",
-                        "pos_id": "10",
-                        "store_id": "20",
-                        "external_pos_id": "CAIXA-01",
-                        "operating_mode": "PDV"
-                      }
-                    ]
-                  }
-                }
-                """));
-
-        server.createContext("/terminals/v1/setup", exchange -> responderJson(exchange, 200, """
-                {
-                  "terminals": [
-                    {
-                      "id": "PAX_A910__01",
-                      "pos_id": "10",
-                      "store_id": "20",
-                      "external_pos_id": "CAIXA-01",
-                      "operating_mode": "STANDALONE"
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenAnswer(invocation -> {
+                    HttpRequest req = invocation.getArgument(0);
+                    ultimaRequisicao.set(req);
+                    String path = req.uri().getPath();
+                    String method = req.method();
+                    if ("POST".equals(method) && "/v1/orders".equals(path)) {
+                        return respostaHttp(201, """
+                                {
+                                  "id": "ORD-HTTP-01",
+                                  "status": "created",
+                                  "status_detail": "waiting_terminal",
+                                  "external_reference": "VHL-01",
+                                  "transactions": {
+                                    "payments": [
+                                      {"id": "PAY-HTTP-01", "status": "created", "amount": "55.90"}
+                                    ]
+                                  }
+                                }
+                                """);
                     }
-                  ]
-                }
-                """));
+                    if ("GET".equals(method) && "/v1/orders/ORD-HTTP-01".equals(path)) {
+                        return respostaHttp(200, """
+                                {
+                                  "id": "ORD-HTTP-01",
+                                  "status": "processed",
+                                  "status_detail": "accredited",
+                                  "external_reference": "VHL-01",
+                                  "total_amount": "55.90",
+                                  "transactions": {
+                                    "payments": [
+                                      {"id": "PAY-HTTP-01", "status": "accredited", "amount": "55.90"}
+                                    ]
+                                  }
+                                }
+                                """);
+                    }
+                    if ("POST".equals(method) && "/v1/orders/ORD-HTTP-01/cancel".equals(path)) {
+                        return respostaHttp(200, """
+                                {"id":"ORD-HTTP-01","status":"canceled","status_detail":"canceled_by_user","external_reference":"VHL-01","total_amount":"55.90"}
+                                """);
+                    }
+                    if ("GET".equals(method) && "/terminals/v1/list".equals(path)) {
+                        return respostaHttp(200, """
+                                {
+                                  "data": {
+                                    "terminals": [
+                                      {
+                                        "id": "PAX_A910__01",
+                                        "pos_id": "10",
+                                        "store_id": "20",
+                                        "external_pos_id": "CAIXA-01",
+                                        "operating_mode": "PDV"
+                                      }
+                                    ]
+                                  }
+                                }
+                                """);
+                    }
+                    if ("PATCH".equals(method) && "/terminals/v1/setup".equals(path)) {
+                        return respostaHttp(200, """
+                                {
+                                  "terminals": [
+                                    {
+                                      "id": "PAX_A910__01",
+                                      "pos_id": "10",
+                                      "store_id": "20",
+                                      "external_pos_id": "CAIXA-01",
+                                      "operating_mode": "STANDALONE"
+                                    }
+                                  ]
+                                }
+                                """);
+                    }
+                    return respostaHttp(404, "{\"message\":\"Order não encontrada\"}");
+                });
 
-        HttpMercadoPagoPointClient client = criarClient(3000L, baseUrl);
+        HttpMercadoPagoPointClient client = criarClient();
 
         OrderPointResultado criada = client.criarOrderPoint(new CriarOrderPointCommand(
                 "idem-01",
@@ -156,8 +168,10 @@ class HttpMercadoPagoPointClientTest {
         ));
         assertThat(criada.orderId()).isEqualTo("ORD-HTTP-01");
         assertThat(criada.totalAmount()).isEqualByComparingTo(new BigDecimal("55.90"));
-        assertThat(authHeader.get()).isEqualTo("Bearer APP_USR-TOKEN-TESTE");
-        assertThat(idempotencyHeader.get()).isEqualTo("idem-01");
+        assertThat(ultimaRequisicao.get().headers().firstValue("Authorization"))
+                .contains("Bearer APP_USR-TOKEN-TESTE");
+        assertThat(ultimaRequisicao.get().headers().firstValue("X-Idempotency-Key"))
+                .contains("idem-01");
 
         OrderPointResultado consultada = client.consultarOrder("ORD-HTTP-01");
         assertThat(consultada.status()).isEqualTo("processed");
@@ -165,6 +179,12 @@ class HttpMercadoPagoPointClientTest {
 
         OrderPointResultado cancelada = client.cancelarOrder("ORD-HTTP-01", "cancel-01");
         assertThat(cancelada.status()).isEqualTo("canceled");
+        assertThat(ultimaRequisicao.get().headers().firstValue("X-Idempotency-Key"))
+                .contains("cancel-01");
+
+        OrderPointResultado canceladaSemIdemp = client.cancelarOrder("ORD-HTTP-01", " ");
+        assertThat(canceladaSemIdemp.status()).isEqualTo("canceled");
+        assertThat(ultimaRequisicao.get().headers().firstValue("X-Idempotency-Key")).isEmpty();
 
         List<TerminalMercadoPagoDto> terminais = client.listarTerminais();
         assertThat(terminais).hasSize(1);
@@ -178,25 +198,61 @@ class HttpMercadoPagoPointClientTest {
     }
 
     @Test
-    void mapeiaErrosHttp4xx5xxETimeoutParaIntegracaoMercadoPagoException() {
-        AtomicInteger modoErro = new AtomicInteger(404);
-        server.createContext("/v1/orders", exchange -> {
-            int code = modoErro.get();
-            if (code == 999) {
-                try {
-                    Thread.sleep(400);
-                } catch (InterruptedException ignored) {
-                    Thread.currentThread().interrupt();
-                }
-                responderJson(exchange, 200, "{}");
-            } else if (code == 422) {
-                responderJson(exchange, 422, "{\"errors\":[{\"message\":\"Valor inválido\"}]}");
-            } else {
-                responderJson(exchange, code, "{\"message\":\"Erro MP " + code + "\"}");
-            }
-        });
+    @SuppressWarnings("unchecked")
+    void trataFormatosAlternativosECorposVaziosNasRespostas() throws Exception {
+        HttpMercadoPagoPointClient client = criarClient();
 
-        HttpMercadoPagoPointClient client = criarClient(150L, baseUrl);
+        HttpResponse<String> respVazia = respostaHttp(200, "");
+        HttpResponse<String> respRaiz = respostaHttp(200, """
+                {"terminals":[{"id":"TERM-RAIZ","operating_mode":"PDV"}]}
+                """);
+        HttpResponse<String> respData = respostaHttp(200, """
+                {"data":{"terminals":[{"id":"TERM-DATA","operating_mode":"STANDALONE"}]}}
+                """);
+        HttpResponse<String> respFallback = respostaHttp(200, "{}");
+
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(respVazia, respRaiz, respData, respFallback);
+
+        OrderPointResultado vazia = client.consultarOrder("ORD-VAZIA");
+        assertThat(vazia.orderId()).isNull();
+        assertThat(vazia.totalAmount()).isNull();
+
+        List<TerminalMercadoPagoDto> terminaisRaiz = client.listarTerminais();
+        assertThat(terminaisRaiz).hasSize(1);
+        assertThat(terminaisRaiz.get(0).id()).isEqualTo("TERM-RAIZ");
+
+        TerminalMercadoPagoDto terminalViaData = client.atualizarModoOperacaoTerminal(
+                "TERM-DATA",
+                ModoOperacaoTerminalPoint.STANDALONE
+        );
+        assertThat(terminalViaData.id()).isEqualTo("TERM-DATA");
+
+        TerminalMercadoPagoDto terminalFallback = client.atualizarModoOperacaoTerminal(
+                "TERM-FALLBACK",
+                ModoOperacaoTerminalPoint.PDV
+        );
+        assertThat(terminalFallback.id()).isEqualTo("TERM-FALLBACK");
+        assertThat(terminalFallback.operatingMode()).isEqualTo("PDV");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void mapeiaErrosHttp4xx5xxETimeoutParaIntegracaoMercadoPagoException() throws Exception {
+        HttpMercadoPagoPointClient client = criarClient();
+
+        HttpResponse<String> r404 = respostaHttp(404, "{\"message\":\"Erro MP 404\"}");
+        HttpResponse<String> r409 = respostaHttp(409, "{\"message\":\"Erro MP 409\"}");
+        HttpResponse<String> r422 = respostaHttp(422, "{\"errors\":[{\"message\":\"Valor inválido\"}]}");
+        HttpResponse<String> r400 = respostaHttp(400, "nao-eh-json");
+        HttpResponse<String> r429 = respostaHttp(429, "{\"errors\":[{}]}");
+        HttpResponse<String> r500 = respostaHttp(500, "");
+
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(r404, r409, r422, r400, r429, r500)
+                .thenThrow(new HttpTimeoutException("read timed out"))
+                .thenThrow(new IOException("connection refused"))
+                .thenThrow(new InterruptedException("interrompida"));
 
         assertThatThrownBy(() -> client.consultarOrder("inexistente"))
                 .isInstanceOf(IntegracaoMercadoPagoException.class)
@@ -206,18 +262,32 @@ class HttpMercadoPagoPointClientTest {
                     assertThat(mp.isErroTransitorio()).isFalse();
                 });
 
-        modoErro.set(409);
         assertThatThrownBy(() -> client.consultarOrder("conflito"))
                 .isInstanceOf(IntegracaoMercadoPagoException.class)
                 .satisfies(ex -> assertThat(((IntegracaoMercadoPagoException) ex).getHttpStatus())
                         .isEqualTo(HttpStatus.CONFLICT));
 
-        modoErro.set(422);
         assertThatThrownBy(() -> client.consultarOrder("invalido"))
                 .isInstanceOf(IntegracaoMercadoPagoException.class)
                 .hasMessageContaining("Valor inválido");
 
-        modoErro.set(500);
+        assertThatThrownBy(() -> client.consultarOrder("bad-request"))
+                .isInstanceOf(IntegracaoMercadoPagoException.class)
+                .satisfies(ex -> {
+                    IntegracaoMercadoPagoException mp = (IntegracaoMercadoPagoException) ex;
+                    assertThat(mp.getHttpStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(mp.isErroTransitorio()).isFalse();
+                    assertThat(mp.getMessage()).contains("HTTP 400");
+                });
+
+        assertThatThrownBy(() -> client.consultarOrder("rate-limit"))
+                .isInstanceOf(IntegracaoMercadoPagoException.class)
+                .satisfies(ex -> {
+                    IntegracaoMercadoPagoException mp = (IntegracaoMercadoPagoException) ex;
+                    assertThat(mp.getHttpStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
+                    assertThat(mp.isErroTransitorio()).isTrue();
+                });
+
         assertThatThrownBy(() -> client.consultarOrder("erro-500"))
                 .isInstanceOf(IntegracaoMercadoPagoException.class)
                 .satisfies(ex -> {
@@ -226,7 +296,6 @@ class HttpMercadoPagoPointClientTest {
                     assertThat(mp.isErroTransitorio()).isTrue();
                 });
 
-        modoErro.set(999);
         assertThatThrownBy(() -> client.consultarOrder("timeout"))
                 .isInstanceOf(IntegracaoMercadoPagoException.class)
                 .satisfies(ex -> {
@@ -235,23 +304,42 @@ class HttpMercadoPagoPointClientTest {
                     assertThat(mp.isErroTransitorio()).isTrue();
                 });
 
-        HttpMercadoPagoPointClient clientPortaFechada = criarClient(200L, "http://127.0.0.1:1");
-        assertThatThrownBy(() -> clientPortaFechada.consultarOrder("rede"))
+        assertThatThrownBy(() -> client.consultarOrder("rede"))
                 .isInstanceOf(IntegracaoMercadoPagoException.class)
-                .satisfies(ex -> assertThat(((IntegracaoMercadoPagoException) ex).isErroTransitorio()).isTrue());
+                .satisfies(ex -> {
+                    IntegracaoMercadoPagoException mp = (IntegracaoMercadoPagoException) ex;
+                    assertThat(mp.getHttpStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
+                    assertThat(mp.isErroTransitorio()).isTrue();
+                });
+
+        try {
+            assertThatThrownBy(() -> client.consultarOrder("interrompida"))
+                    .isInstanceOf(IntegracaoMercadoPagoException.class)
+                    .satisfies(ex -> {
+                        IntegracaoMercadoPagoException mp = (IntegracaoMercadoPagoException) ex;
+                        assertThat(mp.getHttpStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
+                        assertThat(mp.isErroTransitorio()).isTrue();
+                    });
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     @Test
-    void enviaInstallmentsCostConformePoliticaDeJuros() {
+    @SuppressWarnings("unchecked")
+    void enviaInstallmentsCostConformePoliticaDeJurosEOmiteCamposOpcionais() throws Exception {
         AtomicReference<String> ultimoBody = new AtomicReference<>();
-        server.createContext("/v1/orders", exchange -> {
-            ultimoBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-            responderJson(exchange, 201, """
-                    {"id":"ORD-COST-01","status":"created","external_reference":"VHL-COST","total_amount":"100.00"}
-                    """);
-        });
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenAnswer(invocation -> {
+                    HttpRequest request = invocation.getArgument(0);
+                    ultimoBody.set(extrairBody(request));
+                    return respostaHttp(201, """
+                            {"id":"ORD-COST-01","status":"created","external_reference":"VHL-COST","total_amount":"100.00"}
+                            """);
+                });
 
-        HttpMercadoPagoPointClient client = criarClient(3000L, baseUrl);
+        HttpMercadoPagoPointClient client = criarClient();
 
         client.criarOrderPoint(new CriarOrderPointCommand(
                 "idem-seller",
@@ -277,14 +365,64 @@ class HttpMercadoPagoPointClientTest {
                 "buyer"
         ));
         assertThat(ultimoBody.get()).contains("\"installments_cost\":\"buyer\"");
+
+        client.criarOrderPoint(new CriarOrderPointCommand(
+                "idem-debito",
+                "VHL-DEBITO",
+                new BigDecimal("40.00"),
+                "PAX_A910__01",
+                "debit_card",
+                null,
+                "PT5M",
+                "  ",
+                null
+        ));
+        assertThat(ultimoBody.get()).contains("\"default_type\":\"debit_card\"");
+        assertThat(ultimoBody.get()).doesNotContain("\"description\"");
+        assertThat(ultimoBody.get()).doesNotContain("\"installments_cost\"");
+
+        client.criarOrderPoint(new CriarOrderPointCommand(
+                "idem-default-installment",
+                "VHL-INST",
+                new BigDecimal("40.00"),
+                "PAX_A910__01",
+                "credit_card",
+                2,
+                "PT5M",
+                null,
+                " "
+        ));
+        assertThat(ultimoBody.get()).contains("\"installments_cost\":\"seller\"");
     }
 
-    private void responderJson(HttpExchange exchange, int status, String json) throws IOException {
-        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().add("Content-Type", "application/json");
-        exchange.sendResponseHeaders(status, bytes.length);
-        try (OutputStream os = exchange.getResponseBody()) {
-            os.write(bytes);
-        }
+    private String extrairBody(HttpRequest request) throws InterruptedException {
+        HttpRequest.BodyPublisher publisher = request.bodyPublisher().orElseThrow();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        CountDownLatch latch = new CountDownLatch(1);
+        publisher.subscribe(new Flow.Subscriber<>() {
+            @Override
+            public void onSubscribe(Flow.Subscription subscription) {
+                subscription.request(Long.MAX_VALUE);
+            }
+
+            @Override
+            public void onNext(ByteBuffer item) {
+                byte[] bytes = new byte[item.remaining()];
+                item.get(bytes);
+                out.writeBytes(bytes);
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+                latch.countDown();
+            }
+
+            @Override
+            public void onComplete() {
+                latch.countDown();
+            }
+        });
+        assertThat(latch.await(2, TimeUnit.SECONDS)).isTrue();
+        return out.toString(StandardCharsets.UTF_8);
     }
 }

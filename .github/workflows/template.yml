@@ -14,25 +14,21 @@ on:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
   build:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v4
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
+      - name: Configurar JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
 
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
-        run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+      - name: Compilar aplicação e testes
+        run: chmod +x mvnw && ./mvnw -B test-compile -DskipTests
 
   test:
     needs: build # Só roda depois que o job 'build' terminar com sucesso
@@ -41,12 +37,28 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Configurar JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+
+      - name: Executar testes e validar cobertura JaCoCo
+        run: chmod +x mvnw && ./mvnw -B verify
+
       - name: Junit Test Dashboard
+        if: always()
         uses: janisz/action@v2
         with:
-          # Substitua pelo caminho real dos seus relatórios XML do JUnit (ex: '**/build/test-results/**/*.xml')
-          paths: '**/test-results/**/*.xml'
-          # Arquivo opcional para salvar o output renderizado (remova a linha se não usar)
+          paths: 'target/surefire-reports/TEST-*.xml'
           output: 'test-report.md'
-          # Tipos de testes para mostrar (opcional: 'all', 'failed', 'skipped')
           show: 'all'
+
+      - name: Publicar relatório de cobertura JaCoCo
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage-report
+          path: target/site/jacoco
+          retention-days: 14
