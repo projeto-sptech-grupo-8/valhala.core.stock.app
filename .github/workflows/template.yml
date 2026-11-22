@@ -31,7 +31,7 @@ jobs:
           cache: 'maven'
 
       - name: Compilar aplicação e testes
-        run: chmod +x mvnw && ./mvnw -B test-compile -DskipTests
+        run: mvn -B test-compile -DskipTests
 
   test:
     needs: build # Só roda depois que o job 'build' terminar com sucesso
@@ -48,7 +48,7 @@ jobs:
           cache: 'maven'
 
       - name: Executar testes e validar cobertura JaCoCo
-        run: chmod +x mvnw && ./mvnw -B verify
+        run: mvn -B verify
 
       - name: Junit Test Dashboard
         if: always()
