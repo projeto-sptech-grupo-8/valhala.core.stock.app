@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoResponseDto;
+import valhalla.core.stock.app.modules.estoque.dto.ResumoMovimentacoesResponseDto;
 import valhalla.core.stock.app.modules.estoque.dto.SaidaDrinkRequestDto;
 import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
 import valhalla.core.stock.app.modules.estoque.service.MovimentacaoEstoqueService;
@@ -123,6 +124,21 @@ public class MovimentacaoEstoqueController {
         );
         byte[] arquivo = movimentacaoExportacaoService.gerarPlanilhaExcel(movimentacoes);
         return RespostaArquivoExcel.anexo("movimentacoes", arquivo);
+    }
+
+    @GetMapping("/resumo")
+    @Operation(summary = "Indicadores de movimentação do período (totais, perdas e ajustes)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Indicadores calculados."),
+            @ApiResponse(responseCode = "403", description = "Usuário sem permissão para visualizar estoque.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    public ResponseEntity<ResumoMovimentacoesResponseDto> resumirMovimentacoes(
+            @Parameter(description = "Últimos N dias, incluindo hoje. Omitido: histórico completo.",
+                    schema = @Schema(minimum = "1", maximum = "3650"))
+            @RequestParam(required = false) @Min(1) @Max(3650) Integer dias
+    ) {
+        return ResponseEntity.ok(movimentacaoEstoqueService.resumir(dias));
     }
 
     @PostMapping

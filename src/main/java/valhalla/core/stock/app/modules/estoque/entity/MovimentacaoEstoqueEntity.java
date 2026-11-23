@@ -64,6 +64,10 @@ public class MovimentacaoEstoqueEntity {
 
     private String motivo;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "motivo_perda", length = 30)
+    private MotivoPerda motivoPerda;
+
     @Column(length = 100)
     private String lote;
 

@@ -31,6 +31,9 @@ tags:
     \ pelas entradas e consumidos pelas saídas (FEFO) em /movimentacoes-estoque."
 - name: Movimentações de estoque
   description: Histórico e alterações auditáveis do saldo dos produtos.
+- name: Relatórios
+  description: "Relatórios gerenciais agregados do estabelecimento autenticado, por\
+    \ período em dias."
 - name: Dashboard
   description: Indicadores consolidados do estabelecimento autenticado.
 - name: Receitas de drinks
@@ -44,6 +47,8 @@ tags:
 - name: Auditoria do caixa
   description: "Trilha de eventos do caixa, incluindo configuração, abertura, fechamento,\
     \ sangria, reforço e divergências."
+- name: Financeiro
+  description: "Saldo, fluxo de caixa, resultado (DRE) e contas a pagar e receber."
 - name: Estabelecimento
   description: Consulta e atualização dos dados cadastrais do estabelecimento autenticado.
 - name: Categorias
@@ -60,6 +65,55 @@ tags:
   description: Sincronização e modo de operação (PDV/STANDALONE) das maquininhas Mercado
     Pago Point.
 paths:
+  /financeiro/contas/{idConta}:
+    get:
+      tags:
+      - Financeiro
+      summary: Consultar conta
+      operationId: obterConta
+      parameters:
+      - name: idConta
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaContaDto"
+      security:
+      - accessTokenCookie: []
+    put:
+      tags:
+      - Financeiro
+      summary: Editar conta em aberto
+      operationId: atualizarConta
+      parameters:
+      - name: idConta
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoContaDto"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaContaDto"
+      security:
+      - accessTokenCookie: []
   /estabelecimento:
     get:
       tags:
@@ -1177,6 +1231,161 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /financeiro/contas:
+    get:
+      tags:
+      - Financeiro
+      summary: "Listar contas a pagar e receber, ordenadas pelo vencimento"
+      operationId: listarContas
+      parameters:
+      - name: tipo
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - PAGAR
+          - RECEBER
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - ABERTA
+          - PAGA
+          - CANCELADA
+      - name: centroCusto
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - COMPRAS
+          - OPERACIONAL
+          - VENDAS
+          - ADMINISTRATIVO
+      - name: vencimentoDe
+        in: query
+        description: Vencimento a partir de (yyyy-MM-dd).
+        required: false
+        schema:
+          type: string
+          format: date
+      - name: vencimentoAte
+        in: query
+        description: "Vencimento até (yyyy-MM-dd), inclusive."
+        required: false
+        schema:
+          type: string
+          format: date
+      - name: pagina
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+          minimum: 0
+      - name: tamanho
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 20
+          maximum: 100
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaPaginadaDtoRespostaContaDto"
+      security:
+      - accessTokenCookie: []
+    post:
+      tags:
+      - Financeiro
+      summary: Cadastrar conta a pagar ou a receber
+      operationId: criarConta
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoContaDto"
+        required: true
+      responses:
+        "201":
+          description: Conta cadastrada.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaContaDto"
+        "400":
+          description: Dados inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Sem permissão GERENCIAR_FINANCEIRO.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /financeiro/contas/{idConta}/cancelamento:
+    post:
+      tags:
+      - Financeiro
+      summary: Cancelar conta em aberto
+      operationId: cancelarConta
+      parameters:
+      - name: idConta
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaContaDto"
+      security:
+      - accessTokenCookie: []
+  /financeiro/contas/{idConta}/baixa:
+    post:
+      tags:
+      - Financeiro
+      summary: Baixar conta (registrar pagamento ou recebimento)
+      operationId: baixarConta
+      parameters:
+      - name: idConta
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoBaixaContaDto"
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaContaDto"
       security:
       - accessTokenCookie: []
   /categorias:
@@ -2718,6 +2927,62 @@ paths:
                 $ref: "#/components/schemas/ApiErrorResponse"
       security:
       - csrfTokenHeader: []
+  /auth/redefinir-senha:
+    post:
+      tags:
+      - Autenticação
+      summary: Redefinir senha
+      description: Define uma nova senha a partir do token recebido por e-mail. Todas
+        as sessões ativas do usuário são encerradas.
+      operationId: redefinirSenha
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoRedefinicaoSenhaDto"
+        required: true
+      responses:
+        "204":
+          description: Senha redefinida e cookies de sessão removidos.
+          headers:
+            Set-Cookie:
+              description: "Cookies accessToken, refreshToken e XSRF-TOKEN são expirados."
+              style: simple
+        "400":
+          description: "Dados de entrada inválidos ou token inválido, expirado ou\
+            \ já utilizado."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+  /auth/recuperar-senha:
+    post:
+      tags:
+      - Autenticação
+      summary: Solicitar recuperação de senha
+      description: "Envia para o e-mail informado um link de uso único para redefinir\
+        \ a senha. A resposta é sempre a mesma, independentemente de o e-mail estar\
+        \ cadastrado."
+      operationId: solicitarRecuperacaoSenha
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequisicaoRecuperacaoSenhaDto"
+        required: true
+      responses:
+        "202":
+          description: Solicitação recebida.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaMensagemDto"
+        "400":
+          description: Dados de entrada inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
   /auth/logout:
     post:
       tags:
@@ -3784,6 +4049,150 @@ paths:
                 $ref: "#/components/schemas/ApiErrorResponse"
       security:
       - accessTokenCookie: []
+  /relatorios/ruptura:
+    get:
+      tags:
+      - Relatórios
+      summary: Dias com estoque zerado e venda perdida estimada por produto
+      operationId: rupturas
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RelatorioResponseDtoRuptura"
+      security:
+      - accessTokenCookie: []
+  /relatorios/perdas:
+    get:
+      tags:
+      - Relatórios
+      summary: Perdas a custo por motivo e período
+      operationId: perdas
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PerdasResponseDto"
+      security:
+      - accessTokenCookie: []
+  /relatorios/margem-categorias:
+    get:
+      tags:
+      - Relatórios
+      summary: "Faturamento, CMV e margem bruta por categoria"
+      operationId: margemCategorias
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RelatorioResponseDtoMargemCategoria"
+      security:
+      - accessTokenCookie: []
+  /relatorios/horarios:
+    get:
+      tags:
+      - Relatórios
+      summary: Vendas por dia da semana (0 = segunda) e hora
+      operationId: horarios
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RelatorioResponseDtoHorario"
+      security:
+      - accessTokenCookie: []
+  /relatorios/canais:
+    get:
+      tags:
+      - Relatórios
+      summary: Comparativo de vendas por canal
+      operationId: canais
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RelatorioResponseDtoCanal"
+      security:
+      - accessTokenCookie: []
+  /relatorios/abc:
+    get:
+      tags:
+      - Relatórios
+      summary: Curva ABC de faturamento por produto
+      operationId: curvaAbc
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RelatorioResponseDtoCurvaAbc"
+      security:
+      - accessTokenCookie: []
   /produtos/exportar:
     get:
       tags:
@@ -3867,6 +4276,36 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para visualizar estoque.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /movimentacoes-estoque/resumo:
+    get:
+      tags:
+      - Movimentações de estoque
+      summary: "Indicadores de movimentação do período (totais, perdas e ajustes)"
+      operationId: resumirMovimentacoes
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Omitido: histórico completo."
+        required: false
+        schema:
+          type: string
+          maximum: 3650
+          minimum: 1
+      responses:
+        "200":
+          description: Indicadores calculados.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResumoMovimentacoesResponseDto"
         "403":
           description: Usuário sem permissão para visualizar estoque.
           content:
@@ -4089,6 +4528,69 @@ paths:
                 $ref: "#/components/schemas/ApiErrorResponse"
         "403":
           description: Usuário sem permissão para visualizar estoque.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /financeiro/resumo:
+    get:
+      tags:
+      - Financeiro
+      summary: "Visão geral: saldo, contas dos próximos 30 dias, faturamento do mê\
+        s e fluxo de 6 meses"
+      operationId: resumo
+      responses:
+        "200":
+          description: Resumo calculado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResumoFinanceiroDto"
+        "403":
+          description: Sem permissão VISUALIZAR_FINANCEIRO.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /financeiro/resultado:
+    get:
+      tags:
+      - Financeiro
+      summary: Resultado (DRE gerencial) e vendas por categoria do período
+      description: Receita e CMV das vendas concluídas; despesas das contas a pagar
+        fixas e variáveis com vencimento no período. Compras de mercadoria não entram
+        (o custo já está no CMV).
+      operationId: resultado
+      parameters:
+      - name: inicio
+        in: query
+        description: Primeiro dia do período (yyyy-MM-dd).
+        required: true
+        schema:
+          type: string
+          format: date
+        example: 2026-11-01
+      - name: fim
+        in: query
+        description: "Último dia do período, inclusive (yyyy-MM-dd)."
+        required: true
+        schema:
+          type: string
+          format: date
+        example: 2026-11-30
+      responses:
+        "200":
+          description: Resultado calculado.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResultadoFinanceiroDto"
+        "400":
+          description: Período inválido ou maior que 366 dias.
           content:
             '*/*':
               schema:
@@ -4708,6 +5210,109 @@ paths:
       - accessTokenCookie: []
 components:
   schemas:
+    RequisicaoContaDto:
+      type: object
+      description: "Conta a pagar ou a receber. Na edição, o tipo não pode mudar."
+      properties:
+        tipo:
+          type: string
+          enum:
+          - PAGAR
+          - RECEBER
+          example: PAGAR
+        descricao:
+          type: string
+          description: "Fornecedor, cliente ou natureza da conta."
+          example: Aluguel · Adega
+          maxLength: 150
+          minLength: 0
+        valor:
+          type: number
+          example: "3800.00"
+        vencimento:
+          type: string
+          format: date
+          example: 2026-12-05
+        centroCusto:
+          type: string
+          enum:
+          - COMPRAS
+          - OPERACIONAL
+          - VENDAS
+          - ADMINISTRATIVO
+          example: OPERACIONAL
+        categoria:
+          type: string
+          description: Obrigatória em contas a pagar e proibida em contas a receber.
+            MERCADORIA (compra de estoque) entra só no fluxo de caixa; DESPESA_FIXA
+            e DESPESA_VARIAVEL entram no resultado.
+          enum:
+          - MERCADORIA
+          - DESPESA_FIXA
+          - DESPESA_VARIAVEL
+          example: DESPESA_FIXA
+        observacao:
+          type: string
+          maxLength: 500
+          minLength: 0
+      required:
+      - centroCusto
+      - descricao
+      - tipo
+      - valor
+      - vencimento
+    RespostaContaDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tipo:
+          type: string
+          enum:
+          - PAGAR
+          - RECEBER
+        descricao:
+          type: string
+        valor:
+          type: number
+        vencimento:
+          type: string
+          format: date
+        centroCusto:
+          type: string
+          enum:
+          - COMPRAS
+          - OPERACIONAL
+          - VENDAS
+          - ADMINISTRATIVO
+        categoria:
+          type: string
+          enum:
+          - MERCADORIA
+          - DESPESA_FIXA
+          - DESPESA_VARIAVEL
+        status:
+          type: string
+          enum:
+          - ABERTA
+          - PAGA
+          - CANCELADA
+        pagoEm:
+          type: string
+          format: date
+        valorPago:
+          type: number
+        observacao:
+          type: string
+        diasParaVencer:
+          type: integer
+          format: int32
+          description: "Dias até o vencimento (negativo: vencida). Nulo quando a conta\
+            \ não está em aberto."
+        criadoEm:
+          type: string
+          format: date-time
     EstabelecimentoAtualizacaoRequestDto:
       type: object
       properties:
@@ -5761,6 +6366,12 @@ components:
         atualizadoEm:
           type: string
           format: date-time
+        saidasUltimos30Dias:
+          type: number
+          description: "Saídas por venda e consumo (SAIDA e SAIDA_DRINK, descontados\
+            \ os estornos de vendas canceladas) nos últimos 30 dias, na unidade-base\
+            \ do estoque. Base do giro e da cobertura. Nulo para drinks e fora da\
+            \ listagem/consulta."
     MovimentacaoRequestDto:
       type: object
       description: Movimentação direta de um produto padrão. A quantidade usa a unidade-base
@@ -5809,6 +6420,16 @@ components:
           description: "Lote específico a consumir em SAIDA, AJUSTE_NEGATIVO ou PERDA\
             \ (ex.: baixa de lote vencido). Omitido: FEFO."
           example: 42
+        motivoPerda:
+          type: string
+          description: "Classificação da perda; obrigatória em PERDA e proibida nos\
+            \ demais tipos. Omitida em PERDA (clientes antigos): deduzida do texto\
+            \ do motivo."
+          enum:
+          - QUEBRA
+          - VENCIMENTO
+          - CONSUMO_INTERNO
+          example: VENCIMENTO
       required:
       - produtoId
       - quantidade
@@ -5861,6 +6482,12 @@ components:
           type: number
         motivo:
           type: string
+        motivoPerda:
+          type: string
+          enum:
+          - QUEBRA
+          - VENCIMENTO
+          - CONSUMO_INTERNO
         lote:
           type: string
         numeroNotaFiscal:
@@ -5893,6 +6520,21 @@ components:
       required:
       - drinkId
       - quantidade
+    RequisicaoBaixaContaDto:
+      type: object
+      description: Baixa (pagamento ou recebimento) de uma conta em aberto.
+      properties:
+        pagoEm:
+          type: string
+          format: date
+          description: "Data do pagamento/recebimento. Omitida: hoje. Não pode ser\
+            \ futura."
+          example: 2026-11-17
+        valorPago:
+          type: number
+          description: "Valor efetivamente pago, com juros ou desconto. Omitido: o\
+            \ valor da conta."
+          example: "3800.00"
     CategoriaRequestDto:
       type: object
       properties:
@@ -6752,6 +7394,42 @@ components:
         usuario:
           type: string
           example: Administrador Inicial
+    RequisicaoRedefinicaoSenhaDto:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Token recebido no link de recuperação enviado por e-mail
+          example: q1w2e3r4t5y6u7i8o9p0a1s2d3f4g5h6j7k8l9z0x1c
+          maxLength: 255
+          minLength: 0
+        novaSenha:
+          type: string
+          description: Nova senha do usuário. Deve possuir entre 8 e 72 caracteres
+          example: NovaSenha@123
+          maxLength: 72
+          minLength: 8
+      required:
+      - novaSenha
+      - token
+    RequisicaoRecuperacaoSenhaDto:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          description: E-mail da conta cuja senha será recuperada
+          example: usuario@exemplo.com
+          maxLength: 255
+          minLength: 0
+      required:
+      - email
+    RespostaMensagemDto:
+      type: object
+      properties:
+        mensagem:
+          type: string
+          description: Mensagem descritiva do resultado da operação
     RequisicaoLoginDto:
       type: object
       properties:
@@ -6960,6 +7638,198 @@ components:
           format: date-time
           description: Data e hora em que o evento ocorreu.
           example: 2026-11-22T14:32:00
+    Referencia:
+      type: object
+      properties:
+        dias:
+          type: integer
+          format: int32
+        de:
+          type: string
+          format: date
+        ate:
+          type: string
+          format: date
+        fusoHorario:
+          type: string
+    RelatorioResponseDtoRuptura:
+      type: object
+      properties:
+        referencia:
+          $ref: "#/components/schemas/Referencia"
+        totais:
+          $ref: "#/components/schemas/Totais"
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/Ruptura"
+    Ruptura:
+      type: object
+      properties:
+        produtoId:
+          type: string
+          format: uuid
+        nome:
+          type: string
+        categoria:
+          type: string
+        dias:
+          type: integer
+          format: int32
+        ocorrencias:
+          type: integer
+          format: int32
+        unidadesPerdidas:
+          type: number
+        vendaPerdida:
+          type: number
+        percentualDias:
+          type: number
+    Totais:
+      type: object
+      properties:
+        vendas:
+          type: integer
+          format: int64
+        faturamento:
+          type: number
+    Perda:
+      type: object
+      properties:
+        periodo:
+          type: string
+          format: date
+        motivo:
+          type: string
+        valor:
+          type: number
+    PerdasResponseDto:
+      type: object
+      properties:
+        referencia:
+          $ref: "#/components/schemas/Referencia"
+        totais:
+          $ref: "#/components/schemas/Totais"
+        granularidade:
+          type: string
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/Perda"
+    MargemCategoria:
+      type: object
+      properties:
+        categoria:
+          type: string
+        quantidade:
+          type: number
+        receita:
+          type: number
+        cmv:
+          type: number
+        lucro:
+          type: number
+        margem:
+          type: number
+        participacao:
+          type: number
+    RelatorioResponseDtoMargemCategoria:
+      type: object
+      properties:
+        referencia:
+          $ref: "#/components/schemas/Referencia"
+        totais:
+          $ref: "#/components/schemas/Totais"
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/MargemCategoria"
+    Horario:
+      type: object
+      properties:
+        diaSemana:
+          type: integer
+          format: int32
+        hora:
+          type: integer
+          format: int32
+        vendas:
+          type: integer
+          format: int64
+        receita:
+          type: number
+    RelatorioResponseDtoHorario:
+      type: object
+      properties:
+        referencia:
+          $ref: "#/components/schemas/Referencia"
+        totais:
+          $ref: "#/components/schemas/Totais"
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/Horario"
+    Canal:
+      type: object
+      properties:
+        canal:
+          type: string
+        vendas:
+          type: integer
+          format: int64
+        faturamento:
+          type: number
+        ticketMedio:
+          type: number
+        participacao:
+          type: number
+        itensPorVenda:
+          type: number
+    RelatorioResponseDtoCanal:
+      type: object
+      properties:
+        referencia:
+          $ref: "#/components/schemas/Referencia"
+        totais:
+          $ref: "#/components/schemas/Totais"
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/Canal"
+    CurvaAbc:
+      type: object
+      properties:
+        produtoId:
+          type: string
+          format: uuid
+        nome:
+          type: string
+        categoria:
+          type: string
+        quantidade:
+          type: number
+        receita:
+          type: number
+        posicao:
+          type: integer
+          format: int32
+        percentual:
+          type: number
+        acumulado:
+          type: number
+        classe:
+          type: string
+    RelatorioResponseDtoCurvaAbc:
+      type: object
+      properties:
+        referencia:
+          $ref: "#/components/schemas/Referencia"
+        totais:
+          $ref: "#/components/schemas/Totais"
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/CurvaAbc"
     RespostaPaginadaDtoProdutoResponseDto:
       type: object
       properties:
@@ -7006,6 +7876,45 @@ components:
           type: boolean
         ultima:
           type: boolean
+    ResumoMovimentacoesResponseDto:
+      type: object
+      description: "Indicadores das movimentações do período, contados no banco (nã\
+        o só a página carregada)."
+      properties:
+        desde:
+          type: string
+          format: date
+          description: Início do período (inclusivo); nulo quando é o histórico completo.
+        total:
+          type: integer
+          format: int64
+        entradas:
+          type: integer
+          format: int64
+          description: ENTRADA_INICIAL e ENTRADA.
+        saidas:
+          type: integer
+          format: int64
+          description: "SAIDA, SAIDA_DRINK e PERDA."
+        perdas:
+          type: integer
+          format: int64
+        ajustes:
+          type: integer
+          format: int64
+          description: AJUSTE_POSITIVO e AJUSTE_NEGATIVO lançados manualmente (sem
+            os estornos de venda).
+        estornosVenda:
+          type: integer
+          format: int64
+          description: Ajustes automáticos que devolveram ao estoque itens de vendas
+            canceladas.
+        taxaPerdasPercentual:
+          type: number
+          description: "Perdas ÷ saídas, de 0 a 100."
+        taxaAjustesPercentual:
+          type: number
+          description: "Ajustes ÷ total, de 0 a 100."
     LoteResponseDto:
       type: object
       description: Saldo de um lote. Quantidades na unidade-base do estoque (ML para
@@ -7107,6 +8016,164 @@ components:
         valorEmRisco:
           type: number
           description: Valor a custo dos lotes vencidos ou que vencem em até 30 dias.
+    ContasEmAberto:
+      type: object
+      properties:
+        valor:
+          type: number
+        quantidade:
+          type: integer
+          format: int64
+        vencidas:
+          type: integer
+          format: int64
+        vencemEmAte7Dias:
+          type: integer
+          format: int64
+    Faturamento:
+      type: object
+      description: "Mês corrente até hoje, comparado ao mesmo intervalo de dias do\
+        \ mês anterior."
+      properties:
+        mesAtual:
+          type: number
+        mesAnteriorMesmoPeriodo:
+          type: number
+        crescimentoPercentual:
+          type: number
+          description: Variação percentual; nula sem faturamento no mês anterior.
+        cmvMesAtual:
+          type: number
+        cmvPercentual:
+          type: number
+          description: "CMV ÷ faturamento do mês, de 0 a 100."
+        vendasMesAtual:
+          type: integer
+          format: int64
+    FluxoMensal:
+      type: object
+      description: "mes no formato yyyy-MM. Receitas: vendas e contas recebidas; despesas:\
+        \ contas pagas."
+      properties:
+        mes:
+          type: string
+        receitas:
+          type: number
+        despesas:
+          type: number
+        saldo:
+          type: number
+    ResumoFinanceiroDto:
+      type: object
+      description: "Visão geral financeira na data de referência (hoje, no fuso da\
+        \ operação)."
+      properties:
+        referencia:
+          type: string
+          format: date
+        saldoRealizado:
+          type: number
+          description: "Recebido das vendas + contas recebidas − contas pagas, desde\
+            \ o início dos registros."
+        aReceber30Dias:
+          $ref: "#/components/schemas/ContasEmAberto"
+          description: Contas a receber em aberto que vencem nos próximos 30 dias
+            (inclui as vencidas).
+        aPagar30Dias:
+          $ref: "#/components/schemas/ContasEmAberto"
+          description: Contas a pagar em aberto que vencem nos próximos 30 dias (inclui
+            as vencidas).
+        coberturaContasAPagar:
+          type: number
+          description: Saldo realizado ÷ a pagar em 30 dias. Nulo sem contas a pagar.
+        faturamento:
+          $ref: "#/components/schemas/Faturamento"
+        fluxoCaixa:
+          type: array
+          description: "Fluxo de caixa realizado dos últimos 6 meses, do mais antigo\
+            \ ao atual."
+          items:
+            $ref: "#/components/schemas/FluxoMensal"
+    ResultadoFinanceiroDto:
+      type: object
+      description: "Resultado (DRE gerencial) do período. Percentuais de 0 a 100,\
+        \ nulos sem receita."
+      properties:
+        inicio:
+          type: string
+          format: date
+        fim:
+          type: string
+          format: date
+        receitaBruta:
+          type: number
+          description: "Vendas concluídas no período, inclusive as canceladas depois."
+        cancelamentos:
+          type: number
+          description: Vendas do período que foram canceladas.
+        receitaLiquida:
+          type: number
+        cmv:
+          type: number
+          description: "Custo das mercadorias vendidas, pelo custo gravado em cada\
+            \ venda."
+        lucroBruto:
+          type: number
+        margemBrutaPercentual:
+          type: number
+        despesasFixas:
+          type: number
+          description: Contas a pagar DESPESA_FIXA com vencimento no período (não
+            canceladas).
+        despesasVariaveis:
+          type: number
+          description: Contas a pagar DESPESA_VARIAVEL com vencimento no período (não
+            canceladas).
+        lucroLiquido:
+          type: number
+        margemLiquidaPercentual:
+          type: number
+        cmvPercentual:
+          type: number
+        vendas:
+          type: integer
+          format: int64
+        vendasPorCategoria:
+          type: array
+          items:
+            $ref: "#/components/schemas/VendaCategoria"
+    VendaCategoria:
+      type: object
+      properties:
+        categoria:
+          type: string
+        valor:
+          type: number
+        participacaoPercentual:
+          type: number
+    RespostaPaginadaDtoRespostaContaDto:
+      type: object
+      properties:
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/RespostaContaDto"
+        pagina:
+          type: integer
+          format: int32
+        tamanho:
+          type: integer
+          format: int32
+        totalItens:
+          type: integer
+          format: int64
+        totalPaginas:
+          type: integer
+          format: int32
+        primeira:
+          type: boolean
+        ultima:
+          type: boolean
     AlertaEstoqueDashboardResponseDto:
       type: object
       description: Produto com saldo abaixo do estoque mínimo
@@ -7143,6 +8210,8 @@ components:
           $ref: "#/components/schemas/ModuloDashboardResponseDto"
         caixa:
           $ref: "#/components/schemas/ModuloDashboardResponseDto"
+        vendas:
+          $ref: "#/components/schemas/VendasDashboardResponseDto"
     EstoqueDashboardResponseDto:
       type: object
       description: Indicadores e alertas de estoque da dashboard
@@ -7172,6 +8241,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AlertaEstoqueDashboardResponseDto"
+    FormaPagamento:
+      type: object
+      description: "forma: DINHEIRO, DEBITO, CREDITO ou PIX."
+      properties:
+        forma:
+          type: string
+        valor:
+          type: number
     ModuloDashboardResponseDto:
       type: object
       description: Situação de um módulo ainda não integrado à dashboard
@@ -7180,6 +8257,7 @@ components:
           type: string
           enum:
           - INDISPONIVEL
+          - DISPONIVEL
     MovimentacaoMensalDashboardResponseDto:
       type: object
       description: Quantidade de registros de entrada e saída em um mês
@@ -7257,6 +8335,28 @@ components:
           type: string
         motivo:
           type: string
+    VendasDashboardResponseDto:
+      type: object
+      description: Vendas de hoje e referência para a meta diária. Nulo para quem
+        não pode ver vendas.
+      properties:
+        vendasHoje:
+          type: integer
+          format: int64
+        faturamentoHoje:
+          type: number
+        ticketMedioHoje:
+          type: number
+          description: Nulo sem vendas hoje.
+        porFormaPagamento:
+          type: array
+          description: Recebido hoje por forma de pagamento (dinheiro já sem o troco).
+          items:
+            $ref: "#/components/schemas/FormaPagamento"
+        mediaDiariaUltimos30Dias:
+          type: number
+          description: Faturamento médio por dia nos 30 dias anteriores a hoje (base
+            da meta diária).
     RespostaPaginadaDtoCategoriaResponseDto:
       type: object
       properties:

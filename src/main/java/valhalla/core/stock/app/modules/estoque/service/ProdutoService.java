@@ -29,6 +29,7 @@ import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.Paginacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
 import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -118,8 +119,25 @@ public class ProdutoService {
         );
         List<ProdutoEntity> produtos = resultado.getContent();
         Map<UUID, EstoqueEntity> estoques = estoquesPorProduto(produtos);
-        return RespostaPaginadaDto.de(resultado,
-                produto -> ProdutoMapper.paraResposta(produto, estoques.get(produto.getId())));
+        Map<UUID, BigDecimal> saidas = saidasUltimos30Dias(produtos);
+        return RespostaPaginadaDto.de(resultado, produto -> ProdutoMapper.paraResposta(
+                produto, estoques.get(produto.getId()), saidas.get(produto.getId())));
+    }
+
+    /** Giro: saídas por venda/consumo nos últimos 30 dias, só para produtos com estoque (padrão). */
+    private Map<UUID, BigDecimal> saidasUltimos30Dias(List<ProdutoEntity> produtos) {
+        List<UUID> ids = produtos.stream()
+                .filter(produto -> produto.getTipo() == ProdutoTipo.PADRAO)
+                .map(ProdutoEntity::getId)
+                .toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, BigDecimal> saidas = new HashMap<>();
+        ids.forEach(id -> saidas.put(id, BigDecimal.ZERO));
+        movimentacaoEstoqueRepository.somarSaidasPorProduto(ids, FusoHorarioOperacao.agora().minusDays(30))
+                .forEach(linha -> saidas.put(linha.getProdutoId(), linha.getQuantidade().max(BigDecimal.ZERO)));
+        return saidas;
     }
 
     @Transactional(readOnly = true)
@@ -197,7 +215,7 @@ public class ProdutoService {
     public ProdutoResponseDto buscarProduto(UUID idProduto) {
         ProdutoEntity produto = buscarProdutoDoEstabelecimentoAtual(idProduto);
         EstoqueEntity estoque = estoqueRepository.findByProdutoId(produto.getId()).orElse(null);
-        return ProdutoMapper.paraResposta(produto, estoque);
+        return ProdutoMapper.paraResposta(produto, estoque, saidasUltimos30Dias(List.of(produto)).get(produto.getId()));
     }
 
     @Transactional

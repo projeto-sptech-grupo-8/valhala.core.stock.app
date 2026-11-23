@@ -38,6 +38,10 @@ public class CsrfTokenValidationFilter extends OncePerRequestFilter {
     private static final Set<String> METODOS_PROTEGIDOS = Set.of(
             HttpMethod.POST.name(), HttpMethod.PUT.name(), HttpMethod.PATCH.name(), HttpMethod.DELETE.name()
     );
+    /** Endpoints públicos que não dependem de uma sessão e, portanto, não exigem token CSRF. */
+    private static final Set<String> ENDPOINTS_PUBLICOS = Set.of(
+            "/auth/login", "/auth/recuperar-senha", "/auth/redefinir-senha"
+    );
     private static final Logger LOGGER = LoggerFactory.getLogger(CsrfTokenValidationFilter.class);
 
     private final CsrfTokenStore csrfTokenStore;
@@ -59,7 +63,7 @@ public class CsrfTokenValidationFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !METODOS_PROTEGIDOS.contains(request.getMethod()) || "/auth/login".equals(request.getServletPath());
+        return !METODOS_PROTEGIDOS.contains(request.getMethod()) || ENDPOINTS_PUBLICOS.contains(request.getServletPath());
     }
 
     @Override

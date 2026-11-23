@@ -30,7 +30,11 @@ public record ProdutoResponseDto(
         String lote,
         LocalDate validade,
         LocalDateTime criadoEm,
-        LocalDateTime atualizadoEm
+        LocalDateTime atualizadoEm,
+        @Schema(description = "Saídas por venda e consumo (SAIDA e SAIDA_DRINK, descontados os estornos de vendas "
+                + "canceladas) nos últimos 30 dias, na unidade-base do estoque. Base do giro e da cobertura. "
+                + "Nulo para drinks e fora da listagem/consulta.")
+        BigDecimal saidasUltimos30Dias
 ) {
     public ProdutoResponseDto(
             UUID id,
@@ -56,6 +60,6 @@ public record ProdutoResponseDto(
         this(id, sku, nome, tipo, categoriaId, categoriaNome, unidadeMedida,
                 precoCusto, precoVenda, margemPercentual, fracionado,
                 volumeEmbalagemMl, fardo, unidadesPorFardo, ativo, quantidadeEstoque,
-                estoqueMinimo, null, null, criadoEm, atualizadoEm);
+                estoqueMinimo, null, null, criadoEm, atualizadoEm, null);
     }
 }

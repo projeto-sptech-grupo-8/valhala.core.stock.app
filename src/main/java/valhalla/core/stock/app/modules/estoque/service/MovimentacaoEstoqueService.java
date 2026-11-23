@@ -21,10 +21,12 @@ import valhalla.core.stock.app.modules.caixa.exception.EstoqueInsuficientePedido
 import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoLoteResponseDto;
 import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoResponseDto;
+import valhalla.core.stock.app.modules.estoque.dto.ResumoMovimentacoesResponseDto;
 import valhalla.core.stock.app.modules.estoque.dto.SaidaDrinkRequestDto;
 import valhalla.core.stock.app.modules.estoque.entity.ComposicaoDrinkEntity;
 import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.LoteEstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.MotivoPerda;
 import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoEstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoLoteEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
@@ -46,6 +48,7 @@ import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.Paginacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
 import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -217,6 +220,53 @@ public class MovimentacaoEstoqueService {
         return especificacao;
     }
 
+    /** Indicadores do período: últimos {@code dias} dias incluindo hoje; nulo = histórico completo. */
+    @Transactional(readOnly = true)
+    @PreAuthorize("@permissionAuthorizationService.hasPermission('VISUALIZAR_ESTOQUE', authentication)")
+    public ResumoMovimentacoesResponseDto resumir(Integer dias) {
+        LocalDate desde = dias == null ? null : FusoHorarioOperacao.agora().toLocalDate().minusDays(dias - 1L);
+        Map<TipoMovimentacaoEstoque, Long> porTipo = new EnumMap<>(TipoMovimentacaoEstoque.class);
+        long estornosVenda = 0;
+        for (MovimentacaoEstoqueRepository.ContagemTipoProjection linha : movimentacaoEstoqueRepository.contarPorTipo(
+                obterIdEstabelecimentoAutenticado(),
+                desde == null ? LocalDate.of(1970, 1, 1).atStartOfDay() : desde.atStartOfDay())) {
+            if (linha.getTipo() == TipoMovimentacaoEstoque.AJUSTE_POSITIVO && Boolean.TRUE.equals(linha.getVinculadaVenda())) {
+                estornosVenda += linha.getQuantidade();
+            } else {
+                porTipo.merge(linha.getTipo(), linha.getQuantidade(), Long::sum);
+            }
+        }
+        long entradas = contagem(porTipo, TipoMovimentacaoEstoque.ENTRADA_INICIAL, TipoMovimentacaoEstoque.ENTRADA);
+        long perdas = contagem(porTipo, TipoMovimentacaoEstoque.PERDA);
+        long saidas = contagem(porTipo, TipoMovimentacaoEstoque.SAIDA, TipoMovimentacaoEstoque.SAIDA_DRINK) + perdas;
+        long ajustes = contagem(porTipo, TipoMovimentacaoEstoque.AJUSTE_POSITIVO, TipoMovimentacaoEstoque.AJUSTE_NEGATIVO);
+        long total = entradas + saidas + ajustes + estornosVenda;
+        return new ResumoMovimentacoesResponseDto(desde, total, entradas, saidas, perdas, ajustes, estornosVenda,
+                percentual(perdas, saidas), percentual(ajustes, total));
+    }
+
+    private static long contagem(Map<TipoMovimentacaoEstoque, Long> porTipo, TipoMovimentacaoEstoque... tipos) {
+        long soma = 0;
+        for (TipoMovimentacaoEstoque tipo : tipos) {
+            soma += porTipo.getOrDefault(tipo, 0L);
+        }
+        return soma;
+    }
+
+    private static BigDecimal percentual(long parte, long todo) {
+        return todo == 0 ? BigDecimal.ZERO : BigDecimal.valueOf(parte * 100.0 / todo).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private MotivoPerda resolverMotivoPerda(TipoMovimentacaoEstoque tipo, MotivoPerda informado, String motivo) {
+        if (tipo != TipoMovimentacaoEstoque.PERDA) {
+            if (informado != null) {
+                throw new IllegalArgumentException("O motivo da perda só se aplica a movimentações do tipo PERDA");
+            }
+            return null;
+        }
+        return informado != null ? informado : MotivoPerda.inferir(motivo);
+    }
+
     @Transactional
     @PreAuthorize("@permissionAuthorizationService.hasPermission('MOVIMENTAR_ESTOQUE', authentication)")
     public MovimentacaoResponseDto registrarMovimentacao(MovimentacaoRequestDto dto) {
@@ -235,7 +285,8 @@ public class MovimentacaoEstoqueService {
         String motivo = comporMotivoMovimentacao(normalizar(dto.motivo()), dto.quantidade(), Boolean.TRUE.equals(dto.emFardo()));
         MovimentacaoCommand command = new MovimentacaoCommand(
                 dto.tipo(), quantidadeBase, motivo, normalizar(dto.lote()),
-                normalizar(dto.numeroNotaFiscal()), null, null, dto.validade(), dto.loteId()
+                normalizar(dto.numeroNotaFiscal()), null, null, dto.validade(), dto.loteId(),
+                resolverMotivoPerda(dto.tipo(), dto.motivoPerda(), normalizar(dto.motivo())), null
         );
         UUID usuarioId = obterIdUsuarioAutenticado();
         MovimentacaoResponseDto response = aplicarMovimentacao(estoque, command, usuarioId, nomeUsuario(usuarioId));
@@ -790,6 +841,7 @@ public class MovimentacaoEstoqueService {
         movimentacao.setSaldoAnterior(saldoAnterior);
         movimentacao.setSaldoPosterior(saldoPosterior);
         movimentacao.setMotivo(command.motivo());
+        movimentacao.setMotivoPerda(command.motivoPerda());
         movimentacao.setLote(codigosLotes != null ? codigosLotes : command.lote());
         movimentacao.setNumeroNotaFiscal(command.numeroNotaFiscal());
         movimentacao.setOrigemDrinkId(command.origemDrinkId());
@@ -875,7 +927,7 @@ public class MovimentacaoEstoqueService {
                 produto.isFracionado() ? "ML" : produto.getUnidadeMedida(),
                 movimentacao.getTipo(), movimentacao.getQuantidade(),
                 movimentacao.getSaldoAnterior(), movimentacao.getSaldoPosterior(),
-                movimentacao.getMotivo(), movimentacao.getLote(), movimentacao.getNumeroNotaFiscal(),
+                movimentacao.getMotivo(), movimentacao.getMotivoPerda(), movimentacao.getLote(), movimentacao.getNumeroNotaFiscal(),
                 movimentacao.getOrigemDrinkId(), receitaAplicadaParaResposta(movimentacao.getReceitaAplicada()), movimentacao.getOcorridoEm(),
                 lotes
         );
