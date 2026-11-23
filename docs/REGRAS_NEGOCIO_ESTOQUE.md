@@ -62,6 +62,13 @@ SAIDA_DRINK
 - Entradas podem registrar número de nota fiscal e lote; ambos são opcionais.
 - Lote pertence à entrada/movimentação, e não ao cadastro fixo de Produto.
 - Correções devem ser feitas por ajuste ou estorno, preservando o histórico.
+- Toda `PERDA` tem um `motivoPerda`: `QUEBRA`, `VENCIMENTO` ou `CONSUMO_INTERNO`. Ele é proibido nos
+  demais tipos. Se o cliente não o enviar em uma `PERDA`, o motivo é deduzido do texto (vencido/vencimento →
+  `VENCIMENTO`; "consumo interno" → `CONSUMO_INTERNO`; demais → `QUEBRA`). Só `PERDA` entra no relatório de
+  perdas: ajustes e estornos não são perda.
+- Vendas do caixa baixam o estoque como `SAIDA` ou `SAIDA_DRINK` com `item_pedido_id` preenchido; o estorno
+  do pedido devolve com `AJUSTE_POSITIVO` vinculado ao mesmo item. Por isso o giro e o resumo de movimentações
+  descontam esses ajustes das saídas.
 
 ### Lotes e validade (FEFO)
 
@@ -91,6 +98,10 @@ SAIDA_DRINK
 - `VISUALIZAR_ESTOQUE`: consultar produtos, saldo, lotes/validade e movimentações.
 - `GERENCIAR_ESTOQUE`: gerir categorias e produtos.
 - `MOVIMENTAR_ESTOQUE`: registrar entradas, saídas, ajustes, perdas e baixa de drinks.
+- `VISUALIZAR_RELATORIOS`: consultar `/relatorios/*`.
+- `VISUALIZAR_FINANCEIRO` / `GERENCIAR_FINANCEIRO`: consultar o financeiro / cadastrar e baixar contas.
+- O bloco `vendas` de `/dashboard/resumo` só vem para quem tem `CAIXA_VISUALIZAR`, `VISUALIZAR_RELATORIOS`
+  ou `VISUALIZAR_FINANCEIRO`.
 
 ## 4. Padrão Strategy
 
@@ -144,7 +155,8 @@ mesma operação no futuro, mas não fazem parte do escopo atual.
 
 ## 6. Giro, cobertura e classificação ABC
 
-- Giro mensal é a quantidade de saídas dos últimos 30 dias.
+- Giro mensal é a quantidade de saídas dos últimos 30 dias: `SAIDA` e `SAIDA_DRINK`, descontados os estornos
+  de vendas (perdas e ajustes não contam). Vem em `saidasUltimos30Dias` na listagem de produtos.
 - Venda média diária = giro mensal / 30.
 - Cobertura em dias = saldo atual / venda média diária.
 - Se não houver saídas nos últimos 30 dias, o giro é zero e a cobertura é apresentada como

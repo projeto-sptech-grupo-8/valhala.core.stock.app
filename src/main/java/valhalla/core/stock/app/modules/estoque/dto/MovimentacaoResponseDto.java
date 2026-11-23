@@ -1,6 +1,7 @@
 package valhalla.core.stock.app.modules.estoque.dto;
 
 import tools.jackson.databind.util.RawValue;
+import valhalla.core.stock.app.modules.estoque.entity.MotivoPerda;
 import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
 
 import java.math.BigDecimal;
@@ -19,6 +20,7 @@ public record MovimentacaoResponseDto(
         BigDecimal saldoAnterior,
         BigDecimal saldoPosterior,
         String motivo,
+        MotivoPerda motivoPerda,
         String lote,
         String numeroNotaFiscal,
         UUID origemDrinkId,

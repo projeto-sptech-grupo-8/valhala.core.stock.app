@@ -80,4 +80,61 @@ public interface MovimentacaoEstoqueRepository extends JpaRepository<Movimentaca
     );
 
     boolean existsByEstoqueProdutoId(UUID produtoId);
+
+    /**
+     * Saídas por venda e consumo desde o instante informado, por produto: SAIDA e SAIDA_DRINK menos os
+     * estornos de vendas canceladas (AJUSTE_POSITIVO vinculado a item de pedido).
+     */
+    @Query("""
+            select e.produto.id as produtoId,
+                   coalesce(sum(case
+                       when m.tipo in (valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque.SAIDA,
+                                       valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque.SAIDA_DRINK)
+                           then m.quantidade
+                       else -m.quantidade end), 0) as quantidade
+            from MovimentacaoEstoqueEntity m
+            join m.estoque e
+            where e.produto.id in :idsProdutos
+              and m.ocorridoEm >= :desde
+              and (m.tipo in (valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque.SAIDA,
+                              valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque.SAIDA_DRINK)
+                   or (m.tipo = valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque.AJUSTE_POSITIVO
+                       and m.itemPedidoId is not null))
+            group by e.produto.id
+            """)
+    List<SaidasProdutoProjection> somarSaidasPorProduto(
+            @Param("idsProdutos") java.util.Collection<UUID> idsProdutos,
+            @Param("desde") LocalDateTime desde
+    );
+
+    /** Contagem por tipo no estabelecimento; estornos de venda (ajuste com item de pedido) separados. */
+    @Query("""
+            select m.tipo as tipo,
+                   case when m.itemPedidoId is null then false else true end as vinculadaVenda,
+                   count(m) as quantidade
+            from MovimentacaoEstoqueEntity m
+            join m.estoque e
+            join e.produto p
+            where p.estabelecimentoId = :idEstabelecimento
+              and m.ocorridoEm >= :desde
+            group by m.tipo, case when m.itemPedidoId is null then false else true end
+            """)
+    List<ContagemTipoProjection> contarPorTipo(
+            @Param("idEstabelecimento") UUID idEstabelecimento,
+            @Param("desde") LocalDateTime desde
+    );
+
+    interface ContagemTipoProjection {
+        valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque getTipo();
+
+        Boolean getVinculadaVenda();
+
+        Long getQuantidade();
+    }
+
+    interface SaidasProdutoProjection {
+        UUID getProdutoId();
+
+        java.math.BigDecimal getQuantidade();
+    }
 }

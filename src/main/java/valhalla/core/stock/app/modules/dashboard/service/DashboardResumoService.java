@@ -26,10 +26,15 @@ import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.ResumoEstoqueDashboardProjection;
 import valhalla.core.stock.app.modules.estoque.repository.ResumoMovimentacaoMensalDashboardProjection;
+import valhalla.core.stock.app.modules.accesscontrol.security.PermissionAuthorizationService;
+import valhalla.core.stock.app.modules.dashboard.dto.VendasDashboardResponseDto;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
+import valhalla.core.stock.app.modules.relatorios.repository.IndicadoresVendaRepository;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
@@ -47,7 +52,7 @@ public class DashboardResumoService {
 
     private static final int LIMITE_ALERTAS = 5;
     private static final int LIMITE_MOVIMENTACOES_RECENTES = 5;
-    private static final ZoneId FUSO_HORARIO_OPERACAO = ZoneId.of("America/Sao_Paulo");
+    private static final ZoneId FUSO_HORARIO_OPERACAO = FusoHorarioOperacao.ZONA;
     private static final Set<TipoMovimentacaoEstoque> TIPOS_ENTRADA = EnumSet.of(
             TipoMovimentacaoEstoque.ENTRADA_INICIAL,
             TipoMovimentacaoEstoque.ENTRADA,
@@ -63,12 +68,18 @@ public class DashboardResumoService {
     private final EstoqueRepository estoqueRepository;
     private final MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
     private final UserRepository userRepository;
+    private final IndicadoresVendaRepository indicadoresVenda;
+    private final PermissionAuthorizationService permissionAuthorizationService;
 
     public DashboardResumoService(
             EstoqueRepository estoqueRepository,
             MovimentacaoEstoqueRepository movimentacaoEstoqueRepository,
-            UserRepository userRepository
+            UserRepository userRepository,
+            IndicadoresVendaRepository indicadoresVenda,
+            PermissionAuthorizationService permissionAuthorizationService
     ) {
+        this.indicadoresVenda = indicadoresVenda;
+        this.permissionAuthorizationService = permissionAuthorizationService;
         this.estoqueRepository = estoqueRepository;
         this.movimentacaoEstoqueRepository = movimentacaoEstoqueRepository;
         this.userRepository = userRepository;
@@ -91,8 +102,34 @@ public class DashboardResumoService {
                 ),
                 obterEstoque(idEstabelecimento),
                 obterMovimentacoes(idEstabelecimento, dataInicio, dataFim, meses),
+                new ModuloDashboardResponseDto(DisponibilidadeModuloDashboard.DISPONIVEL),
                 moduloIndisponivel(),
-                moduloIndisponivel()
+                podeVerVendas() ? obterVendas(idEstabelecimento, dataFim) : null
+        );
+    }
+
+    private boolean podeVerVendas() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return permissionAuthorizationService.hasPermission("CAIXA_VISUALIZAR", authentication)
+                || permissionAuthorizationService.hasPermission("VISUALIZAR_RELATORIOS", authentication)
+                || permissionAuthorizationService.hasPermission("VISUALIZAR_FINANCEIRO", authentication);
+    }
+
+    private VendasDashboardResponseDto obterVendas(UUID idEstabelecimento, LocalDate hoje) {
+        LocalDateTime inicioHoje = hoje.atStartOfDay();
+        LocalDateTime amanha = hoje.plusDays(1).atStartOfDay();
+        IndicadoresVendaRepository.Totais totaisHoje = indicadoresVenda.totais(idEstabelecimento, inicioHoje, amanha);
+        IndicadoresVendaRepository.Totais ultimos30 = indicadoresVenda.totais(
+                idEstabelecimento, inicioHoje.minusDays(30), inicioHoje);
+        return new VendasDashboardResponseDto(
+                totaisHoje.vendas(),
+                totaisHoje.faturamento(),
+                totaisHoje.vendas() == 0 ? null : totaisHoje.faturamento()
+                        .divide(BigDecimal.valueOf(totaisHoje.vendas()), 2, RoundingMode.HALF_UP),
+                indicadoresVenda.recebidoPorForma(idEstabelecimento, inicioHoje, amanha).stream()
+                        .map(linha -> new VendasDashboardResponseDto.FormaPagamento(linha.chave(), linha.valor()))
+                        .toList(),
+                ultimos30.faturamento().divide(BigDecimal.valueOf(30), 2, RoundingMode.HALF_UP)
         );
     }
 

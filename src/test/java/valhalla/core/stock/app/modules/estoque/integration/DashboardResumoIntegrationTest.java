@@ -55,7 +55,7 @@ class DashboardResumoIntegrationTest extends EstoqueIntegrationTestSupport {
                 .andExpect(jsonPath("$.movimentacoes.serieMensal[5].mes").value(mesAtual))
                 .andExpect(jsonPath("$.movimentacoes.serieMensal[5].entradas").value(1))
                 .andExpect(jsonPath("$.movimentacoes.serieMensal[5].saidas").value(1))
-                .andExpect(jsonPath("$.financeiro.status").value("INDISPONIVEL"))
+                .andExpect(jsonPath("$.financeiro.status").value("DISPONIVEL"))
                 .andExpect(jsonPath("$.caixa.status").value("INDISPONIVEL"));
     }
 

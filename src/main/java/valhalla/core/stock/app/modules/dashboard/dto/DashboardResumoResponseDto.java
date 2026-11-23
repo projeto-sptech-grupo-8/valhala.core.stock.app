@@ -8,6 +8,7 @@ public record DashboardResumoResponseDto(
         EstoqueDashboardResponseDto estoque,
         MovimentacoesDashboardResponseDto movimentacoes,
         ModuloDashboardResponseDto financeiro,
-        ModuloDashboardResponseDto caixa
+        ModuloDashboardResponseDto caixa,
+        VendasDashboardResponseDto vendas
 ) {
 }

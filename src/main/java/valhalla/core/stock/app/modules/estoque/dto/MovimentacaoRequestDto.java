@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
+import valhalla.core.stock.app.modules.estoque.entity.MotivoPerda;
 import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
 
 import java.math.BigDecimal;
@@ -41,7 +42,12 @@ public record MovimentacaoRequestDto(
 
         @Positive(message = "O lote de origem deve ser um identificador válido")
         @Schema(description = "Lote específico a consumir em SAIDA, AJUSTE_NEGATIVO ou PERDA (ex.: baixa de lote vencido). Omitido: FEFO.", example = "42")
-        Long loteId
+        Long loteId,
+
+        @Schema(description = "Classificação da perda; obrigatória em PERDA e proibida nos demais tipos. "
+                + "Omitida em PERDA (clientes antigos): deduzida do texto do motivo.",
+                example = "VENCIMENTO")
+        MotivoPerda motivoPerda
 ) {
     public MovimentacaoRequestDto(
             UUID produtoId,
@@ -51,7 +57,7 @@ public record MovimentacaoRequestDto(
             String lote,
             String numeroNotaFiscal
     ) {
-        this(produtoId, tipo, quantidade, motivo, lote, numeroNotaFiscal, null, null, null);
+        this(produtoId, tipo, quantidade, motivo, lote, numeroNotaFiscal, null, null, null, null);
     }
 
     public MovimentacaoRequestDto(
@@ -63,6 +69,6 @@ public record MovimentacaoRequestDto(
             String numeroNotaFiscal,
             Boolean emFardo
     ) {
-        this(produtoId, tipo, quantidade, motivo, lote, numeroNotaFiscal, emFardo, null, null);
+        this(produtoId, tipo, quantidade, motivo, lote, numeroNotaFiscal, emFardo, null, null, null);
     }
 }

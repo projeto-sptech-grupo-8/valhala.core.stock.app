@@ -25,6 +25,24 @@ public final class ProdutoMapper {
             String lote,
             LocalDate validade
     ) {
+        return paraResposta(produto, estoque, lote, validade, null);
+    }
+
+    public static ProdutoResponseDto paraResposta(
+            ProdutoEntity produto,
+            EstoqueEntity estoque,
+            BigDecimal saidasUltimos30Dias
+    ) {
+        return paraResposta(produto, estoque, null, null, saidasUltimos30Dias);
+    }
+
+    public static ProdutoResponseDto paraResposta(
+            ProdutoEntity produto,
+            EstoqueEntity estoque,
+            String lote,
+            LocalDate validade,
+            BigDecimal saidasUltimos30Dias
+    ) {
         BigDecimal quantidadeEstoque = estoque == null ? null : estoque.getQuantidadeAtual();
         BigDecimal estoqueMinimo = estoque == null ? null : estoque.getEstoqueMinimo();
 
@@ -49,7 +67,8 @@ public final class ProdutoMapper {
                 lote,
                 validade,
                 produto.getCriadoEm(),
-                produto.getAtualizadoEm()
+                produto.getAtualizadoEm(),
+                saidasUltimos30Dias
         );
     }
 

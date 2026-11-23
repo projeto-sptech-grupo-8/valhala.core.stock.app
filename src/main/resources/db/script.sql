@@ -202,6 +202,23 @@ CREATE TABLE historico_acesso_usuario (
         REFERENCES estabelecimento(id)
 );
 
+-- Tokens de uso único da recuperação de senha por e-mail; só o hash SHA-256 é persistido.
+CREATE TABLE token_recuperacao_senha (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    usuario_id UUID NOT NULL,
+    token_hash VARCHAR(64) NOT NULL,
+    expira_em TIMESTAMP NOT NULL,
+    utilizado_em TIMESTAMP,
+    criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT uk_token_recuperacao_senha_hash UNIQUE (token_hash),
+
+    CONSTRAINT fk_token_recuperacao_senha_usuario
+        FOREIGN KEY (usuario_id)
+        REFERENCES usuario(id)
+        ON DELETE CASCADE
+);
+
 -- ============================================================
 -- 3. CATÁLOGO E ESTOQUE
 -- ============================================================
@@ -933,6 +950,7 @@ CREATE TABLE movimentacao_estoque (
     saldo_anterior NUMERIC(12,3) NOT NULL,
     saldo_posterior NUMERIC(12,3) NOT NULL,
     motivo TEXT,
+    motivo_perda VARCHAR(30),
     lote VARCHAR(100),
     numero_nota_fiscal VARCHAR(50),
     origem_drink_id UUID,
@@ -943,6 +961,12 @@ CREATE TABLE movimentacao_estoque (
 
     CONSTRAINT ck_movimentacao_estoque_origem
         CHECK (origem IN ('USUARIO', 'SISTEMA', 'WEBHOOK', 'PEDIDO')),
+
+    CONSTRAINT ck_movimentacao_estoque_motivo_perda
+        CHECK (motivo_perda IN ('QUEBRA', 'VENCIMENTO', 'CONSUMO_INTERNO')),
+
+    CONSTRAINT ck_movimentacao_estoque_perda_classificada
+        CHECK ((tipo = 'PERDA') = (motivo_perda IS NOT NULL)),
 
     CONSTRAINT ck_movimentacao_estoque_usuario_origem
         CHECK (origem <> 'USUARIO' OR usuario_id IS NOT NULL),
@@ -1159,6 +1183,47 @@ CREATE TABLE auditoria_caixa (
         FOREIGN KEY (pagamento_pedido_id)
         REFERENCES pagamento_pedido(id)
         ON DELETE SET NULL
+);
+
+-- ============================================================
+-- FINANCEIRO
+-- ============================================================
+
+-- Contas a pagar e a receber. categoria (só PAGAR): MERCADORIA entra só no fluxo de caixa (o custo já está no
+-- CMV das vendas); DESPESA_FIXA e DESPESA_VARIAVEL entram como despesas no resultado.
+CREATE TABLE conta_financeira (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    estabelecimento_id UUID NOT NULL,
+    tipo VARCHAR(10) NOT NULL,
+    descricao VARCHAR(150) NOT NULL,
+    valor NUMERIC(12,2) NOT NULL,
+    vencimento DATE NOT NULL,
+    centro_custo VARCHAR(20) NOT NULL,
+    categoria VARCHAR(20),
+    status VARCHAR(12) NOT NULL DEFAULT 'ABERTA',
+    pago_em DATE,
+    valor_pago NUMERIC(12,2),
+    observacao TEXT,
+    criado_por_usuario_id UUID NOT NULL,
+    criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT ck_conta_financeira_tipo CHECK (tipo IN ('PAGAR', 'RECEBER')),
+    CONSTRAINT ck_conta_financeira_valor CHECK (valor > 0),
+    CONSTRAINT ck_conta_financeira_centro_custo
+        CHECK (centro_custo IN ('COMPRAS', 'OPERACIONAL', 'VENDAS', 'ADMINISTRATIVO')),
+    CONSTRAINT ck_conta_financeira_categoria
+        CHECK (categoria IN ('MERCADORIA', 'DESPESA_FIXA', 'DESPESA_VARIAVEL')),
+    CONSTRAINT ck_conta_financeira_categoria_so_pagar CHECK ((tipo = 'PAGAR') = (categoria IS NOT NULL)),
+    CONSTRAINT ck_conta_financeira_status CHECK (status IN ('ABERTA', 'PAGA', 'CANCELADA')),
+    CONSTRAINT ck_conta_financeira_baixa
+        CHECK ((status = 'PAGA') = (pago_em IS NOT NULL AND valor_pago IS NOT NULL)),
+    CONSTRAINT ck_conta_financeira_valor_pago CHECK (valor_pago IS NULL OR valor_pago > 0),
+
+    CONSTRAINT fk_conta_financeira_estabelecimento
+        FOREIGN KEY (estabelecimento_id) REFERENCES estabelecimento(id),
+    CONSTRAINT fk_conta_financeira_criado_por
+        FOREIGN KEY (criado_por_usuario_id) REFERENCES usuario(id)
 );
 
 -- ============================================================
@@ -1627,3 +1692,39 @@ COMMENT ON COLUMN auditoria_caixa.descricao IS
 
 COMMENT ON COLUMN auditoria_caixa.tipo_evento IS
     'Código do evento: DESCONTO_CONCEDIDO, DESCONTO_ACIMA_DO_LIMITE, PEDIDO_CANCELADO, ITEM_REMOVIDO, SANGRIA, REFORCO, ABERTURA_CAIXA, FECHAMENTO_CAIXA, DIVERGENCIA_CAIXA, PAGAMENTO_CANCELADO, PAGAMENTO_ESTORNADO, CONFIGURACAO_CAIXA_ALTERADA';
+
+-- ============================================================
+-- APOIO A RELATÓRIOS E FINANCEIRO
+-- ============================================================
+
+CREATE INDEX idx_token_recuperacao_senha_usuario_criado_em
+    ON token_recuperacao_senha (usuario_id, criado_em);
+
+CREATE INDEX idx_conta_estabelecimento_status_vencimento
+    ON conta_financeira (estabelecimento_id, status, vencimento);
+
+CREATE INDEX idx_conta_estabelecimento_pago_em
+    ON conta_financeira (estabelecimento_id, pago_em)
+    WHERE pago_em IS NOT NULL;
+
+CREATE INDEX idx_pagamento_pedido_pago_em
+    ON pagamento_pedido (pago_em);
+
+-- Usado como fallback no CMV quando o item vendido não tem custo gravado (item_pedido.custo_unitario nulo).
+-- Produto padrão: o custo cadastrado. Drink: a soma do custo dos ingredientes da receita
+-- (ML proporcional ao volume da embalagem; UN pelo custo da unidade).
+CREATE OR REPLACE VIEW vw_custo_produto AS
+SELECT p.id AS produto_id, p.preco_custo AS custo_unitario
+FROM produto p
+WHERE p.tipo <> 'DRINK'
+UNION ALL
+SELECT d.id,
+       COALESCE(SUM(
+           cd.quantidade * i.preco_custo
+           / CASE WHEN cd.unidade_consumo = 'ML' THEN NULLIF(i.volume_embalagem_ml, 0) ELSE 1 END
+       ), 0)
+FROM produto d
+LEFT JOIN composicao_drink cd ON cd.drink_id = d.id
+LEFT JOIN produto i ON i.id = cd.produto_id
+WHERE d.tipo = 'DRINK'
+GROUP BY d.id;

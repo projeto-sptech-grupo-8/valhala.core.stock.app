@@ -6,6 +6,7 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import valhalla.core.stock.app.modules.estoque.dto.MovimentacaoResponseDto;
+import valhalla.core.stock.app.modules.estoque.entity.MotivoPerda;
 import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
 import valhalla.core.stock.app.shared.export.PoiExportadorExcel;
 
@@ -28,13 +29,13 @@ class MovimentacaoExportacaoServiceTest {
                 1L, "Lucas", UUID.randomUUID(), "Brahma Lata", "un",
                 TipoMovimentacaoEstoque.ENTRADA, new BigDecimal("24"),
                 new BigDecimal("10"), new BigDecimal("34"),
-                "Reposição (2 fardo(s))", "LOTE-01", "NF-123", null, null, agora, List.of()
+                "Reposição (2 fardo(s))", null, "LOTE-01", "NF-123", null, null, agora, List.of()
         );
         MovimentacaoResponseDto perda = new MovimentacaoResponseDto(
                 2L, "Maria", UUID.randomUUID(), "Vodka Absolut", "ML",
                 TipoMovimentacaoEstoque.PERDA, new BigDecimal("100"),
                 new BigDecimal("1000"), new BigDecimal("900"),
-                "Quebra", null, null, null, null, agora, List.of()
+                "Quebra", MotivoPerda.QUEBRA, null, null, null, null, agora, List.of()
         );
 
         byte[] bytes = service.gerarPlanilhaExcel(List.of(entrada, perda));

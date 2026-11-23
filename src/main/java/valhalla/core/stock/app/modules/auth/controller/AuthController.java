@@ -26,10 +26,14 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import valhalla.core.stock.app.modules.auth.config.JwtProperties;
 import valhalla.core.stock.app.modules.auth.dto.RequisicaoLoginDto;
+import valhalla.core.stock.app.modules.auth.dto.RequisicaoRecuperacaoSenhaDto;
+import valhalla.core.stock.app.modules.auth.dto.RequisicaoRedefinicaoSenhaDto;
 import valhalla.core.stock.app.modules.auth.dto.RespostaAutenticacaoDto;
 import valhalla.core.stock.app.modules.auth.dto.RespostaCsrfTokenDto;
+import valhalla.core.stock.app.modules.auth.dto.RespostaMensagemDto;
 import valhalla.core.stock.app.modules.auth.dto.RespostaTokenDto;
 import valhalla.core.stock.app.modules.auth.service.AuthService;
+import valhalla.core.stock.app.modules.auth.service.RecuperacaoSenhaService;
 import valhalla.core.stock.app.modules.auth.security.CsrfTokenStore;
 import valhalla.core.stock.app.shared.config.CookieProperties;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
@@ -49,17 +53,20 @@ public class AuthController {
     private static final String COOKIE_CSRF = "XSRF-TOKEN";
 
     private final AuthService authService;
+    private final RecuperacaoSenhaService recuperacaoSenhaService;
     private final JwtProperties jwtProperties;
     private final CookieProperties cookieProperties;
     private final CsrfTokenStore csrfTokenStore;
 
     public AuthController(
             AuthService authService,
+            RecuperacaoSenhaService recuperacaoSenhaService,
             JwtProperties jwtProperties,
             CsrfTokenStore csrfTokenStore,
             CookieProperties cookieProperties
     ) {
         this.authService = authService;
+        this.recuperacaoSenhaService = recuperacaoSenhaService;
         this.jwtProperties = jwtProperties;
         this.csrfTokenStore = csrfTokenStore;
         this.cookieProperties = cookieProperties;
@@ -174,6 +181,50 @@ public class AuthController {
         authService.logout(refreshToken, accessToken);
         clearAuthenticationCookies(response);
 
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/recuperar-senha")
+    @Operation(
+            summary = "Solicitar recuperação de senha",
+            description = "Envia para o e-mail informado um link de uso único para redefinir a senha. "
+                    + "A resposta é sempre a mesma, independentemente de o e-mail estar cadastrado."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "202", description = "Solicitação recebida.",
+                    content = @Content(schema = @Schema(implementation = RespostaMensagemDto.class))),
+            @ApiResponse(responseCode = "400", description = "Dados de entrada inválidos.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    public ResponseEntity<RespostaMensagemDto> solicitarRecuperacaoSenha(
+            @Valid @RequestBody RequisicaoRecuperacaoSenhaDto request
+    ) {
+        recuperacaoSenhaService.solicitar(request.email());
+        return ResponseEntity.accepted().body(new RespostaMensagemDto(
+                "Se o e-mail estiver cadastrado, você receberá as instruções para redefinir a senha"
+        ));
+    }
+
+    @PostMapping("/redefinir-senha")
+    @Operation(
+            summary = "Redefinir senha",
+            description = "Define uma nova senha a partir do token recebido por e-mail. "
+                    + "Todas as sessões ativas do usuário são encerradas."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Senha redefinida e cookies de sessão removidos.",
+                    headers = @Header(name = HttpHeaders.SET_COOKIE,
+                            description = "Cookies accessToken, refreshToken e XSRF-TOKEN são expirados.")),
+            @ApiResponse(responseCode = "400",
+                    description = "Dados de entrada inválidos ou token inválido, expirado ou já utilizado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    public ResponseEntity<Void> redefinirSenha(
+            @Valid @RequestBody RequisicaoRedefinicaoSenhaDto request,
+            HttpServletResponse response
+    ) {
+        recuperacaoSenhaService.redefinir(request.token(), request.novaSenha());
+        clearAuthenticationCookies(response);
         return ResponseEntity.noContent().build();
     }
 

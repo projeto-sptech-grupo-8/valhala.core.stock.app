@@ -126,7 +126,9 @@ public class SecurityConfig {
                                 "/auth/login",
                                 "/auth/refresh",
                                 "/auth/logout",
-                                "/webhooks/mercado-pago/point"
+                                "/webhooks/mercado-pago/point",
+                                "/auth/recuperar-senha",
+                                "/auth/redefinir-senha"
                         ).permitAll()
                         .requestMatchers(
                                 "/swagger-ui/**",
@@ -258,7 +260,9 @@ public class SecurityConfig {
     private boolean isAuthenticationEndpoint(HttpServletRequest request) {
         return request.getServletPath().equals("/auth/login")
                 || request.getServletPath().equals("/auth/refresh")
-                || request.getServletPath().equals("/auth/logout");
+                || request.getServletPath().equals("/auth/logout")
+                || request.getServletPath().equals("/auth/recuperar-senha")
+                || request.getServletPath().equals("/auth/redefinir-senha");
     }
 
     private JwtDecoder jwtDecoder(

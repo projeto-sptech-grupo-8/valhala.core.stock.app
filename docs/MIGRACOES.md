@@ -200,6 +200,26 @@ A V19 realiza os ajustes complementares de banco de dados para a operação comp
 
 O `script.sql` foi mantido em paridade com a V19.
 
+### V25, V26 e V27 (recuperação de senha, relatórios e financeiro)
+
+- **V25** cria `token_recuperacao_senha`, usada na recuperação de senha por e-mail. Só o hash SHA-256 de cada
+  token é armazenado, e os tokens são removidos junto com o usuário.
+- **V26** apoia os relatórios gerenciais:
+  - cria a view `vw_custo_produto` (custo atual do produto; drink = soma dos ingredientes), usada como fallback
+    do CMV quando `item_pedido.custo_unitario` está nulo;
+  - adiciona `movimentacao_estoque.motivo_perda` (`QUEBRA`, `VENCIMENTO` ou `CONSUMO_INTERNO`), obrigatório em
+    `PERDA`. As perdas existentes são classificadas pelo texto do motivo;
+  - cria a permissão `VISUALIZAR_RELATORIOS`, concedida aos perfis `Gerente` e `Financeiro`.
+- **V27** cria `conta_financeira` (contas a pagar e a receber), o índice `idx_pagamento_pedido_pago_em` e as
+  permissões `VISUALIZAR_FINANCEIRO` e `GERENCIAR_FINANCEIRO`, concedidas aos perfis `Gerente` e `Financeiro`.
+
+As três são idempotentes (`IF NOT EXISTS` e constraints verificadas em `pg_constraint`), e o `script.sql` foi
+mantido em paridade com elas. Validação: a suíte de testes sobe um PostgreSQL embarcado, executa o `script.sql`
+e o Flyway V1–V27 com `ddl-auto=validate`; os dois caminhos (banco já existente e banco novo) foram exercitados.
+
+Perfis que precisam ver relatórios ou o financeiro e não se chamam Gerente ou Financeiro devem receber as
+permissões manualmente.
+
 ## Próximas alterações
 
 Não edite uma migração já executada em ambientes compartilhados. Crie um novo arquivo SQL com numeração crescente:
