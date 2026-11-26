@@ -7,6 +7,8 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Comparator;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -14,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class InMemoryCsrfTokenStore implements CsrfTokenStore {
 
     private static final int TAMANHO_TOKEN_EM_BYTES = 32;
+    private static final int MAX_TOKENS = 10_000;
 
     private final SecureRandom secureRandom = new SecureRandom();
     private final ConcurrentHashMap<UUID, TokenArmazenado> tokens = new ConcurrentHashMap<>();
@@ -21,6 +24,18 @@ public class InMemoryCsrfTokenStore implements CsrfTokenStore {
     @Override
     public String criar(UUID idSessao, Instant expiraEm) {
         removerExpirados();
+        if (!tokens.containsKey(idSessao)) {
+            while (tokens.size() >= MAX_TOKENS) {
+                UUID maisAntiga = tokens.entrySet().stream()
+                        .min(Comparator.comparing(e -> e.getValue().expiraEm()))
+                        .map(Map.Entry::getKey)
+                        .orElse(null);
+                if (maisAntiga == null) {
+                    break;
+                }
+                tokens.remove(maisAntiga);
+            }
+        }
         byte[] bytes = new byte[TAMANHO_TOKEN_EM_BYTES];
         secureRandom.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);

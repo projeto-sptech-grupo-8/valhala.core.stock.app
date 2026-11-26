@@ -10,6 +10,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import valhalla.core.stock.app.modules.caixa.exception.AutorizacaoCaixaNegadaException;
 import valhalla.core.stock.app.modules.caixa.exception.NotaFiscalEstadoInvalidoException;
 import valhalla.core.stock.app.modules.caixa.exception.NotaFiscalJaEmitidaException;
 import valhalla.core.stock.app.modules.caixa.exception.PedidoEstadoInvalidoException;
@@ -506,7 +507,7 @@ public class NotaFiscalCaixaService {
         return new ArquivoXmlNotaFiscal(nomeArquivo, nota.getXmlConteudo());
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = AutorizacaoCaixaNegadaException.class)
     @PreAuthorize("""
             @permissionAuthorizationService.hasPermission(
                 'CAIXA_OPERAR',

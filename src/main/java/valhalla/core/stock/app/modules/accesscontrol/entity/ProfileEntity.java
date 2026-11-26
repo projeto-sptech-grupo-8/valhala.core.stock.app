@@ -39,7 +39,7 @@ public class ProfileEntity {
     @Column(name = "atualizado_em", nullable = false)
     private LocalDateTime updatedAt;
 
-    @ManyToMany(fetch = FetchType.EAGER)
+    @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
             name = "perfil_funcionalidade",
             joinColumns = @JoinColumn(name = "perfil_id"),

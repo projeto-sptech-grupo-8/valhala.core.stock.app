@@ -12,8 +12,10 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import valhalla.core.stock.app.modules.accesscontrol.entity.FuncionalidadeEntity;
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.repository.ProfileRepository;
+import valhalla.core.stock.app.modules.auth.security.CustomUserDetailsService;
 import valhalla.core.stock.app.modules.auth.service.TokenStateService;
 import valhalla.core.stock.app.modules.users.dto.RequisicaoAtualizacaoUsuarioDto;
 import valhalla.core.stock.app.modules.users.dto.RequisicaoCriacaoUsuarioDto;
@@ -30,6 +32,7 @@ import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
 import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @Service
@@ -48,6 +51,9 @@ public class UserService {
     @Transactional
     @PreAuthorize("@permissionAuthorizationService.hasPermission('USUARIOS_CRIAR', authentication)")
     public RespostaUsuarioDto criarUsuario(RequisicaoCriacaoUsuarioDto dtoRequest) {
+        if (dtoRequest.senha().getBytes(StandardCharsets.UTF_8).length > 72) {
+            throw new IllegalArgumentException("A senha excede o limite de 72 bytes");
+        }
         String emailNormalizado = dtoRequest.email()
                 .trim()
                 .toLowerCase(Locale.ROOT);
@@ -65,6 +71,7 @@ public class UserService {
                                 "Perfil não encontrado: " + profileName
                         )
                 );
+        garantirAtorPodeAtribuirPerfil(profile, SecurityContextHolder.getContext().getAuthentication());
 
         String passwordHash = passwordEncoder.encode(dtoRequest.senha());
         UserEntity user = UserMapper.toEntity(dtoRequest, passwordHash, profile);
@@ -111,6 +118,15 @@ public class UserService {
 
         Authentication authentication = SecurityContextHolder.getContext()
                 .getAuthentication();
+        boolean isManager = UserAuthorizationService.isManagerRole(authentication);
+        UUID actorId = authenticatedUserId(authentication);
+        boolean isSelf = actorId != null && actorId.equals(idUsuario);
+        if (!isManager && !isSelf && isManagerProfile(user.getProfile())) {
+            throw new AccessDeniedException(
+                    "Apenas gerente pode alterar a conta de um gerente"
+            );
+        }
+
         boolean canEditUsers = userAuthorizationService
                 .hasPermission(authentication, "USUARIOS_EDITAR");
         boolean authenticationChanged = false;
@@ -121,10 +137,23 @@ public class UserService {
                     "Apenas gerente pode alterar perfil ou status"
             );
         }
+        if (isSelf && !isManager && (updateDto.nomePerfil() != null || updateDto.ativo() != null)) {
+            throw new AccessDeniedException(
+                    "Não é permitido alterar o próprio perfil ou status"
+            );
+        }
 
-        List<UserEntity> lista = new ArrayList<>();
-
-            
+        boolean emailAlterado = StringUtils.hasText(updateDto.email())
+                && !user.getEmail().equalsIgnoreCase(updateDto.email().trim().toLowerCase(Locale.ROOT));
+        boolean senhaAlterada = StringUtils.hasText(updateDto.senha());
+        if (isSelf && (emailAlterado || senhaAlterada)) {
+            if (!StringUtils.hasText(updateDto.senhaAtual())
+                    || !passwordEncoder.matches(updateDto.senhaAtual(), user.getPasswordHash())) {
+                throw new InvalidUserUpdateException(
+                        "Informe a senha atual correta para alterar seu e-mail ou senha"
+                );
+            }
+        }
 
         if (StringUtils.hasText(updateDto.nome())) {
             user.setName(updateDto.nome().trim());
@@ -162,6 +191,7 @@ public class UserService {
                     .orElseThrow(() -> new ProfileNotFoundException(
                             "Perfil não encontrado: " + profileName
                     ));
+            garantirAtorPodeAtribuirPerfil(profile, authentication);
             if (!Objects.equals(user.getProfile().getId(), profile.getId())) {
                 user.setProfile(profile);
                 authenticationChanged = true;
@@ -206,6 +236,16 @@ public class UserService {
                         "Usuário não encontrado"
                 ));
 
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        boolean isManager = UserAuthorizationService.isManagerRole(authentication);
+        UUID actorId = authenticatedUserId(authentication);
+        boolean isSelf = actorId != null && actorId.equals(idUsuario);
+        if (!isManager && !isSelf && isManagerProfile(user.getProfile())) {
+            throw new AccessDeniedException(
+                    "Apenas gerente pode excluir a conta de um gerente"
+            );
+        }
+
         try {
             servicoPermissoes.garantirUsuarioPodeSerDesativadoOuExcluido(user);
             tokenStateService.revokeAll(idUsuario);
@@ -243,6 +283,56 @@ public class UserService {
         if (updateDto.nomePerfil() != null
                 && !StringUtils.hasText(updateDto.nomePerfil())) {
             throw new InvalidUserUpdateException("O perfil não pode ficar vazio");
+        }
+
+        if (updateDto.senha() != null && !StringUtils.hasText(updateDto.senha())) {
+            throw new InvalidUserUpdateException("A senha não pode ficar vazia");
+        }
+
+        if (updateDto.senha() != null
+                && updateDto.senha().getBytes(StandardCharsets.UTF_8).length > 72) {
+            throw new InvalidUserUpdateException("A senha excede o limite de 72 bytes");
+        }
+    }
+
+    private void garantirAtorPodeAtribuirPerfil(ProfileEntity profile, Authentication authentication) {
+        if (UserAuthorizationService.isManagerRole(authentication)) {
+            return;
+        }
+        if (isManagerProfile(profile)) {
+            throw new AccessDeniedException("Apenas gerente pode atribuir o perfil Gerente");
+        }
+        if (profile.getFunctionalities() == null || profile.getFunctionalities().isEmpty()) {
+            return;
+        }
+        Set<String> atorPermissoes = authentication == null ? Set.of()
+                : authentication.getAuthorities().stream()
+                        .map(authority -> authority.getAuthority())
+                        .collect(java.util.stream.Collectors.toSet());
+        Set<String> perfilPermissoes = profile.getFunctionalities().stream()
+                .map(FuncionalidadeEntity::getCode)
+                .collect(java.util.stream.Collectors.toSet());
+        if (!atorPermissoes.containsAll(perfilPermissoes)) {
+            throw new AccessDeniedException("Não é permitido atribuir um perfil com permissões superiores às suas");
+        }
+    }
+
+    private boolean isManagerProfile(ProfileEntity profile) {
+        return profile != null && "GERENTE".equals(CustomUserDetailsService.normalizeRole(profile.getName()));
+    }
+
+    private UUID authenticatedUserId(Authentication authentication) {
+        if (!(authentication instanceof org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken jwt)) {
+            return null;
+        }
+        String rawUserId = jwt.getToken().getClaimAsString("userId");
+        if (!StringUtils.hasText(rawUserId)) {
+            return null;
+        }
+        try {
+            return UUID.fromString(rawUserId);
+        } catch (IllegalArgumentException exception) {
+            return null;
         }
     }
 

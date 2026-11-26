@@ -15,9 +15,12 @@ import valhalla.core.stock.app.modules.accesscontrol.repository.ProfileRepositor
 import valhalla.core.stock.app.modules.auth.entity.PasswordResetTokenEntity;
 import valhalla.core.stock.app.modules.auth.repository.PasswordResetTokenRepository;
 import valhalla.core.stock.app.modules.auth.repository.UserSessionRepository;
+import valhalla.core.stock.app.modules.auth.security.CsrfTokenStore;
 import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
+import valhalla.core.stock.app.modules.users.entity.TipoEventoAcessoUsuario;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.entity.UserStatus;
+import valhalla.core.stock.app.modules.users.repository.UserAccessHistoryRepository;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 
 import java.nio.charset.StandardCharsets;
@@ -54,6 +57,12 @@ class RecuperacaoSenhaIntegrationTest {
 
     @Autowired
     private UserSessionRepository userSessionRepository;
+
+    @Autowired
+    private UserAccessHistoryRepository userAccessHistoryRepository;
+
+    @Autowired
+    private CsrfTokenStore csrfTokenStore;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -132,7 +141,8 @@ class RecuperacaoSenhaIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(loginJson(SENHA_ATUAL)))
                 .andExpect(status().isOk());
-        assertThat(userSessionRepository.existsById(usuario.getId())).isTrue();
+        var sessaoAntes = userSessionRepository.findById(usuario.getId()).orElseThrow();
+        assertThat(csrfTokenStore.obter(sessaoAntes.getRefreshJti())).isNotNull();
 
         salvarToken("token-valido", LocalDateTime.now(ZoneOffset.UTC).plusMinutes(10));
 
@@ -144,6 +154,10 @@ class RecuperacaoSenhaIntegrationTest {
         entityManager.flush();
         entityManager.clear();
         assertThat(userSessionRepository.existsById(usuario.getId())).isFalse();
+        assertThat(csrfTokenStore.obter(sessaoAntes.getRefreshJti())).isNull();
+        assertThat(userAccessHistoryRepository.findByUser_IdOrderByOccurredAtDescIdDesc(
+                usuario.getId(), org.springframework.data.domain.PageRequest.of(0, 10)))
+                .anyMatch(evento -> evento.getEventType() == TipoEventoAcessoUsuario.SENHA_ALTERADA);
         assertThat(passwordEncoder.matches(NOVA_SENHA,
                 userRepository.findById(usuario.getId()).orElseThrow().getPasswordHash())).isTrue();
 

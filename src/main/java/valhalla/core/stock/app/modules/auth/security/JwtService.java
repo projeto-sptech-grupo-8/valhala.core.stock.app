@@ -37,7 +37,7 @@ public class JwtService {
                 .toList();
         List<String> permissions = authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
-                .filter(authority -> !authority.startsWith("ROLE_"))
+                .filter(authority -> !authority.startsWith("ROLE_") && !authority.startsWith("FACTOR_"))
                 .toList();
 
         JwtClaimsSet claims = JwtClaimsSet.builder()

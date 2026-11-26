@@ -13,6 +13,7 @@ import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserAccessHistoryRepository;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -23,6 +24,8 @@ public class UserAccessHistoryService {
 
     private static final int MIN_LIMIT = 1;
     private static final int MAX_LIMIT = 50;
+    private static final int MAX_TENTATIVAS_SEM_BLOQUEIO = 5;
+    private static final Duration DURACAO_BLOQUEIO = Duration.ofMinutes(15);
 
     private final UserAccessHistoryRepository userAccessHistoryRepository;
     private final UserRepository userRepository;
@@ -32,6 +35,7 @@ public class UserAccessHistoryService {
     public void registrarLoginSucesso(UserEntity user) {
         user.setLastLoginAt(LocalDateTime.now());
         user.setLoginAttempts(0);
+        user.setLockedUntil(null);
         userRepository.save(user);
         registrarEvento(user, TipoEventoAcessoUsuario.LOGIN_SUCESSO);
     }
@@ -39,8 +43,17 @@ public class UserAccessHistoryService {
     @Transactional
     public void registrarSenhaIncorreta(String emailNormalizado) {
         userRepository.findByEmailIgnoreCase(emailNormalizado).ifPresent(user -> {
+            LocalDateTime agora = LocalDateTime.now();
             int attempts = user.getLoginAttempts() == null ? 0 : user.getLoginAttempts();
-            user.setLoginAttempts(attempts + 1);
+            if (user.getLockedUntil() != null && !user.getLockedUntil().isAfter(agora)) {
+                attempts = 0;
+                user.setLockedUntil(null);
+            }
+            int novasTentativas = attempts + 1;
+            user.setLoginAttempts(novasTentativas);
+            if (novasTentativas >= MAX_TENTATIVAS_SEM_BLOQUEIO) {
+                user.setLockedUntil(agora.plus(DURACAO_BLOQUEIO));
+            }
             userRepository.save(user);
             registrarEvento(user, TipoEventoAcessoUsuario.SENHA_INCORRETA);
         });

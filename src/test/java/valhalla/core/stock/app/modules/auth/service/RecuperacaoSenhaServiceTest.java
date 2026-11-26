@@ -15,9 +15,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import valhalla.core.stock.app.modules.auth.config.RecuperacaoSenhaProperties;
 import valhalla.core.stock.app.modules.auth.entity.PasswordResetTokenEntity;
 import valhalla.core.stock.app.modules.auth.repository.PasswordResetTokenRepository;
+import valhalla.core.stock.app.modules.auth.security.CsrfTokenStore;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.entity.UserStatus;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
+import valhalla.core.stock.app.modules.users.service.UserAccessHistoryService;
 import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 import valhalla.core.stock.app.shared.mail.EmailProperties;
 import valhalla.core.stock.app.shared.mail.ServicoEmail;
@@ -30,6 +32,7 @@ import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -49,6 +52,10 @@ class RecuperacaoSenhaServiceTest {
     private BusinessEventLogger businessEventLogger;
     @Mock
     private JavaMailSender mailSender;
+    @Mock
+    private UserAccessHistoryService userAccessHistoryService;
+    @Mock
+    private CsrfTokenStore csrfTokenStore;
 
     private RecuperacaoSenhaService service;
 
@@ -67,7 +74,9 @@ class RecuperacaoSenhaServiceTest {
                         Duration.ofMinutes(30),
                         Duration.ofMinutes(1)
                 ),
-                businessEventLogger
+                businessEventLogger,
+                userAccessHistoryService,
+                csrfTokenStore
         );
     }
 
@@ -118,6 +127,45 @@ class RecuperacaoSenhaServiceTest {
         service.solicitar("x@meraki.com");
 
         verifyNoInteractions(passwordResetTokenRepository, mailSender);
+    }
+
+    @Test
+    void deveRegistrarSenhaAlteradaERemoverCsrfAoRedefinirSenha() {
+        UserEntity usuario = usuario("Lucas");
+        UUID tokenId = UUID.randomUUID();
+        UUID sessaoAnterior = UUID.randomUUID();
+        PasswordResetTokenEntity tokenEntity = PasswordResetTokenEntity.builder()
+                .id(tokenId)
+                .user(usuario)
+                .tokenHash(RecuperacaoSenhaService.hash("token-secreto"))
+                .build();
+
+        when(passwordResetTokenRepository.findByTokenHash(RecuperacaoSenhaService.hash("token-secreto")))
+                .thenReturn(Optional.of(tokenEntity));
+        when(passwordResetTokenRepository.consumir(eq(tokenId), any())).thenReturn(1);
+        when(passwordEncoder.encode("NovaSenha@123")).thenReturn("hash-novo");
+        when(tokenStateService.revokeAll(usuario.getId())).thenReturn(Optional.of(sessaoAnterior));
+
+        service.redefinir("token-secreto", "NovaSenha@123");
+
+        verify(userRepository).save(usuario);
+        verify(tokenStateService).revokeAll(usuario.getId());
+        verify(csrfTokenStore).remover(sessaoAnterior);
+        verify(userAccessHistoryService).registrarSenhaAlterada(usuario);
+    }
+
+    @Test
+    void deveRejeitarNovaSenhaEmBrancoOuMaiorQue72BytesUtf8() {
+        assertThatThrownBy(() -> service.redefinir("token", "   "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("obrigatória");
+
+        String senhaComAcentos = "á".repeat(40); // 40 chars, 80 bytes UTF-8
+        assertThatThrownBy(() -> service.redefinir("token", senhaComAcentos))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("72 bytes");
+
+        verifyNoInteractions(passwordResetTokenRepository);
     }
 
     private UserEntity usuario(String nome) {

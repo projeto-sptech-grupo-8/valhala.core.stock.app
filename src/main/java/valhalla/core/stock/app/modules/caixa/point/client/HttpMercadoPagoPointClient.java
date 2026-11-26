@@ -31,8 +31,8 @@ import java.util.List;
 
 @Component
 @ConditionalOnExpression(
-        "'${app.mercado-pago.point.modo:MOCK}'.equalsIgnoreCase('HOMOLOGACAO') "
-                + "|| '${app.mercado-pago.point.modo:MOCK}'.equalsIgnoreCase('PRODUCAO')"
+        "'${app.mercado-pago.point.modo:PRODUCAO}'.equalsIgnoreCase('HOMOLOGACAO') "
+                + "|| '${app.mercado-pago.point.modo:PRODUCAO}'.equalsIgnoreCase('PRODUCAO')"
 )
 public class HttpMercadoPagoPointClient implements MercadoPagoPointClient {
 

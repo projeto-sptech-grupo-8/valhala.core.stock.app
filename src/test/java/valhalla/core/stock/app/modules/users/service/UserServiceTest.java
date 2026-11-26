@@ -11,10 +11,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import valhalla.core.stock.app.modules.accesscontrol.entity.FuncionalidadeEntity;
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.repository.ProfileRepository;
 import valhalla.core.stock.app.modules.accesscontrol.service.ServicoPermissoes;
@@ -300,6 +302,91 @@ class UserServiceTest {
                 exception.getMessage()
         );
         verify(tokenStateService).revokeAll(user.getId());
+    }
+
+    @Test
+    void naoGerenteNaoDeveAtribuirPerfilGerenteOuSuperiorNemEditarOuExcluirGerente() {
+        ProfileEntity perfilGerente = ProfileEntity.builder().id(9).name("Gerente")
+                .establishment(EstablishmentEntity.builder().id(establishmentId).build()).build();
+        when(userRepository.existsByEmailIgnoreCase("novo@meraki.com")).thenReturn(false);
+        when(profileRepository.findByEstablishment_IdAndNameIgnoreCase(establishmentId, "Gerente"))
+                .thenReturn(Optional.of(perfilGerente));
+
+        assertThatThrownBy(() -> userService.criarUsuario(new RequisicaoCriacaoUsuarioDto(
+                "Novo", "novo@meraki.com", null, "senha-segura", "Gerente")))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("Gerente");
+
+        FuncionalidadeEntity funcExtra = FuncionalidadeEntity.builder().code("FINANCEIRO_GERENCIAR").build();
+        ProfileEntity perfilSuperior = ProfileEntity.builder().id(10).name("Financeiro")
+                .establishment(EstablishmentEntity.builder().id(establishmentId).build())
+                .functionalities(java.util.Set.of(funcExtra)).build();
+        when(profileRepository.findByEstablishment_IdAndNameIgnoreCase(establishmentId, "Financeiro"))
+                .thenReturn(Optional.of(perfilSuperior));
+
+        assertThatThrownBy(() -> userService.criarUsuario(new RequisicaoCriacaoUsuarioDto(
+                "Novo", "novo@meraki.com", null, "senha-segura", "Financeiro")))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("superiores");
+
+        UUID gerenteId = UUID.randomUUID();
+        UserEntity gerenteAlvo = UserEntity.builder()
+                .id(gerenteId).name("Gerente").email("gerente@meraki.com")
+                .status(UserStatus.ATIVO).profile(perfilGerente)
+                .establishment(perfilGerente.getEstablishment()).passwordHash("hash").build();
+        when(userRepository.findById(gerenteId)).thenReturn(Optional.of(gerenteAlvo));
+
+        assertThatThrownBy(() -> userService.atualizarUsuario(gerenteId,
+                new RequisicaoAtualizacaoUsuarioDto("Outro", null, null, null, null, null)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        assertThatThrownBy(() -> userService.deletarUsuario(gerenteId))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void deveExigirSenhaAtualNaAutoEdicaoERejeitarSenhaAcimaDe72Bytes() {
+        UUID selfId = UUID.randomUUID();
+        Jwt selfJwt = Jwt.withTokenValue("test").header("alg", "none")
+                .claim("establishmentId", establishmentId.toString())
+                .claim("userId", selfId.toString()).build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new JwtAuthenticationToken(selfJwt, List.of(new SimpleGrantedAuthority("USUARIOS_EDITAR"))));
+
+        UserEntity selfUser = usuarioEntidade(selfId, "Operador", "op@meraki.com");
+        when(userRepository.findById(selfId)).thenReturn(Optional.of(selfUser));
+        when(userAuthorizationService.hasPermission(any(), eq("USUARIOS_EDITAR"))).thenReturn(true);
+
+        // Operador com USUARIOS_EDITAR não pode alterar o próprio perfil
+        assertThatThrownBy(() -> userService.atualizarUsuario(selfId,
+                new RequisicaoAtualizacaoUsuarioDto(null, null, null, null, "Gerente", null)))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("próprio perfil");
+
+        // Trocar própria senha sem senhaAtual
+        assertThatThrownBy(() -> userService.atualizarUsuario(selfId,
+                new RequisicaoAtualizacaoUsuarioDto(null, null, null, "NovaSenha@123", null, null, null)))
+                .isInstanceOf(InvalidUserUpdateException.class)
+                .hasMessageContaining("senha atual");
+
+        // Trocar próprio e-mail com senhaAtual errada
+        when(passwordEncoder.matches("errada", "hash")).thenReturn(false);
+        assertThatThrownBy(() -> userService.atualizarUsuario(selfId,
+                new RequisicaoAtualizacaoUsuarioDto(null, "novo@meraki.com", null, null, null, null, "errada")))
+                .isInstanceOf(InvalidUserUpdateException.class)
+                .hasMessageContaining("senha atual");
+
+        // Senha com acentos excedendo 72 bytes UTF-8
+        String senhaLonga = "á".repeat(40);
+        assertThatThrownBy(() -> userService.criarUsuario(new RequisicaoCriacaoUsuarioDto(
+                "Novo", "novo2@meraki.com", null, senhaLonga, "Atendente")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("72 bytes");
+
+        assertThatThrownBy(() -> userService.atualizarUsuario(selfId,
+                new RequisicaoAtualizacaoUsuarioDto(null, null, null, senhaLonga, null, null, "atual")))
+                .isInstanceOf(InvalidUserUpdateException.class)
+                .hasMessageContaining("72 bytes");
     }
 
     private UserEntity usuarioEntidade(UUID id, String nome, String email) {

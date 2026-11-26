@@ -19,7 +19,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
-import valhalla.core.stock.app.shared.config.CorsProperties;
+import valhalla.core.stock.app.modules.auth.service.TokenStateService;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 import valhalla.core.stock.app.shared.logging.RequestFailureContext;
 
@@ -47,18 +47,18 @@ public class CsrfTokenValidationFilter extends OncePerRequestFilter {
     private final CsrfTokenStore csrfTokenStore;
     private final JwtDecoder refreshTokenDecoder;
     private final ObjectMapper objectMapper;
-    private final CorsProperties corsProperties;
+    private final TokenStateService tokenStateService;
 
     public CsrfTokenValidationFilter(
             CsrfTokenStore csrfTokenStore,
             @Qualifier("refreshTokenDecoder") JwtDecoder refreshTokenDecoder,
             ObjectMapper objectMapper,
-            CorsProperties corsProperties
+            TokenStateService tokenStateService
     ) {
         this.csrfTokenStore = csrfTokenStore;
         this.refreshTokenDecoder = refreshTokenDecoder;
         this.objectMapper = objectMapper;
-        this.corsProperties = corsProperties;
+        this.tokenStateService = tokenStateService;
     }
 
     @Override
@@ -72,27 +72,16 @@ public class CsrfTokenValidationFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain
     ) throws ServletException, IOException {
-        UUID idSessao = obterIdSessaoAutenticada(request);
-        // Sem uma sessão válida não há token CSRF a validar. A cadeia de segurança/autenticação
-        // preserva a resposta 401 apropriada para token ausente, revogado ou malformado.
-        if (idSessao == null) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-        // Sessões removidas no logout/refresh não possuem mais um token CSRF. Nesse caso,
-        // a autenticação ou o endpoint deve responder 401 em vez de mascarar a sessão inválida como 403.
-        if (csrfTokenStore.obter(idSessao) == null) {
+        SessaoRequisicao sessao = obterSessaoAutenticada(request);
+        // Sem uma sessão válida e ativa no servidor não há token CSRF a validar. A cadeia
+        // de segurança/autenticação preserva a resposta 401 (ou 204 no logout idempotente).
+        if (sessao == null || sessao.idSessao() == null || !sessao.ativaConfirmada()) {
             filterChain.doFilter(request, response);
             return;
         }
         String tokenNoCabecalho = request.getHeader(CABECALHO_CSRF);
-        String token = tokenNoCabecalho == null || tokenNoCabecalho.isBlank()
-                ? obterCookie(request, COOKIE_CSRF)
-                : tokenNoCabecalho;
-        boolean possuiTokenNoCabecalho = tokenNoCabecalho != null && !tokenNoCabecalho.isBlank();
-        boolean origemDoFrontendConfigurado = corsProperties.allows(request.getHeader("Origin"));
-        if (csrfTokenStore.ehValido(idSessao, token)
-                && (possuiTokenNoCabecalho || origemDoFrontendConfigurado)) {
+        if (tokenNoCabecalho != null && !tokenNoCabecalho.isBlank()
+                && csrfTokenStore.ehValido(sessao.idSessao(), tokenNoCabecalho)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -105,10 +94,10 @@ public class CsrfTokenValidationFilter extends OncePerRequestFilter {
         escreverErroCsrf(response);
     }
 
-    private UUID obterIdSessaoAutenticada(HttpServletRequest request) {
+    private SessaoRequisicao obterSessaoAutenticada(HttpServletRequest request) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication instanceof JwtAuthenticationToken token) {
-            return converterUuid(token.getToken().getClaimAsString("sessionJti"));
+            return new SessaoRequisicao(converterUuid(token.getToken().getClaimAsString("sessionJti")), true);
         }
 
         String refreshToken = obterCookie(request, "refreshToken");
@@ -117,10 +106,17 @@ public class CsrfTokenValidationFilter extends OncePerRequestFilter {
         }
         try {
             Jwt jwt = refreshTokenDecoder.decode(refreshToken);
-            return converterUuid(jwt.getId());
+            UUID refreshJti = converterUuid(jwt.getId());
+            UUID userId = converterUuid(jwt.getClaimAsString("userId"));
+            boolean ativa = userId != null && refreshJti != null
+                    && tokenStateService.isRefreshActive(userId, refreshJti);
+            return new SessaoRequisicao(refreshJti, ativa);
         } catch (RuntimeException exception) {
             return null;
         }
+    }
+
+    private record SessaoRequisicao(UUID idSessao, boolean ativaConfirmada) {
     }
 
     private UUID converterUuid(String valor) {

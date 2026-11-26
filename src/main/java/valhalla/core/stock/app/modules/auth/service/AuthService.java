@@ -64,9 +64,8 @@ public class AuthService {
     @Transactional(dontRollbackOn = AuthenticationException.class)
     public RespostaTokenDto login(RequisicaoLoginDto request) {
         String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
-        Authentication authentication;
         try {
-            authentication = authenticationManager.authenticate(
+            authenticationManager.authenticate(
                     UsernamePasswordAuthenticationToken.unauthenticated(
                             normalizedEmail,
                             request.senha()
@@ -77,12 +76,12 @@ public class AuthService {
             throw exception;
         }
 
-        UserEntity user = userRepository.findByEmailIgnoreCase(normalizedEmail)
+        UserEntity user = userRepository.findWithAccessGraphByEmailIgnoreCase(normalizedEmail)
                 .orElseThrow(() -> new IllegalStateException(
                         "Usuário autenticado não encontrado"
                 ));
 
-        RespostaTokenDto response = issueTokens(authentication, user);
+        RespostaTokenDto response = issueTokens(authenticationFor(user), user);
         userAccessHistoryService.registrarLoginSucesso(user);
         businessEventLogger.authenticationSuccess("auth.login.succeeded", user.getId(), user.getEstablishment().getId());
         return response;
@@ -94,7 +93,7 @@ public class AuthService {
         UUID userId = extractUserId(jwt);
         UUID refreshJti = extractRefreshJti(jwt);
 
-        UserEntity user = userRepository.findById(userId)
+        UserEntity user = userRepository.findWithAccessGraphById(userId)
                 .orElseThrow(() -> new InvalidRefreshTokenException(
                         "Refresh token inválido"
                 ));
@@ -186,7 +185,7 @@ public class AuthService {
 
         if (expectedRefreshJti == null) {
             tokenStateService.replace(user.getId(), accessJti, refreshJti,
-                    refreshExpiresAt, user);
+                    refreshExpiresAt, user).ifPresent(csrfTokenStore::remover);
         } else {
             tokenStateService.rotate(
                     user.getId(),

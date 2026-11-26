@@ -7,17 +7,24 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.accesscontrol.security.PermissionAuthorizationService;
 import valhalla.core.stock.app.modules.accesscontrol.security.PermissionResolver;
+import valhalla.core.stock.app.modules.auth.security.CustomUserDetailsService;
 import valhalla.core.stock.app.modules.caixa.exception.AutorizacaoCaixaNegadaException;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.entity.UserStatus;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
+import valhalla.core.stock.app.modules.users.service.UserAccessHistoryService;
 
+import java.time.LocalDateTime;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 @Service
 public class AutorizadorOperacaoCaixaService {
+
+    private static final String MENSAGEM_CREDENCIAIS_INVALIDAS =
+            "Credenciais de autorização inválidas ou sem permissão para esta operação";
 
     public record AutorizadorResolvido(UUID usuarioId, String nome) {
     }
@@ -26,20 +33,23 @@ public class AutorizadorOperacaoCaixaService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final ContextoCaixa contextoCaixa;
+    private final UserAccessHistoryService userAccessHistoryService;
 
     public AutorizadorOperacaoCaixaService(
             PermissionAuthorizationService permissionAuthorizationService,
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
-            ContextoCaixa contextoCaixa
+            ContextoCaixa contextoCaixa,
+            UserAccessHistoryService userAccessHistoryService
     ) {
         this.permissionAuthorizationService = permissionAuthorizationService;
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.contextoCaixa = contextoCaixa;
+        this.userAccessHistoryService = userAccessHistoryService;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(noRollbackFor = AutorizacaoCaixaNegadaException.class)
     public Optional<AutorizadorResolvido> tentarResolverAutorizador(
             String codigoPermissao,
             String autorizadorEmail,
@@ -55,24 +65,22 @@ public class AutorizadorOperacaoCaixaService {
                         "Informe o e-mail e a senha do autorizador para aprovar a operação"
                 );
             }
-            UserEntity autorizador = userRepository.findByEmailIgnoreCase(autorizadorEmail.trim())
+            String emailNormalizado = autorizadorEmail.trim().toLowerCase(Locale.ROOT);
+            LocalDateTime agora = LocalDateTime.now();
+            UserEntity autorizador = userRepository.findWithAccessGraphByEmailIgnoreCase(emailNormalizado)
                     .filter(u -> u.getStatus() == UserStatus.ATIVO)
+                    .filter(u -> u.getLockedUntil() == null || !u.getLockedUntil().isAfter(agora))
                     .filter(u -> u.getEstablishment() != null
                             && estabelecimentoId.equals(u.getEstablishment().getId()))
-                    .orElseThrow(() -> new AutorizacaoCaixaNegadaException(
-                            "Credenciais de autorização inválidas ou sem permissão para esta operação"
-                    ));
+                    .orElseThrow(() -> new AutorizacaoCaixaNegadaException(MENSAGEM_CREDENCIAIS_INVALIDAS));
 
             if (!passwordEncoder.matches(autorizadorSenha, autorizador.getPasswordHash())) {
-                throw new AutorizacaoCaixaNegadaException(
-                        "Credenciais de autorização inválidas ou sem permissão para esta operação"
-                );
+                userAccessHistoryService.registrarSenhaIncorreta(emailNormalizado);
+                throw new AutorizacaoCaixaNegadaException(MENSAGEM_CREDENCIAIS_INVALIDAS);
             }
 
             if (!usuarioPossuiPermissao(autorizador, codigoPermissao)) {
-                throw new AutorizacaoCaixaNegadaException(
-                        "O usuário informado não possui a permissão " + codigoPermissao
-                );
+                throw new AutorizacaoCaixaNegadaException(MENSAGEM_CREDENCIAIS_INVALIDAS);
             }
 
             return Optional.of(new AutorizadorResolvido(autorizador.getId(), autorizador.getName()));
@@ -90,7 +98,7 @@ public class AutorizadorOperacaoCaixaService {
         return Optional.empty();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(noRollbackFor = AutorizacaoCaixaNegadaException.class)
     public AutorizadorResolvido exigirAutorizador(
             String codigoPermissao,
             String autorizadorEmail,
@@ -103,7 +111,7 @@ public class AutorizadorOperacaoCaixaService {
 
     private boolean usuarioPossuiPermissao(UserEntity usuario, String codigoPermissao) {
         if (usuario.getProfile() != null
-                && "Gerente".equalsIgnoreCase(usuario.getProfile().getName())) {
+                && "GERENTE".equals(CustomUserDetailsService.normalizeRole(usuario.getProfile().getName()))) {
             return true;
         }
         Set<String> permissoes = PermissionResolver.effectiveCodes(usuario);

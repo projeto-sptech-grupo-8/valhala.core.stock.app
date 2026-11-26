@@ -16,7 +16,7 @@ public class UserFunctionalityOverrideEntity {
     @JoinColumn(name = "usuario_id", nullable = false)
     private UserEntity user;
 
-    @ManyToOne(fetch = FetchType.EAGER, optional = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "funcionalidade_id", nullable = false)
     private FuncionalidadeEntity functionality;
 

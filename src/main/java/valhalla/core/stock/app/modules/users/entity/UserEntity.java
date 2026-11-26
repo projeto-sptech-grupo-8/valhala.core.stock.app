@@ -42,12 +42,12 @@ public class UserEntity {
     @JoinColumn(name = "estabelecimento_id", nullable = false)
     private EstablishmentEntity establishment;
 
-    @ManyToOne(fetch = FetchType.EAGER, optional = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "perfil_id", nullable = false)
     private ProfileEntity profile;
 
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL,
-            orphanRemoval = true, fetch = FetchType.EAGER)
+            orphanRemoval = true, fetch = FetchType.LAZY)
     @Builder.Default
     private Set<UserFunctionalityOverrideEntity> functionalityOverrides = new HashSet<>();
 
