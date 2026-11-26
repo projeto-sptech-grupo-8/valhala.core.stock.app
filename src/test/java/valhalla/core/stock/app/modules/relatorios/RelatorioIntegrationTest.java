@@ -2,16 +2,19 @@ package valhalla.core.stock.app.modules.relatorios;
 
 import com.jayway.jsonpath.JsonPath;
 import jakarta.servlet.http.Cookie;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MvcResult;
 import valhalla.core.stock.app.modules.estoque.entity.CategoriaEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.support.PostgresIntegrationTestSupport;
 import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
+import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
@@ -20,6 +23,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -143,10 +147,69 @@ class RelatorioIntegrationTest extends PostgresIntegrationTestSupport {
         Cookie estoquista = autenticarComPermissoes("estoque@meraki.com", "VISUALIZAR_ESTOQUE");
         mockMvc.perform(get("/relatorios/abc").param("dias", "7").cookie(estoquista))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(get("/relatorios/abc/exportar").param("dias", "7").cookie(estoquista))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/relatorios/ruptura/exportar").param("dias", "7").cookie(estoquista))
+                .andExpect(status().isForbidden());
 
         Cookie financeiro = autenticarComPermissoes("financeiro@meraki.com", "VISUALIZAR_RELATORIOS");
         mockMvc.perform(get("/relatorios/abc").param("dias", "7").cookie(financeiro))
                 .andExpect(status().isOk());
+        mockMvc.perform(get("/relatorios/abc/exportar").param("dias", "7").cookie(financeiro))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/relatorios/ruptura/exportar").param("dias", "7").cookie(financeiro))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void deveExportarCurvaAbcERupturaEmExcel() throws Exception {
+        vender("BALCAO", 0, cerveja, 10);
+        ProdutoEntity rum = produtoPadrao("Rum", categoria("Rum"), false, "0");
+        UUID usuario = userRepository.findByEmailIgnoreCase("gerente@meraki.com").orElseThrow().getId();
+        jdbc.update("""
+                INSERT INTO movimentacao_estoque (estoque_id, usuario_id, tipo, quantidade, saldo_anterior,
+                                                  saldo_posterior, motivo, ocorrido_em)
+                SELECT e.id, ?, 'AJUSTE_NEGATIVO', 5, 5, 0, 'Correção', now() - interval '40 days'
+                FROM estoque e WHERE e.produto_id = ?
+                """, usuario, rum.getId());
+        entityManager.flush();
+
+        MvcResult abcExportado = mockMvc.perform(get("/relatorios/abc/exportar").param("dias", "7").cookie(gerente))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .andExpect(header().string("Content-Disposition",
+                        org.hamcrest.Matchers.allOf(
+                                org.hamcrest.Matchers.containsString("curva-abc-7d"),
+                                org.hamcrest.Matchers.containsString(".xlsx"))))
+                .andReturn();
+
+        try (var wb = new XSSFWorkbook(new ByteArrayInputStream(abcExportado.getResponse().getContentAsByteArray()))) {
+            var sheet = wb.getSheet("Curva ABC");
+            assertThat(sheet).isNotNull();
+            assertThat(sheet.getPhysicalNumberOfRows()).isEqualTo(2);
+            assertThat(sheet.getRow(1).getCell(1).getStringCellValue()).isEqualTo("Cerveja Lata");
+            assertThat(sheet.getRow(1).getCell(4).getNumericCellValue()).isEqualTo(200.0);
+            assertThat(sheet.getRow(1).getCell(7).getStringCellValue()).isEqualTo("A");
+        }
+
+        MvcResult rupturaExportada = mockMvc.perform(get("/relatorios/ruptura/exportar").param("dias", "7").cookie(gerente))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .andExpect(header().string("Content-Disposition",
+                        org.hamcrest.Matchers.allOf(
+                                org.hamcrest.Matchers.containsString("falta-estoque-7d"),
+                                org.hamcrest.Matchers.containsString(".xlsx"))))
+                .andReturn();
+
+        try (var wb = new XSSFWorkbook(new ByteArrayInputStream(rupturaExportada.getResponse().getContentAsByteArray()))) {
+            var sheet = wb.getSheet("Falta de Estoque");
+            assertThat(sheet).isNotNull();
+            assertThat(sheet.getPhysicalNumberOfRows()).isEqualTo(4);
+            assertThat(sheet.getRow(1).getCell(0).getStringCellValue()).isEqualTo("Cerveja Lata");
+            assertThat(sheet.getRow(1).getCell(7).getStringCellValue()).isEqualTo("Recorrente");
+        }
     }
 
     /** Venda no caixa pelo gerente; itens: pares (produto, quantidade). */

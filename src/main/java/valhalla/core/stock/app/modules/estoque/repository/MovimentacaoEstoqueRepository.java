@@ -81,6 +81,8 @@ public interface MovimentacaoEstoqueRepository extends JpaRepository<Movimentaca
 
     boolean existsByEstoqueProdutoId(UUID produtoId);
 
+    boolean existsByOrigemDrinkId(UUID origemDrinkId);
+
     /**
      * Saídas por venda e consumo desde o instante informado, por produto: SAIDA e SAIDA_DRINK menos os
      * estornos de vendas canceladas (AJUSTE_POSITIVO vinculado a item de pedido).

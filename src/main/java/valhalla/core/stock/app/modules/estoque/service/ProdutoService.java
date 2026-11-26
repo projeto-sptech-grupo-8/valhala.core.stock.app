@@ -1,7 +1,6 @@
 package valhalla.core.stock.app.modules.estoque.service;
 
 import jakarta.persistence.EntityNotFoundException;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -12,6 +11,9 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import valhalla.core.stock.app.modules.caixa.fiscal.repository.ItemNotaFiscalRepository;
+import valhalla.core.stock.app.modules.caixa.pedido.repository.ItemPedidoRepository;
+import valhalla.core.stock.app.modules.caixa.pedido.repository.ReservaEstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoAtualizacaoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoResponseDto;
@@ -22,6 +24,7 @@ import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
 import valhalla.core.stock.app.modules.estoque.exception.ProdutoPossuiMovimentacoesException;
 import valhalla.core.stock.app.modules.estoque.mapper.ProdutoMapper;
 import valhalla.core.stock.app.modules.estoque.repository.CategoriaRepository;
+import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkRepository;
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
@@ -51,6 +54,10 @@ public class ProdutoService {
     private final EstoqueRepository estoqueRepository;
     private final MovimentacaoEstoqueService movimentacaoEstoqueService;
     private final MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
+    private final ComposicaoDrinkRepository composicaoDrinkRepository;
+    private final ItemPedidoRepository itemPedidoRepository;
+    private final ItemNotaFiscalRepository itemNotaFiscalRepository;
+    private final ReservaEstoqueRepository reservaEstoqueRepository;
     private final BusinessEventLogger businessEventLogger;
 
     public ProdutoService(
@@ -59,6 +66,10 @@ public class ProdutoService {
             EstoqueRepository estoqueRepository,
             MovimentacaoEstoqueService movimentacaoEstoqueService,
             MovimentacaoEstoqueRepository movimentacaoEstoqueRepository,
+            ComposicaoDrinkRepository composicaoDrinkRepository,
+            ItemPedidoRepository itemPedidoRepository,
+            ItemNotaFiscalRepository itemNotaFiscalRepository,
+            ReservaEstoqueRepository reservaEstoqueRepository,
             BusinessEventLogger businessEventLogger
     ) {
         this.produtoRepository = produtoRepository;
@@ -66,6 +77,10 @@ public class ProdutoService {
         this.estoqueRepository = estoqueRepository;
         this.movimentacaoEstoqueService = movimentacaoEstoqueService;
         this.movimentacaoEstoqueRepository = movimentacaoEstoqueRepository;
+        this.composicaoDrinkRepository = composicaoDrinkRepository;
+        this.itemPedidoRepository = itemPedidoRepository;
+        this.itemNotaFiscalRepository = itemNotaFiscalRepository;
+        this.reservaEstoqueRepository = reservaEstoqueRepository;
         this.businessEventLogger = businessEventLogger;
     }
 
@@ -278,6 +293,9 @@ public class ProdutoService {
             """)
     public ProdutoResponseDto atualizarProduto(UUID idProduto, ProdutoAtualizacaoRequestDto dto) {
         ProdutoEntity produto = buscarProdutoDoEstabelecimentoAtual(idProduto);
+        if (Boolean.FALSE.equals(dto.ativo()) && produto.isAtivo()) {
+            validarPodeInativar(produto);
+        }
         validarAlteracaoDeFracionamento(produto, dto);
         validarAlteracaoDeFardo(produto, dto);
         if (dto.volumeEmbalagemMl() != null) {
@@ -306,18 +324,51 @@ public class ProdutoService {
             """)
     public void excluirProduto(UUID idProduto) {
         ProdutoEntity produto = buscarProdutoDoEstabelecimentoAtual(idProduto);
-        estoqueRepository.deleteByProdutoId(produto.getId());
+        if (!produto.isAtivo()) {
+            return;
+        }
+        validarPodeInativar(produto);
 
-        try {
-            produtoRepository.delete(produto);
-            produtoRepository.flush();
-            businessEventLogger.success("stock.product.deleted", "product", idProduto);
-        } catch (DataIntegrityViolationException excecao) {
+        produto.setAtivo(false);
+        produtoRepository.saveAndFlush(produto);
+        businessEventLogger.success("stock.product.inactivated", "product", idProduto);
+    }
+
+    private void validarPodeInativar(ProdutoEntity produto) {
+        UUID id = produto.getId();
+        if (movimentacaoEstoqueRepository.existsByEstoqueProdutoId(id)
+                || movimentacaoEstoqueRepository.existsByOrigemDrinkId(id)) {
             throw new ProdutoPossuiMovimentacoesException(
-                    "Produto não pode ser excluído porque possui movimentações ou vínculos registrados",
-                    excecao
+                    "Produto não pode ser inativado porque possui movimentações de estoque registradas"
             );
         }
+        if (itemPedidoRepository.existsByProdutoId(id)
+                || itemNotaFiscalRepository.existsByProdutoId(id)
+                || reservaEstoqueRepository.existsByProdutoIdOrOrigemDrinkId(id, id)) {
+            throw new ProdutoPossuiMovimentacoesException(
+                    "Produto não pode ser inativado porque possui histórico de pedidos, notas fiscais ou reservas"
+            );
+        }
+        if (composicaoDrinkRepository.existsByProdutoId(id)) {
+            throw new ProdutoPossuiMovimentacoesException(
+                    "Produto não pode ser inativado porque é utilizado como ingrediente em receita de drink"
+            );
+        }
+        if (estoqueRepository.findByProdutoId(id)
+                .filter(ProdutoService::temSaldoPositivo)
+                .isPresent()) {
+            throw new ProdutoPossuiMovimentacoesException(
+                    "Produto não pode ser inativado porque possui saldo em estoque"
+            );
+        }
+    }
+
+    private static boolean temSaldoPositivo(EstoqueEntity estoque) {
+        boolean saldoAtualPositivo = estoque.getQuantidadeAtual() != null
+                && estoque.getQuantidadeAtual().signum() > 0;
+        boolean reservadoPositivo = estoque.getQuantidadeReservada() != null
+                && estoque.getQuantidadeReservada().signum() > 0;
+        return saldoAtualPositivo || reservadoPositivo;
     }
 
     private EstoqueEntity criarEstoqueInicial(

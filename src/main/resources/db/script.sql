@@ -1215,7 +1215,7 @@ CREATE TABLE conta_financeira (
     CONSTRAINT ck_conta_financeira_categoria
         CHECK (categoria IN ('MERCADORIA', 'DESPESA_FIXA', 'DESPESA_VARIAVEL')),
     CONSTRAINT ck_conta_financeira_categoria_so_pagar CHECK ((tipo = 'PAGAR') = (categoria IS NOT NULL)),
-    CONSTRAINT ck_conta_financeira_status CHECK (status IN ('ABERTA', 'PAGA', 'CANCELADA')),
+    CONSTRAINT ck_conta_financeira_status CHECK (status IN ('ABERTA', 'PAGA', 'INATIVA')),
     CONSTRAINT ck_conta_financeira_baixa
         CHECK ((status = 'PAGA') = (pago_em IS NOT NULL AND valor_pago IS NOT NULL)),
     CONSTRAINT ck_conta_financeira_valor_pago CHECK (valor_pago IS NULL OR valor_pago > 0),

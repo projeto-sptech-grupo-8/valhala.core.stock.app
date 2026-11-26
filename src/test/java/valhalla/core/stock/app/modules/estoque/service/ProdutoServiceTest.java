@@ -7,7 +7,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
@@ -22,6 +21,9 @@ import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
+import valhalla.core.stock.app.modules.caixa.fiscal.repository.ItemNotaFiscalRepository;
+import valhalla.core.stock.app.modules.caixa.pedido.repository.ItemPedidoRepository;
+import valhalla.core.stock.app.modules.caixa.pedido.repository.ReservaEstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoAtualizacaoRequestDto;
 import valhalla.core.stock.app.modules.estoque.dto.ProdutoResponseDto;
@@ -31,6 +33,7 @@ import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
 import valhalla.core.stock.app.modules.estoque.exception.ProdutoPossuiMovimentacoesException;
 import valhalla.core.stock.app.modules.estoque.repository.CategoriaRepository;
+import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkRepository;
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
@@ -49,6 +52,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -60,6 +64,10 @@ class ProdutoServiceTest {
     @Mock private EstoqueRepository estoqueRepository;
     @Mock private MovimentacaoEstoqueService movimentacaoEstoqueService;
     @Mock private MovimentacaoEstoqueRepository movimentacaoEstoqueRepository;
+    @Mock private ComposicaoDrinkRepository composicaoDrinkRepository;
+    @Mock private ItemPedidoRepository itemPedidoRepository;
+    @Mock private ItemNotaFiscalRepository itemNotaFiscalRepository;
+    @Mock private ReservaEstoqueRepository reservaEstoqueRepository;
     @Mock private BusinessEventLogger businessEventLogger;
     @InjectMocks private ProdutoService produtoService;
 
@@ -245,35 +253,126 @@ class ProdutoServiceTest {
     }
 
     @Test
-    void deveExcluirProdutoComSucesso() {
+    void deveInativarProdutoLogicamenteQuandoNaoPossuiHistoricoOuSaldo() {
         UUID estabelecimentoId = UUID.randomUUID();
         CategoriaEntity categoria = categoria(estabelecimentoId, true);
         ProdutoEntity produto = produto(estabelecimentoId, categoria, "PRD-AAAA0001", "Vodka Absolut", ProdutoTipo.PADRAO, true);
+        EstoqueEntity estoqueZerado = new EstoqueEntity();
+        estoqueZerado.setProduto(produto);
+        estoqueZerado.setQuantidadeAtual(BigDecimal.ZERO);
+        estoqueZerado.setQuantidadeReservada(BigDecimal.ZERO);
 
         autenticarNoEstabelecimento(estabelecimentoId);
         when(produtoRepository.findById(produto.getId())).thenReturn(Optional.of(produto));
+        when(estoqueRepository.findByProdutoId(produto.getId())).thenReturn(Optional.of(estoqueZerado));
 
         produtoService.excluirProduto(produto.getId());
 
-        verify(estoqueRepository).deleteByProdutoId(produto.getId());
-        verify(produtoRepository).delete(produto);
-        verify(produtoRepository).flush();
+        assertThat(produto.isAtivo()).isFalse();
+        verify(produtoRepository).saveAndFlush(produto);
+        verify(estoqueRepository, never()).deleteByProdutoId(any());
+        verify(produtoRepository, never()).delete(any(ProdutoEntity.class));
+
+        // Idempotente quando já está inativo
+        produtoService.excluirProduto(produto.getId());
+        verify(produtoRepository, org.mockito.Mockito.times(1)).saveAndFlush(produto);
     }
 
     @Test
-    void deveLancarProdutoPossuiMovimentacoesExceptionAoExcluirComVinculos() {
+    void deveLancarProdutoPossuiMovimentacoesExceptionAoInativarComHistoricoOuVinculos() {
         UUID estabelecimentoId = UUID.randomUUID();
         CategoriaEntity categoria = categoria(estabelecimentoId, true);
-        ProdutoEntity produto = produto(estabelecimentoId, categoria, "PRD-AAAA0001", "Vodka Absolut", ProdutoTipo.PADRAO, true);
-
         autenticarNoEstabelecimento(estabelecimentoId);
-        when(produtoRepository.findById(produto.getId())).thenReturn(Optional.of(produto));
-        org.mockito.Mockito.doThrow(new DataIntegrityViolationException("FK constraint"))
-                .when(produtoRepository).flush();
 
-        assertThatThrownBy(() -> produtoService.excluirProduto(produto.getId()))
+        ProdutoEntity comMovimentacao = produto(estabelecimentoId, categoria, "PRD-AAAA0001", "Vodka", ProdutoTipo.PADRAO, true);
+        when(produtoRepository.findById(comMovimentacao.getId())).thenReturn(Optional.of(comMovimentacao));
+        when(movimentacaoEstoqueRepository.existsByEstoqueProdutoId(comMovimentacao.getId())).thenReturn(true);
+        assertThatThrownBy(() -> produtoService.excluirProduto(comMovimentacao.getId()))
                 .isInstanceOf(ProdutoPossuiMovimentacoesException.class)
-                .hasMessage("Produto não pode ser excluído porque possui movimentações ou vínculos registrados");
+                .hasMessage("Produto não pode ser inativado porque possui movimentações de estoque registradas");
+
+        ProdutoEntity drinkComSaida = produto(estabelecimentoId, categoria, "PRD-DRK0001", "Gin Tônica", ProdutoTipo.DRINK, true);
+        when(produtoRepository.findById(drinkComSaida.getId())).thenReturn(Optional.of(drinkComSaida));
+        when(movimentacaoEstoqueRepository.existsByOrigemDrinkId(drinkComSaida.getId())).thenReturn(true);
+        assertThatThrownBy(() -> produtoService.excluirProduto(drinkComSaida.getId()))
+                .isInstanceOf(ProdutoPossuiMovimentacoesException.class);
+
+        ProdutoEntity emPedido = produto(estabelecimentoId, categoria, "PRD-PED0001", "Cerveja", ProdutoTipo.PADRAO, true);
+        when(produtoRepository.findById(emPedido.getId())).thenReturn(Optional.of(emPedido));
+        when(itemPedidoRepository.existsByProdutoId(emPedido.getId())).thenReturn(true);
+        assertThatThrownBy(() -> produtoService.excluirProduto(emPedido.getId()))
+                .isInstanceOf(ProdutoPossuiMovimentacoesException.class)
+                .hasMessage("Produto não pode ser inativado porque possui histórico de pedidos, notas fiscais ou reservas");
+
+        ProdutoEntity emNota = produto(estabelecimentoId, categoria, "PRD-NF0001", "Vinho", ProdutoTipo.PADRAO, true);
+        when(produtoRepository.findById(emNota.getId())).thenReturn(Optional.of(emNota));
+        when(itemNotaFiscalRepository.existsByProdutoId(emNota.getId())).thenReturn(true);
+        assertThatThrownBy(() -> produtoService.excluirProduto(emNota.getId()))
+                .isInstanceOf(ProdutoPossuiMovimentacoesException.class);
+
+        ProdutoEntity emReserva = produto(estabelecimentoId, categoria, "PRD-RES0001", "Gin", ProdutoTipo.PADRAO, true);
+        when(produtoRepository.findById(emReserva.getId())).thenReturn(Optional.of(emReserva));
+        when(reservaEstoqueRepository.existsByProdutoIdOrOrigemDrinkId(emReserva.getId(), emReserva.getId())).thenReturn(true);
+        assertThatThrownBy(() -> produtoService.excluirProduto(emReserva.getId()))
+                .isInstanceOf(ProdutoPossuiMovimentacoesException.class);
+
+        ProdutoEntity ingrediente = produto(estabelecimentoId, categoria, "PRD-ING0001", "Água Tônica", ProdutoTipo.PADRAO, true);
+        when(produtoRepository.findById(ingrediente.getId())).thenReturn(Optional.of(ingrediente));
+        when(composicaoDrinkRepository.existsByProdutoId(ingrediente.getId())).thenReturn(true);
+        assertThatThrownBy(() -> produtoService.excluirProduto(ingrediente.getId()))
+                .isInstanceOf(ProdutoPossuiMovimentacoesException.class)
+                .hasMessage("Produto não pode ser inativado porque é utilizado como ingrediente em receita de drink");
+
+        ProdutoEntity comSaldo = produto(estabelecimentoId, categoria, "PRD-SLD0001", "Red Bull", ProdutoTipo.PADRAO, true);
+        EstoqueEntity estoquePositivo = new EstoqueEntity();
+        estoquePositivo.setProduto(comSaldo);
+        estoquePositivo.setQuantidadeAtual(BigDecimal.ONE);
+        estoquePositivo.setQuantidadeReservada(BigDecimal.ZERO);
+        when(produtoRepository.findById(comSaldo.getId())).thenReturn(Optional.of(comSaldo));
+        when(estoqueRepository.findByProdutoId(comSaldo.getId())).thenReturn(Optional.of(estoquePositivo));
+        assertThatThrownBy(() -> produtoService.excluirProduto(comSaldo.getId()))
+                .isInstanceOf(ProdutoPossuiMovimentacoesException.class)
+                .hasMessage("Produto não pode ser inativado porque possui saldo em estoque");
+
+        ProdutoEntity comReservaEstoque = produto(estabelecimentoId, categoria, "PRD-RSV0001", "Suco", ProdutoTipo.PADRAO, true);
+        EstoqueEntity estoqueComReserva = new EstoqueEntity();
+        estoqueComReserva.setProduto(comReservaEstoque);
+        estoqueComReserva.setQuantidadeAtual(BigDecimal.ZERO);
+        estoqueComReserva.setQuantidadeReservada(BigDecimal.ONE);
+        when(produtoRepository.findById(comReservaEstoque.getId())).thenReturn(Optional.of(comReservaEstoque));
+        when(estoqueRepository.findByProdutoId(comReservaEstoque.getId())).thenReturn(Optional.of(estoqueComReserva));
+        assertThatThrownBy(() -> produtoService.excluirProduto(comReservaEstoque.getId()))
+                .isInstanceOf(ProdutoPossuiMovimentacoesException.class);
+    }
+
+    @Test
+    void validaInativacaoEReativacaoViaAtualizacaoDeProduto() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        CategoriaEntity categoria = categoria(estabelecimentoId, true);
+        autenticarNoEstabelecimento(estabelecimentoId);
+
+        ProdutoEntity produto = produto(estabelecimentoId, categoria, "PRD-AT0001", "Whisky", ProdutoTipo.PADRAO, true);
+        when(produtoRepository.findById(produto.getId())).thenReturn(Optional.of(produto));
+        when(movimentacaoEstoqueRepository.existsByEstoqueProdutoId(produto.getId())).thenReturn(true);
+
+        assertThatThrownBy(() -> produtoService.atualizarProduto(produto.getId(), new ProdutoAtualizacaoRequestDto(
+                null, null, null, null, null, null, null, null, false
+        ))).isInstanceOf(ProdutoPossuiMovimentacoesException.class);
+
+        ProdutoEntity semHistorico = produto(estabelecimentoId, categoria, "PRD-AT0002", "Energético", ProdutoTipo.PADRAO, true);
+        when(produtoRepository.findById(semHistorico.getId())).thenReturn(Optional.of(semHistorico));
+        when(estoqueRepository.findByProdutoId(semHistorico.getId())).thenReturn(Optional.of(new EstoqueEntity()));
+        when(produtoRepository.saveAndFlush(any(ProdutoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ProdutoResponseDto inativado = produtoService.atualizarProduto(semHistorico.getId(), new ProdutoAtualizacaoRequestDto(
+                null, null, null, null, null, null, null, null, false
+        ));
+        assertThat(inativado.ativo()).isFalse();
+
+        ProdutoResponseDto reativado = produtoService.atualizarProduto(semHistorico.getId(), new ProdutoAtualizacaoRequestDto(
+                null, null, null, null, null, null, null, null, true
+        ));
+        assertThat(reativado.ativo()).isTrue();
     }
 
     @Test

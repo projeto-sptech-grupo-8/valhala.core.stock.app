@@ -62,6 +62,101 @@ class ProdutoIntegrationTest extends EstoqueIntegrationTestSupport {
                 .andExpect(jsonPath("$.estoqueMinimo").value(5));
         mockMvc.perform(delete("/produtos/{id}", id).cookie(gerente).with(csrf(gerente)))
                 .andExpect(status().isNoContent());
+        mockMvc.perform(get("/produtos/{id}", id).cookie(gerente))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ativo").value(false));
+    }
+
+    @Test
+    void inativaProdutoSemHistoricoEBloqueiaQuandoHaMovimentacaoOuVinculoEmDrink() throws Exception {
+        CategoriaEntity bebidas = categoria("Bebidas");
+        Cookie gerente = autenticarGerente("gerente-inativar@meraki.com");
+
+        // Produto padrão com saldo inicial zero e lote inicial zerado (cenário do formulário web) deve permitir inativação lógica
+        MvcResult semHistoricoRes = mockMvc.perform(post("/produtos").cookie(gerente).with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nome":"Água Tônica Zero","categoriaId":%d,"unidadeMedida":"un",
+                                 "precoVenda":8.00,"precoCusto":3.50,"tipo":"PADRAO",
+                                 "quantidadeInicial":0,"validade":"2027-06-30"}
+                                """.formatted(bebidas.getId())))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String semHistoricoId = com.jayway.jsonpath.JsonPath.read(
+                semHistoricoRes.getResponse().getContentAsString(), "$.id").toString();
+
+        mockMvc.perform(delete("/produtos/{id}", semHistoricoId).cookie(gerente).with(csrf(gerente)))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/produtos/{id}", semHistoricoId).cookie(gerente))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ativo").value(false));
+
+        // Reativação e inativação via PATCH funcionam quando não há histórico
+        mockMvc.perform(patch("/produtos/{id}", semHistoricoId).cookie(gerente).with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"ativo\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ativo").value(true));
+        mockMvc.perform(patch("/produtos/{id}", semHistoricoId).cookie(gerente).with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"ativo\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ativo").value(false));
+
+        // Produto padrão criado com saldo inicial > 0 gera ENTRADA_INICIAL e deve bloquear inativação (DELETE e PATCH)
+        MvcResult comSaldoRes = mockMvc.perform(post("/produtos").cookie(gerente).with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nome":"Cerveja Premium","categoriaId":%d,"unidadeMedida":"un",
+                                 "precoVenda":15.00,"precoCusto":8.00,"tipo":"PADRAO","quantidadeInicial":10}
+                                """.formatted(bebidas.getId())))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String comSaldoId = com.jayway.jsonpath.JsonPath.read(
+                comSaldoRes.getResponse().getContentAsString(), "$.id").toString();
+
+        mockMvc.perform(delete("/produtos/{id}", comSaldoId).cookie(gerente).with(csrf(gerente)))
+                .andExpect(status().isConflict());
+        mockMvc.perform(patch("/produtos/{id}", comSaldoId).cookie(gerente).with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"ativo\":false}"))
+                .andExpect(status().isConflict());
+
+        // Produto ingrediente sem movimentação mas vinculado a receita de drink deve bloquear inativação;
+        // o próprio drink sem histórico pode ser inativado
+        MvcResult ingredienteRes = mockMvc.perform(post("/produtos").cookie(gerente).with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nome":"Xarope de Hortelã","categoriaId":%d,"unidadeMedida":"un",
+                                 "precoVenda":35.00,"precoCusto":15.00,"tipo":"PADRAO",
+                                 "fracionado":true,"volumeEmbalagemMl":1000,"quantidadeInicial":0}
+                                """.formatted(bebidas.getId())))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String ingredienteId = com.jayway.jsonpath.JsonPath.read(
+                ingredienteRes.getResponse().getContentAsString(), "$.id").toString();
+
+        MvcResult drinkRes = mockMvc.perform(post("/produtos").cookie(gerente).with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nome":"Soda Italiana","categoriaId":%d,"unidadeMedida":"copo",
+                                 "precoVenda":18.00,"tipo":"DRINK"}
+                                """.formatted(bebidas.getId())))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String drinkId = com.jayway.jsonpath.JsonPath.read(
+                drinkRes.getResponse().getContentAsString(), "$.id").toString();
+
+        mockMvc.perform(put("/drinks/{idDrink}/receita", drinkId).cookie(gerente).with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ingredientes\":[{\"produtoId\":\"%s\",\"quantidade\":30,\"unidadeConsumo\":\"ML\"}]}"
+                                .formatted(ingredienteId)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(delete("/produtos/{id}", ingredienteId).cookie(gerente).with(csrf(gerente)))
+                .andExpect(status().isConflict());
+        mockMvc.perform(delete("/produtos/{id}", drinkId).cookie(gerente).with(csrf(gerente)))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/produtos/{id}", drinkId).cookie(gerente))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ativo").value(false));
     }
 
     @Test

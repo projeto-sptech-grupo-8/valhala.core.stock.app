@@ -171,6 +171,8 @@ public class ProdutoController {
             @ApiResponse(responseCode = "403", description = "Usuário sem permissão ou produto de outro estabelecimento.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
             @ApiResponse(responseCode = "404", description = "Produto ou categoria não encontrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "Tentativa de inativar produto com movimentações, histórico ou vínculos.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     public ResponseEntity<ProdutoResponseDto> atualizarProduto(
@@ -182,16 +184,16 @@ public class ProdutoController {
 
     @DeleteMapping("/{id}")
     @SecurityRequirement(name = "csrfTokenHeader")
-    @Operation(summary = "Excluir produto sem movimentações ou vínculos")
+    @Operation(summary = "Inativar produto (exclusão lógica) sem movimentações ou histórico vinculado")
     @ApiResponses({
-            @ApiResponse(responseCode = "204", description = "Produto excluído."),
+            @ApiResponse(responseCode = "204", description = "Produto inativado."),
             @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
             @ApiResponse(responseCode = "403", description = "Usuário sem permissão ou produto de outro estabelecimento.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
             @ApiResponse(responseCode = "404", description = "Produto não encontrado.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
-            @ApiResponse(responseCode = "409", description = "Produto possui movimentações ou vínculos.",
+            @ApiResponse(responseCode = "409", description = "Produto possui movimentações, histórico ou vínculos que impedem a inativação.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     public ResponseEntity<Void> excluirProduto(@PathVariable UUID id) {

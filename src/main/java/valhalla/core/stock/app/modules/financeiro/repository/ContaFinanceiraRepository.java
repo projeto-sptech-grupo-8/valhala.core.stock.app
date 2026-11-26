@@ -16,7 +16,7 @@ public interface ContaFinanceiraRepository
 
     Optional<ContaFinanceiraEntity> findByIdAndEstabelecimentoId(UUID id, UUID estabelecimentoId);
 
-    /** Bloqueia a conta para alteração, baixa ou cancelamento (evita baixa em dobro). */
+    /** Bloqueia a conta para alteração, baixa ou inativação (evita baixa em dobro). */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select c from ContaFinanceiraEntity c where c.id = :id and c.estabelecimentoId = :idEstabelecimento")
     Optional<ContaFinanceiraEntity> buscarParaAtualizacao(@Param("id") UUID id,

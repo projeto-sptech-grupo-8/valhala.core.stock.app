@@ -71,13 +71,13 @@ public class IndicadoresContasRepository {
                 """, new MapSqlParameterSource().addValue("estab", estab).addValue("ate", ate), BigDecimal.class);
     }
 
-    /** Despesas do DRE por competência (vencimento no período), sem as canceladas e sem mercadoria. */
+    /** Despesas do DRE por competência (vencimento no período), sem as inativas e sem mercadoria. */
     public Map<String, BigDecimal> despesasPorCategoria(UUID estab, LocalDate inicio, LocalDate fim) {
         Map<String, BigDecimal> resultado = new HashMap<>();
         jdbc.query("""
                 SELECT categoria, SUM(COALESCE(valor_pago, valor)) AS valor
                 FROM conta_financeira
-                WHERE estabelecimento_id = :estab AND tipo = 'PAGAR' AND status <> 'CANCELADA'
+                WHERE estabelecimento_id = :estab AND tipo = 'PAGAR' AND status IN ('ABERTA', 'PAGA')
                   AND categoria IN ('DESPESA_FIXA', 'DESPESA_VARIAVEL')
                   AND vencimento >= :inicio AND vencimento <= :fim
                 GROUP BY categoria
