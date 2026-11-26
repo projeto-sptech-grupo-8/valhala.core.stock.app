@@ -1,10 +1,10 @@
 -- Substitui o status CANCELADA por INATIVA nas contas financeiras (módulo financeiro).
+ALTER TABLE conta_financeira
+    DROP CONSTRAINT IF EXISTS ck_conta_financeira_status;
+
 UPDATE conta_financeira
 SET status = 'INATIVA'
 WHERE status = 'CANCELADA';
-
-ALTER TABLE conta_financeira
-    DROP CONSTRAINT IF EXISTS ck_conta_financeira_status;
 
 ALTER TABLE conta_financeira
     ADD CONSTRAINT ck_conta_financeira_status
