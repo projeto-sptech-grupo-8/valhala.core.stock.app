@@ -38,10 +38,10 @@ class RequestAccessMetadataExtractorTest {
     }
 
     @Test
-    void deveExtrairPrimeiroIpDeXForwardedForEDispositivoWindowsChrome() {
+    void deveIgnorarXForwardedForEExtrairRemoteAddrComDispositivoWindowsChrome() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.addHeader("X-Forwarded-For", "10.0.0.24, 192.168.0.1");
-        request.setRemoteAddr("127.0.0.1");
+        request.addHeader("X-Forwarded-For", "198.51.100.99, 192.168.0.1");
+        request.setRemoteAddr("10.0.0.24");
         request.addHeader("User-Agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36");
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
@@ -98,7 +98,7 @@ class RequestAccessMetadataExtractorTest {
     @Test
     void deveTruncarUserAgentEIpMuitoLongos() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.addHeader("X-Forwarded-For", "1".repeat(80));
+        request.setRemoteAddr("1".repeat(80));
         request.addHeader("User-Agent", "A".repeat(600));
 
         RequestAccessMetadataExtractor.AccessMetadata metadata = extractor.extractFrom(request);

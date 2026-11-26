@@ -27,7 +27,7 @@ public class CustomUserDetailsService implements UserDetailsService {
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
         String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
         UserEntity user = userRepository
-                .findByEmailIgnoreCase(normalizedEmail)
+                .findWithAccessGraphByEmailIgnoreCase(normalizedEmail)
                 .orElseThrow(() -> new UsernameNotFoundException("Credenciais inválidas"));
 
         return User.withUsername(user.getEmail())

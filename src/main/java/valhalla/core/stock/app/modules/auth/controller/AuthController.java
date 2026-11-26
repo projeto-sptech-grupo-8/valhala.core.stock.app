@@ -21,7 +21,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import valhalla.core.stock.app.modules.auth.config.JwtProperties;
@@ -34,11 +33,13 @@ import valhalla.core.stock.app.modules.auth.dto.RespostaMensagemDto;
 import valhalla.core.stock.app.modules.auth.dto.RespostaTokenDto;
 import valhalla.core.stock.app.modules.auth.service.AuthService;
 import valhalla.core.stock.app.modules.auth.service.RecuperacaoSenhaService;
+import valhalla.core.stock.app.modules.auth.service.TokenStateService;
 import valhalla.core.stock.app.modules.auth.security.CsrfTokenStore;
 import valhalla.core.stock.app.shared.config.CookieProperties;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
@@ -57,18 +58,21 @@ public class AuthController {
     private final JwtProperties jwtProperties;
     private final CookieProperties cookieProperties;
     private final CsrfTokenStore csrfTokenStore;
+    private final TokenStateService tokenStateService;
 
     public AuthController(
             AuthService authService,
             RecuperacaoSenhaService recuperacaoSenhaService,
             JwtProperties jwtProperties,
             CsrfTokenStore csrfTokenStore,
+            TokenStateService tokenStateService,
             CookieProperties cookieProperties
     ) {
         this.authService = authService;
         this.recuperacaoSenhaService = recuperacaoSenhaService;
         this.jwtProperties = jwtProperties;
         this.csrfTokenStore = csrfTokenStore;
+        this.tokenStateService = tokenStateService;
         this.cookieProperties = cookieProperties;
     }
 
@@ -149,11 +153,31 @@ public class AuthController {
             @ApiResponse(responseCode = "401", description = "Sessão ausente, inválida ou expirada.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
-    public ResponseEntity<RespostaCsrfTokenDto> obterTokenCsrf(@AuthenticationPrincipal Jwt jwt) {
+    public ResponseEntity<RespostaCsrfTokenDto> obterTokenCsrf(
+            @AuthenticationPrincipal Jwt jwt,
+            HttpServletResponse response
+    ) {
         UUID idSessao = UUID.fromString(jwt.getClaimAsString("sessionJti"));
+        UUID idUsuario = UUID.fromString(jwt.getClaimAsString("userId"));
         String token = csrfTokenStore.obter(idSessao);
         if (token == null) {
-            throw new AccessDeniedException("Sessão inválida");
+            Instant agora = Instant.now();
+            Instant expiraEm = tokenStateService.findActiveExpiration(idUsuario, idSessao)
+                    .orElseGet(() -> agora.plus(jwtProperties.refreshExpiration()));
+            token = csrfTokenStore.criar(idSessao, expiraEm);
+            Duration maxAge = Duration.between(agora, expiraEm);
+            if (maxAge.isNegative()) {
+                maxAge = Duration.ZERO;
+            }
+            response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie
+                    .from(COOKIE_CSRF, token)
+                    .httpOnly(false)
+                    .secure(cookieProperties.secure())
+                    .path("/")
+                    .maxAge(maxAge)
+                    .sameSite("Strict")
+                    .build()
+                    .toString());
         }
         return ResponseEntity.ok(new RespostaCsrfTokenDto(token));
     }
@@ -264,18 +288,18 @@ public class AuthController {
     }
 
     private void clearAuthenticationCookies(HttpServletResponse response) {
-        ResponseCookie accessCookie = expiredCookie("accessToken", "/");
-        ResponseCookie refreshCookie = expiredCookie("refreshToken", "/auth");
-        ResponseCookie csrfCookie = expiredCookie(COOKIE_CSRF, "/");
+        ResponseCookie accessCookie = expiredCookie("accessToken", "/", true);
+        ResponseCookie refreshCookie = expiredCookie("refreshToken", "/auth", true);
+        ResponseCookie csrfCookie = expiredCookie(COOKIE_CSRF, "/", false);
 
         response.addHeader(HttpHeaders.SET_COOKIE, accessCookie.toString());
         response.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
         response.addHeader(HttpHeaders.SET_COOKIE, csrfCookie.toString());
     }
 
-    private ResponseCookie expiredCookie(String name, String path) {
+    private ResponseCookie expiredCookie(String name, String path, boolean httpOnly) {
         return ResponseCookie.from(name, "")
-                .httpOnly(true)
+                .httpOnly(httpOnly)
                 .secure(cookieProperties.secure())
                 .path(path)
                 .maxAge(Duration.ZERO)

@@ -94,12 +94,12 @@ public class ContaFinanceiraService {
 
     @Transactional
     @PreAuthorize(GERENCIAR)
-    public RespostaContaDto cancelar(UUID id) {
+    public RespostaContaDto inativar(UUID id) {
         ContaFinanceiraEntity conta = buscarParaAtualizacao(id);
         exigirAberta(conta);
-        conta.setStatus(StatusConta.CANCELADA);
+        conta.setStatus(StatusConta.INATIVA);
         conta.setAtualizadoEm(FusoHorarioOperacao.agora());
-        businessEventLogger.success("finance.account.cancelled", "financial-account", conta.getId());
+        businessEventLogger.success("finance.account.inactivated", "financial-account", conta.getId());
         return paraResposta(conta);
     }
 
@@ -172,7 +172,7 @@ public class ContaFinanceiraService {
         if (conta.getStatus() != StatusConta.ABERTA) {
             throw new IllegalArgumentException(conta.getStatus() == StatusConta.PAGA
                     ? "A conta já foi baixada"
-                    : "A conta está cancelada");
+                    : "A conta está inativa");
         }
     }
 

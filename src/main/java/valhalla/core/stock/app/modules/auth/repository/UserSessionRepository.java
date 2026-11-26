@@ -12,6 +12,10 @@ public interface UserSessionRepository extends JpaRepository<UserSessionEntity, 
             UUID userId, UUID accessJti, UUID refreshJti, LocalDateTime now
     );
 
+    boolean existsByUserIdAndRefreshJtiAndExpiresAtAfter(
+            UUID userId, UUID refreshJti, LocalDateTime now
+    );
+
     @Modifying
     @Query("""
             update UserSessionEntity s set s.accessJti = :accessJti,

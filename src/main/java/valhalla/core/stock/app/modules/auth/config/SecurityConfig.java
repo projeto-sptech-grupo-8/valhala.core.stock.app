@@ -3,6 +3,7 @@ package valhalla.core.stock.app.modules.auth.config;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -83,7 +84,9 @@ public class SecurityConfig {
             JwtDecoder jwtDecoder,
             PermissionAuthorizationService permissionAuthorizationService,
             CsrfTokenValidationFilter csrfTokenValidationFilter,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            @Value("${springdoc.api-docs.enabled:false}") boolean openApiDocsEnabled,
+            @Value("${springdoc.swagger-ui.enabled:false}") boolean swaggerUiEnabled
     ) throws Exception {
         AuthenticationEntryPoint authenticationEntryPoint = (request, response, exception) -> {
             RequestFailureContext.markFailure(request, "AUTHENTICATION_REJECTED", "Token inválido ou expirado");
@@ -120,28 +123,32 @@ public class SecurityConfig {
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
-                .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers(
-                                HttpMethod.POST,
-                                "/auth/login",
-                                "/auth/refresh",
-                                "/auth/logout",
-                                "/webhooks/mercado-pago/point",
-                                "/auth/recuperar-senha",
-                                "/auth/redefinir-senha"
-                        ).permitAll()
-                        .requestMatchers(
+                .authorizeHttpRequests(authorize -> {
+                    authorize
+                            .requestMatchers(
+                                    HttpMethod.POST,
+                                    "/auth/login",
+                                    "/auth/refresh",
+                                    "/auth/logout",
+                                    "/webhooks/mercado-pago/point",
+                                    "/auth/recuperar-senha",
+                                    "/auth/redefinir-senha"
+                            ).permitAll();
+                    if (openApiDocsEnabled || swaggerUiEnabled) {
+                        authorize.requestMatchers(
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/v3/api-docs/**",
                                 "/v3/api-docs.yaml"
-                        ).permitAll()
-                        .requestMatchers(HttpMethod.POST, "/usuario")
-                        .access((authentication, context) -> new AuthorizationDecision(
-                                permissionAuthorizationService.canManageUsers(
-                                        authentication.get())))
-                        .anyRequest().authenticated()
-                )
+                        ).permitAll();
+                    }
+                    authorize
+                            .requestMatchers(HttpMethod.POST, "/usuario")
+                            .access((authentication, context) -> new AuthorizationDecision(
+                                    permissionAuthorizationService.canManageUsers(
+                                            authentication.get())))
+                            .anyRequest().authenticated();
+                })
                 .exceptionHandling(exceptionHandling -> exceptionHandling
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .accessDeniedHandler(accessDeniedHandler)
@@ -206,7 +213,7 @@ public class SecurityConfig {
                 List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
         );
         configuration.setAllowedHeaders(List.of("Content-Type", CsrfTokenValidationFilter.CABECALHO_CSRF));
-        configuration.setExposedHeaders(List.of("Location"));
+        configuration.setExposedHeaders(List.of("Location", "Content-Disposition"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

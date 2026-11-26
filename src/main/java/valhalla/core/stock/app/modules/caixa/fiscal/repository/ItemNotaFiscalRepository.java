@@ -9,4 +9,6 @@ import java.util.UUID;
 public interface ItemNotaFiscalRepository extends JpaRepository<ItemNotaFiscalEntity, Long> {
 
     List<ItemNotaFiscalEntity> findByNotaFiscalIdOrderByIdAsc(UUID notaFiscalId);
+
+    boolean existsByProdutoId(UUID produtoId);
 }

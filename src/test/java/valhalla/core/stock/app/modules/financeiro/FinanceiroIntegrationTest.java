@@ -16,6 +16,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -53,10 +54,10 @@ class FinanceiroIntegrationTest extends PostgresIntegrationTestSupport {
         String taxas = conta("PAGAR", "Taxas de cartão", "100", hoje, "VENDAS", "DESPESA_VARIAVEL");
         enviar(gerente, "/financeiro/contas/" + JsonPath.read(taxas, "$.id") + "/baixa", "{\"valorPago\": 90}")
                 .andExpect(status().isOk());
-        String cancelar = conta("PAGAR", "Lançada errada", "50", hoje, "ADMINISTRATIVO", "DESPESA_FIXA");
-        enviar(gerente, "/financeiro/contas/" + JsonPath.read(cancelar, "$.id") + "/cancelamento", "")
+        String inativar = conta("PAGAR", "Lançada errada", "50", hoje, "ADMINISTRATIVO", "DESPESA_FIXA");
+        enviarPatch(gerente, "/financeiro/contas/" + JsonPath.read(inativar, "$.id") + "/inativacao")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("CANCELADA"));
+                .andExpect(jsonPath("$.status").value("INATIVA"));
 
         String resumo = getJson("/financeiro/resumo");
         // saldo: venda recebida (80) + recebido (200) − pago (90); o pagamento estornado fica fora
@@ -126,6 +127,21 @@ class FinanceiroIntegrationTest extends PostgresIntegrationTestSupport {
 
         conta("PAGAR", "Energia", "200", hoje.plusDays(1), "OPERACIONAL", "DESPESA_FIXA");
         conta("PAGAR", "Água", "80", hoje.minusDays(1), "OPERACIONAL", "DESPESA_FIXA");
+        String contaInativar = conta("PAGAR", "Conta para inativar", "150", hoje.plusDays(2), "OPERACIONAL", "DESPESA_FIXA");
+        String idInativar = JsonPath.read(contaInativar, "$.id");
+        enviarPatch(gerente, "/financeiro/contas/" + idInativar + "/inativacao")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INATIVA"));
+        enviar(gerente, "/financeiro/contas/" + idInativar + "/baixa", "{}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("A conta está inativa"));
+        enviarPatch(gerente, "/financeiro/contas/" + idInativar + "/inativacao")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("A conta está inativa"));
+        put(idInativar, corpoConta("PAGAR", "Editada", "150", hoje, "OPERACIONAL", "DESPESA_FIXA"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("A conta está inativa"));
+
         String lista = getJson("/financeiro/contas?tipo=PAGAR&status=ABERTA");
         assertThat((List<String>) JsonPath.read(lista, "$.itens[*].descricao")).containsExactly("Água", "Energia");
     }
@@ -138,6 +154,10 @@ class FinanceiroIntegrationTest extends PostgresIntegrationTestSupport {
         Cookie leitor = autenticarComPermissoes("leitor@meraki.com", "VISUALIZAR_FINANCEIRO");
         mockMvc.perform(get("/financeiro/resumo").cookie(leitor)).andExpect(status().isOk());
         enviar(leitor, "/financeiro/contas", corpoConta("PAGAR", "Aluguel", "10", hoje, "OPERACIONAL", "DESPESA_FIXA"))
+                .andExpect(status().isForbidden());
+
+        String conta = conta("PAGAR", "Assinatura", "40", hoje.plusDays(3), "ADMINISTRATIVO", "DESPESA_FIXA");
+        enviarPatch(leitor, "/financeiro/contas/" + JsonPath.read(conta, "$.id") + "/inativacao")
                 .andExpect(status().isForbidden());
     }
 
@@ -159,6 +179,10 @@ class FinanceiroIntegrationTest extends PostgresIntegrationTestSupport {
     private ResultActions enviar(Cookie usuario, String url, String corpo) throws Exception {
         return mockMvc.perform(post(url).cookie(usuario).with(csrf(usuario))
                 .contentType(MediaType.APPLICATION_JSON).content(corpo));
+    }
+
+    private ResultActions enviarPatch(Cookie usuario, String url) throws Exception {
+        return mockMvc.perform(patch(url).cookie(usuario).with(csrf(usuario)));
     }
 
     private ResultActions put(String idConta, String corpo) throws Exception {

@@ -12,5 +12,7 @@ public interface ComposicaoDrinkRepository extends JpaRepository<ComposicaoDrink
     @EntityGraph(attributePaths = "produto")
     List<ComposicaoDrinkEntity> findAllByDrinkIdOrderByIdAsc(UUID idDrink);
 
+    boolean existsByProdutoId(UUID produtoId);
+
     void deleteAllByDrinkId(UUID idDrink);
 }

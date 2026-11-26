@@ -34,15 +34,8 @@ public class RequestAccessMetadataExtractor {
     }
 
     String extractClientIp(HttpServletRequest request) {
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        String candidate = null;
-        if (forwardedFor != null && !forwardedFor.isBlank()) {
-            candidate = forwardedFor.split(",")[0].trim();
-        }
-        if (candidate == null || candidate.isBlank()) {
-            String remoteAddr = request.getRemoteAddr();
-            candidate = remoteAddr == null ? null : remoteAddr.trim();
-        }
+        String remoteAddr = request.getRemoteAddr();
+        String candidate = remoteAddr == null ? null : remoteAddr.trim();
         if (candidate == null || candidate.isBlank()) {
             return null;
         }

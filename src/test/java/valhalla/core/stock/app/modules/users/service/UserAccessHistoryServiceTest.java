@@ -52,15 +52,17 @@ class UserAccessHistoryServiceTest {
     }
 
     @Test
-    void deveRegistrarLoginSucessoAtualizandoUltimoLoginEZerandoTentativas() {
+    void deveRegistrarLoginSucessoAtualizandoUltimoLoginEZerandoTentativasEBloqueio() {
         UserEntity user = sampleUser();
         user.setLoginAttempts(3);
+        user.setLockedUntil(LocalDateTime.now().plusMinutes(10));
         when(metadataExtractor.extractCurrent())
                 .thenReturn(new RequestAccessMetadataExtractor.AccessMetadata("10.0.0.24", "Windows · Chrome", "UA"));
 
         service.registrarLoginSucesso(user);
 
         assertThat(user.getLoginAttempts()).isZero();
+        assertThat(user.getLockedUntil()).isNull();
         assertThat(user.getLastLoginAt()).isNotNull();
         verify(userRepository).save(user);
 
@@ -86,10 +88,31 @@ class UserAccessHistoryServiceTest {
         service.registrarSenhaIncorreta("op@meraki.com");
 
         assertThat(user.getLoginAttempts()).isEqualTo(1);
+        assertThat(user.getLockedUntil()).isNull();
         verify(userRepository).save(user);
         ArgumentCaptor<UserAccessHistoryEntity> captor = ArgumentCaptor.forClass(UserAccessHistoryEntity.class);
         verify(userAccessHistoryRepository).save(captor.capture());
         assertThat(captor.getValue().getEventType()).isEqualTo(TipoEventoAcessoUsuario.SENHA_INCORRETA);
+    }
+
+    @Test
+    void deveBloquearContaNaQuintaTentativaIncorretaEResetarAposExpiracao() {
+        UserEntity user = sampleUser();
+        user.setLoginAttempts(4);
+        when(userRepository.findByEmailIgnoreCase("op@meraki.com")).thenReturn(Optional.of(user));
+        when(metadataExtractor.extractCurrent())
+                .thenReturn(new RequestAccessMetadataExtractor.AccessMetadata("45.12.88.101", "Linux · Firefox", "UA"));
+
+        service.registrarSenhaIncorreta("op@meraki.com");
+
+        assertThat(user.getLoginAttempts()).isEqualTo(5);
+        assertThat(user.getLockedUntil()).isAfter(LocalDateTime.now().plusMinutes(10));
+
+        user.setLockedUntil(LocalDateTime.now().minusMinutes(1));
+        service.registrarSenhaIncorreta("op@meraki.com");
+
+        assertThat(user.getLoginAttempts()).isEqualTo(1);
+        assertThat(user.getLockedUntil()).isNull();
     }
 
     @Test

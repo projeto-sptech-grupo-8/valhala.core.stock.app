@@ -10,6 +10,7 @@ import valhalla.core.stock.app.shared.error.InvalidRefreshTokenException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -18,7 +19,7 @@ public class TokenStateService {
 
     private final UserSessionRepository userSessionRepository;
 
-    public void replace(
+    public Optional<UUID> replace(
             UUID userId,
             UUID accessJti,
             UUID refreshJti,
@@ -26,13 +27,16 @@ public class TokenStateService {
             UserEntity user
     ) {
         LocalDateTime expiration = LocalDateTime.ofInstant(expiresAt, ZoneOffset.UTC);
-        userSessionRepository.findById(userId).ifPresentOrElse(session -> {
+        Optional<UserSessionEntity> existing = userSessionRepository.findById(userId);
+        Optional<UUID> previousRefreshJti = existing.map(UserSessionEntity::getRefreshJti);
+        existing.ifPresentOrElse(session -> {
             session.setAccessJti(accessJti);
             session.setRefreshJti(refreshJti);
             session.setExpiresAt(expiration);
         }, () -> userSessionRepository.save(UserSessionEntity.builder()
                 .user(user).accessJti(accessJti).refreshJti(refreshJti)
                 .expiresAt(expiration).build()));
+        return previousRefreshJti;
     }
 
     public void rotate(
@@ -57,6 +61,19 @@ public class TokenStateService {
                 userId, accessJti, refreshJti, LocalDateTime.now(ZoneOffset.UTC));
     }
 
+    public boolean isRefreshActive(UUID userId, UUID refreshJti) {
+        return userSessionRepository.existsByUserIdAndRefreshJtiAndExpiresAtAfter(
+                userId, refreshJti, LocalDateTime.now(ZoneOffset.UTC));
+    }
+
+    public Optional<Instant> findActiveExpiration(UUID userId, UUID refreshJti) {
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        return userSessionRepository.findById(userId)
+                .filter(session -> refreshJti.equals(session.getRefreshJti()))
+                .filter(session -> session.getExpiresAt().isAfter(now))
+                .map(session -> session.getExpiresAt().toInstant(ZoneOffset.UTC));
+    }
+
     public void revoke(
             UUID userId,
             UUID accessJti,
@@ -65,7 +82,10 @@ public class TokenStateService {
         userSessionRepository.revoke(userId, accessJti, refreshJti);
     }
 
-    public void revokeAll(UUID userId) {
+    public Optional<UUID> revokeAll(UUID userId) {
+        Optional<UUID> previousRefreshJti = userSessionRepository.findById(userId)
+                .map(UserSessionEntity::getRefreshJti);
         userSessionRepository.deleteById(userId);
+        return previousRefreshJti;
     }
 }

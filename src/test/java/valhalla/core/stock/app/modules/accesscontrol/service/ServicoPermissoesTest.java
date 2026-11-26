@@ -7,6 +7,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import valhalla.core.stock.app.modules.accesscontrol.dto.*;
@@ -53,8 +54,9 @@ class ServicoPermissoesTest {
                 new BusinessEventLogger());
         idEstabelecimento = UUID.randomUUID();
         Jwt token = Jwt.withTokenValue("teste").header("alg", "none")
-                .claim("establishmentId", idEstabelecimento.toString()).build();
-        autenticacao = new JwtAuthenticationToken(token);
+                .claim("establishmentId", idEstabelecimento.toString())
+                .claim("userId", UUID.randomUUID().toString()).build();
+        autenticacao = new JwtAuthenticationToken(token, List.of(new SimpleGrantedAuthority("ROLE_GERENTE")));
     }
 
     @Test
@@ -71,10 +73,8 @@ class ServicoPermissoesTest {
     @Test
     void deveListarApenasPerfisDoEstabelecimentoAutenticado() {
         ProfileEntity p1 = perfil("Perfil 1");
-        ProfileEntity p2 = perfil("Perfil 2");
-        p2.getEstablishment().setId(UUID.randomUUID()); // outro estabelecimento
 
-        when(repositorioPerfil.findAll()).thenReturn(List.of(p1, p2));
+        when(repositorioPerfil.findAllByEstablishment_IdOrderByNameAsc(idEstabelecimento)).thenReturn(List.of(p1));
 
         List<RespostaPerfilDto> perfis = servicoPermissoes.listarPerfis(autenticacao);
 
@@ -336,6 +336,93 @@ class ServicoPermissoesTest {
         assertThat(dto.permissoesEfetivas()).contains("ESTOQUE_VER", "ESTOQUE_AJUSTAR");
         assertThat(dto.sobrescritas()).extracting(SobrescritaPermissaoUsuarioDto::codigoFuncionalidade)
                 .containsExactly("ESTOQUE_AJUSTAR");
+    }
+
+    @Test
+    void deveBloquearCriacaoOuRenomeacaoParaVarianteNormalizadaDeGerente() {
+        assertThatThrownBy(() -> servicoPermissoes.criarPerfil(
+                new RequisicaoPerfilDto("Gérênte", "Bypass", Set.of()), autenticacao))
+                .isInstanceOf(AccessConfigurationConflictException.class)
+                .hasMessageContaining("reservado");
+
+        ProfileEntity operador = perfil("Operador");
+        when(repositorioPerfil.findById(1)).thenReturn(Optional.of(operador));
+
+        assertThatThrownBy(() -> servicoPermissoes.atualizarPerfil(1,
+                new RequisicaoAtualizacaoPerfilDto("Gerente!", null), autenticacao))
+                .isInstanceOf(AccessConfigurationConflictException.class)
+                .hasMessageContaining("reservado");
+    }
+
+    @Test
+    void deveBloquearRenomeacaoExclusaoEEdicaoDeGerentePorNaoGerente() {
+        ProfileEntity perfilGerente = perfil("Gerente");
+        when(repositorioPerfil.findById(1)).thenReturn(Optional.of(perfilGerente));
+
+        assertThatThrownBy(() -> servicoPermissoes.atualizarPerfil(1,
+                new RequisicaoAtualizacaoPerfilDto("Outro Nome", null), autenticacao))
+                .isInstanceOf(AccessConfigurationConflictException.class)
+                .hasMessageContaining("não pode ser alterado");
+
+        assertThatThrownBy(() -> servicoPermissoes.excluirPerfil(1, autenticacao))
+                .isInstanceOf(AccessConfigurationConflictException.class)
+                .hasMessageContaining("não pode ser excluído");
+
+        Jwt tokenNaoGerente = Jwt.withTokenValue("teste").header("alg", "none")
+                .claim("establishmentId", idEstabelecimento.toString())
+                .claim("userId", UUID.randomUUID().toString()).build();
+        JwtAuthenticationToken authNaoGerente = new JwtAuthenticationToken(
+                tokenNaoGerente, List.of(new SimpleGrantedAuthority("PERFIS_GERENCIAR")));
+
+        assertThatThrownBy(() -> servicoPermissoes.atualizarPerfil(1,
+                new RequisicaoAtualizacaoPerfilDto(null, "Desc"), authNaoGerente))
+                .isInstanceOf(AccessDeniedException.class);
+
+        assertThatThrownBy(() -> servicoPermissoes.substituirFuncionalidadesPerfil(1, Set.of(), authNaoGerente))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void deveBloquearConcessaoDePermissoesNaoPossuidasEAutoEdicaoDeSobrescritas() {
+        UUID atorId = UUID.randomUUID();
+        Jwt tokenAtor = Jwt.withTokenValue("teste").header("alg", "none")
+                .claim("establishmentId", idEstabelecimento.toString())
+                .claim("userId", atorId.toString()).build();
+        JwtAuthenticationToken authAtor = new JwtAuthenticationToken(
+                tokenAtor,
+                List.of(
+                        new SimpleGrantedAuthority("PERFIS_GERENCIAR"),
+                        new SimpleGrantedAuthority("PERMISSOES_GERENCIAR"),
+                        new SimpleGrantedAuthority("PRODUTOS_CRIAR")
+                ));
+
+        when(repositorioPerfil.findByEstablishment_IdAndNameIgnoreCase(idEstabelecimento, "Supervisor"))
+                .thenReturn(Optional.empty());
+        assertThatThrownBy(() -> servicoPermissoes.criarPerfil(
+                new RequisicaoPerfilDto("Supervisor", null, Set.of("USUARIOS_CRIAR")), authAtor))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("não possui");
+
+        UserEntity proprioUsuario = usuario("Atendente", Set.of());
+        proprioUsuario.setId(atorId);
+        when(repositorioUsuario.findById(atorId)).thenReturn(Optional.of(proprioUsuario));
+
+        assertThatThrownBy(() -> servicoPermissoes.substituirSobrescritasPermissaoUsuario(
+                atorId,
+                Set.of(new SobrescritaPermissaoUsuarioDto("USUARIOS_CRIAR", PermissionEffect.GRANT)),
+                authAtor))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("próprias sobrescritas");
+
+        UserEntity outroUsuario = usuario("Atendente", Set.of());
+        when(repositorioUsuario.findById(outroUsuario.getId())).thenReturn(Optional.of(outroUsuario));
+
+        assertThatThrownBy(() -> servicoPermissoes.substituirSobrescritasPermissaoUsuario(
+                outroUsuario.getId(),
+                Set.of(new SobrescritaPermissaoUsuarioDto("USUARIOS_CRIAR", PermissionEffect.GRANT)),
+                authAtor))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("não possui");
     }
 
     private UserEntity usuario(String nomePerfil, Set<UserFunctionalityOverrideEntity> sobrescritas) {

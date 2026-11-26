@@ -64,7 +64,24 @@ public record RequisicaoAtualizacaoUsuarioDto(
                 description = "Define se o usuário está ativo",
                 example = "true"
         )
-        Boolean ativo
+        Boolean ativo,
+
+        @JsonAlias("currentPassword")
+        @Schema(
+                description = "Senha atual do usuário (obrigatória ao alterar o próprio e-mail ou senha)",
+                example = "SenhaAtual@123"
+        )
+        String senhaAtual
 
 ) {
+    public RequisicaoAtualizacaoUsuarioDto(
+            String nome,
+            String email,
+            String telefone,
+            String senha,
+            String nomePerfil,
+            Boolean ativo
+    ) {
+        this(nome, email, telefone, senha, nomePerfil, ativo, null);
+    }
 }

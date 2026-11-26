@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -17,6 +18,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@TestPropertySource(properties = {
+        "app.mercado-pago.point.modo=HOMOLOGACAO",
+        "app.mercado-pago.point.access-token=TEST-openapi-token",
+        "app.mercado-pago.point.webhook-secret=openapi-webhook-secret"
+})
 class OpenApiExportIntegrationTest {
 
     @Autowired
@@ -38,6 +44,10 @@ class OpenApiExportIntegrationTest {
                 .contains("/lotes:")
                 .contains("/lotes/resumo:")
                 .contains("/dashboard/resumo:")
+                .contains("/relatorios/abc/exportar:")
+                .contains("/relatorios/ruptura/exportar:")
+                .contains("/financeiro/contas/{idConta}/inativacao:")
+                .doesNotContain("/financeiro/contas/{idConta}/cancelamento:")
                 .contains("/caixa/configuracao:")
                 .contains("/caixa/caixas:")
                 .contains("/caixa/caixas/{caixaId}/terminais:")

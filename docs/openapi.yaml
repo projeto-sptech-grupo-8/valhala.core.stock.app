@@ -1256,7 +1256,7 @@ paths:
           enum:
           - ABERTA
           - PAGA
-          - CANCELADA
+          - INATIVA
       - name: centroCusto
         in: query
         required: false
@@ -1337,28 +1337,6 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
-      security:
-      - accessTokenCookie: []
-  /financeiro/contas/{idConta}/cancelamento:
-    post:
-      tags:
-      - Financeiro
-      summary: Cancelar conta em aberto
-      operationId: cancelarConta
-      parameters:
-      - name: idConta
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      responses:
-        "200":
-          description: OK
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/RespostaContaDto"
       security:
       - accessTokenCookie: []
   /financeiro/contas/{idConta}/baixa:
@@ -3323,7 +3301,7 @@ paths:
     delete:
       tags:
       - Produtos
-      summary: Excluir produto sem movimentações ou vínculos
+      summary: Inativar produto (exclusão lógica) sem movimentações ou histórico vinculado
       operationId: excluirProduto
       parameters:
       - name: id
@@ -3334,7 +3312,7 @@ paths:
           format: uuid
       responses:
         "204":
-          description: Produto excluído.
+          description: Produto inativado.
         "401":
           description: "Sessão ausente, inválida ou expirada."
           content:
@@ -3354,7 +3332,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
         "409":
-          description: Produto possui movimentações ou vínculos.
+          description: "Produto possui movimentações, histórico ou vínculos que impedem\
+            \ a inativação."
           content:
             '*/*':
               schema:
@@ -3410,6 +3389,35 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: "Tentativa de inativar produto com movimentações, histórico\
+            \ ou vínculos."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
+  /financeiro/contas/{idConta}/inativacao:
+    patch:
+      tags:
+      - Financeiro
+      summary: Inativar conta em aberto
+      operationId: inativarConta
+      parameters:
+      - name: idConta
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RespostaContaDto"
       security:
       - accessTokenCookie: []
   /categorias/{id}:
@@ -4073,6 +4081,49 @@ paths:
                 $ref: "#/components/schemas/RelatorioResponseDtoRuptura"
       security:
       - accessTokenCookie: []
+  /relatorios/ruptura/exportar:
+    get:
+      tags:
+      - Relatórios
+      summary: Exportar relatório de falta de estoque em planilha Excel (.xlsx)
+      operationId: exportarRupturas
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: Planilha Excel gerada.
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: byte
+        "400":
+          description: Parâmetros de consulta inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para visualizar relatórios.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+      security:
+      - accessTokenCookie: []
   /relatorios/perdas:
     get:
       tags:
@@ -4191,6 +4242,49 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/RelatorioResponseDtoCurvaAbc"
+      security:
+      - accessTokenCookie: []
+  /relatorios/abc/exportar:
+    get:
+      tags:
+      - Relatórios
+      summary: Exportar Curva ABC em planilha Excel (.xlsx)
+      operationId: exportarCurvaAbc
+      parameters:
+      - name: dias
+        in: query
+        description: "Últimos N dias, incluindo hoje. Padrão: 30; máximo: 365."
+        required: false
+        schema:
+          type: string
+          maximum: 365
+          minimum: 1
+      responses:
+        "200":
+          description: Planilha Excel gerada.
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: byte
+        "400":
+          description: Parâmetros de consulta inválidos.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: "Sessão ausente, inválida ou expirada."
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Usuário sem permissão para visualizar relatórios.
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
       security:
       - accessTokenCookie: []
   /produtos/exportar:
@@ -5297,7 +5391,7 @@ components:
           enum:
           - ABERTA
           - PAGA
-          - CANCELADA
+          - INATIVA
         pagoEm:
           type: string
           format: date
@@ -7483,6 +7577,11 @@ components:
           type: boolean
           description: Define se o usuário está ativo
           example: true
+        senhaAtual:
+          type: string
+          description: Senha atual do usuário (obrigatória ao alterar o próprio e-mail
+            ou senha)
+          example: SenhaAtual@123
     ProdutoAtualizacaoRequestDto:
       type: object
       description: Dados parciais para atualização de um produto. SKU e saldo não
@@ -8124,11 +8223,11 @@ components:
         despesasFixas:
           type: number
           description: Contas a pagar DESPESA_FIXA com vencimento no período (não
-            canceladas).
+            inativas).
         despesasVariaveis:
           type: number
           description: Contas a pagar DESPESA_VARIAVEL com vencimento no período (não
-            canceladas).
+            inativas).
         lucroLiquido:
           type: number
         margemLiquidaPercentual:

@@ -18,6 +18,8 @@ public interface ReservaEstoqueRepository extends JpaRepository<ReservaEstoqueEn
 
     List<ReservaEstoqueEntity> findByPedidoIdAndStatusOrderByIdAsc(UUID pedidoId, StatusReservaEstoque status);
 
+    boolean existsByProdutoIdOrOrigemDrinkId(UUID produtoId, UUID origemDrinkId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             SELECT r

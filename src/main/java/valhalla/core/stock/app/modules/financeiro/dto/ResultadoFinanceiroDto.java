@@ -19,9 +19,9 @@ public record ResultadoFinanceiroDto(
         BigDecimal cmv,
         BigDecimal lucroBruto,
         BigDecimal margemBrutaPercentual,
-        @Schema(description = "Contas a pagar DESPESA_FIXA com vencimento no período (não canceladas).")
+        @Schema(description = "Contas a pagar DESPESA_FIXA com vencimento no período (não inativas).")
         BigDecimal despesasFixas,
-        @Schema(description = "Contas a pagar DESPESA_VARIAVEL com vencimento no período (não canceladas).")
+        @Schema(description = "Contas a pagar DESPESA_VARIAVEL com vencimento no período (não inativas).")
         BigDecimal despesasVariaveis,
         BigDecimal lucroLiquido,
         BigDecimal margemLiquidaPercentual,

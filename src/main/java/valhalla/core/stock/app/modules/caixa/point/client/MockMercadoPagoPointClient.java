@@ -1,6 +1,7 @@
 package valhalla.core.stock.app.modules.caixa.point.client;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import valhalla.core.stock.app.modules.caixa.point.client.dto.CriarOrderPointCommand;
@@ -19,11 +20,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Component
+@Profile({"dev", "test"})
 @ConditionalOnProperty(
         prefix = "app.mercado-pago.point",
         name = "modo",
         havingValue = "MOCK",
-        matchIfMissing = true
+        matchIfMissing = false
 )
 public class MockMercadoPagoPointClient implements MercadoPagoPointClient {
 

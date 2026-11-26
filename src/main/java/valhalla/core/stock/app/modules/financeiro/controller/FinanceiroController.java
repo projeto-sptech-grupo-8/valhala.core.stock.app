@@ -15,6 +15,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -141,10 +142,10 @@ public class FinanceiroController {
         return ResponseEntity.ok(contaService.baixar(idConta, requisicao));
     }
 
-    @PostMapping("/contas/{idConta}/cancelamento")
+    @PatchMapping("/contas/{idConta}/inativacao")
     @SecurityRequirement(name = "csrfTokenHeader")
-    @Operation(summary = "Cancelar conta em aberto")
-    public ResponseEntity<RespostaContaDto> cancelarConta(@PathVariable UUID idConta) {
-        return ResponseEntity.ok(contaService.cancelar(idConta));
+    @Operation(summary = "Inativar conta em aberto")
+    public ResponseEntity<RespostaContaDto> inativarConta(@PathVariable UUID idConta) {
+        return ResponseEntity.ok(contaService.inativar(idConta));
     }
 }

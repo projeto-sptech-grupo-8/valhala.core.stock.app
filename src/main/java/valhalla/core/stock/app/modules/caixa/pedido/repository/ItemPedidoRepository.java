@@ -13,5 +13,7 @@ public interface ItemPedidoRepository extends JpaRepository<ItemPedidoEntity, Lo
 
     List<ItemPedidoEntity> findByPedidoIdInOrderByIdAsc(Collection<UUID> pedidoIds);
 
+    boolean existsByProdutoId(UUID produtoId);
+
     void deleteByPedidoId(UUID pedidoId);
 }

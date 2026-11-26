@@ -24,6 +24,7 @@ import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity
 import jakarta.persistence.EntityManager;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.modules.auth.repository.UserSessionRepository;
+import valhalla.core.stock.app.modules.auth.security.CsrfTokenStore;
 
 import java.util.UUID;
 import java.util.HashMap;
@@ -60,6 +61,9 @@ class AuthenticationIntegrationTest {
 
     @Autowired
     private UserSessionRepository userSessionRepository;
+
+    @Autowired
+    private CsrfTokenStore csrfTokenStore;
 
     @Autowired
     private EntityManager entityManager;
@@ -357,7 +361,7 @@ class AuthenticationIntegrationTest {
     }
 
     @Test
-    void deveAceitarCookieCsrfDoFrontendConfiguradoSemHeader() throws Exception {
+    void naoDeveAceitarCookieCsrfSemHeaderMesmoComOrigemDoFrontend() throws Exception {
         MvcResult loginResult = performLogin("gerente@meraki.com", "senha-gerente");
         Cookie accessToken = requireCookie(loginResult, "accessToken");
         Cookie csrfToken = requireCookie(loginResult, "XSRF-TOKEN");
@@ -367,8 +371,41 @@ class AuthenticationIntegrationTest {
                         .header("Origin", "http://localhost:5173")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"profileName\":\"Gerente\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Token CSRF ausente ou inválido"));
+    }
+
+    @Test
+    void deveFalharFechadoSemCsrfEmMemoriaEPermitirReemissaoViaGetAuthCsrf() throws Exception {
+        MvcResult loginResult = performLogin("atendente@meraki.com", "senha-atendente");
+        Cookie accessToken = requireCookie(loginResult, "accessToken");
+        UUID sessaoId = userSessionRepository.findById(atendenteUser.getId()).orElseThrow().getRefreshJti();
+
+        // Simula perda da memória RAM após restart enquanto sessão permanece ativa no banco
+        csrfTokenStore.remover(sessaoId);
+
+        mockMvc.perform(patch("/usuario/me")
+                        .cookie(accessToken)
+                        .with(csrf(accessToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"11912345678\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Token CSRF ausente ou inválido"));
+
+        MvcResult reemissao = mockMvc.perform(get("/auth/csrf").cookie(accessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.nomePerfil").value("Gerente"));
+                .andExpect(cookie().exists("XSRF-TOKEN"))
+                .andExpect(cookie().httpOnly("XSRF-TOKEN", false))
+                .andReturn();
+        String novoCsrf = JsonPath.read(reemissao.getResponse().getContentAsString(), "$.token");
+
+        mockMvc.perform(patch("/usuario/me")
+                        .cookie(accessToken)
+                        .header("X-XSRF-TOKEN", novoCsrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"11912345678\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.telefone").value("11912345678"));
     }
 
     @Test
@@ -605,7 +642,8 @@ class AuthenticationIntegrationTest {
                 {
                   "name": "Atendente Atualizado",
                   "email": "atendente.novo@meraki.com",
-                  "phone": "11999999999"
+                  "phone": "11999999999",
+                  "senhaAtual": "senha-atendente"
                 }
                 """;
 
@@ -619,6 +657,15 @@ class AuthenticationIntegrationTest {
                 .andExpect(jsonPath("$.email").value("atendente.novo@meraki.com"))
                 .andExpect(jsonPath("$.telefone").value("11999999999"))
                 .andExpect(jsonPath("$.atualizadoEm").isNotEmpty());
+
+        // Exige senhaAtual correta na autoedição de senha/e-mail
+        mockMvc.perform(patch("/usuario/me")
+                        .cookie(accessToken)
+                        .with(csrf(accessToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"nova-senha-atendente\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Informe a senha atual correta para alterar seu e-mail ou senha"));
 
         // O token continua identificando o proprietário pelo userId mesmo após trocar o e-mail.
         mockMvc.perform(patch("/usuario/me")
@@ -640,7 +687,7 @@ class AuthenticationIntegrationTest {
                         .cookie(secondAccessToken)
                         .with(csrf(secondAccessToken))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"password\":\"nova-senha-atendente\"}"))
+                        .content("{\"password\":\"nova-senha-atendente\",\"senhaAtual\":\"senha-atendente\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(patch("/usuario/me")
@@ -837,21 +884,24 @@ class AuthenticationIntegrationTest {
 
         mockMvc.perform(post("/auth/login")
                         .header("User-Agent", userAgent)
-                        .header("X-Forwarded-For", "10.0.0.24")
+                        .header("X-Forwarded-For", "198.51.100.200")
+                        .with(remoteIp("10.0.0.24"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(loginJson("atendente@meraki.com", "senha-errada")))
                 .andExpect(status().isUnauthorized());
 
         mockMvc.perform(post("/auth/login")
                         .header("User-Agent", userAgent)
-                        .header("X-Forwarded-For", "10.0.0.24")
+                        .header("X-Forwarded-For", "198.51.100.200")
+                        .with(remoteIp("10.0.0.24"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(loginJson("naoexiste@meraki.com", "qualquer-senha")))
                 .andExpect(status().isUnauthorized());
 
         MvcResult firstLogin = mockMvc.perform(post("/auth/login")
                         .header("User-Agent", userAgent)
-                        .header("X-Forwarded-For", "10.0.0.24")
+                        .header("X-Forwarded-For", "198.51.100.200")
+                        .with(remoteIp("10.0.0.24"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(loginJson("atendente@meraki.com", "senha-atendente")))
                 .andExpect(status().isOk())
@@ -871,9 +921,10 @@ class AuthenticationIntegrationTest {
                         .cookie(firstAccess)
                         .with(csrf(firstAccess))
                         .header("User-Agent", userAgent)
-                        .header("X-Forwarded-For", "10.0.0.24")
+                        .header("X-Forwarded-For", "198.51.100.200")
+                        .with(remoteIp("10.0.0.24"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"password\":\"nova-senha-atendente\"}"))
+                        .content("{\"password\":\"nova-senha-atendente\",\"senhaAtual\":\"senha-atendente\"}"))
                 .andExpect(status().isOk());
 
         Cookie secondAccess = login("atendente@meraki.com", "nova-senha-atendente");
@@ -898,6 +949,50 @@ class AuthenticationIntegrationTest {
                 .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].tipoEvento").value("LOGIN_SUCESSO"))
                 .andExpect(jsonPath("$[1].tipoEvento").value("SENHA_ALTERADA"));
+    }
+
+    @Test
+    void deveBloquearContaAposCincoTentativasIncorretas() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(post("/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(loginJson("atendente@meraki.com", "senha-errada")))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        UserEntity bloqueado = userRepository.findById(atendenteUser.getId()).orElseThrow();
+        assertEquals(5, bloqueado.getLoginAttempts());
+        assertNotNull(bloqueado.getLockedUntil());
+
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginJson("atendente@meraki.com", "senha-atendente")))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void usuarioComUsuariosEditarNaoDeveSeAutopromoverOuAlterarGerente() throws Exception {
+        FuncionalidadeEntity editar = entityManager.merge(
+                FuncionalidadeEntity.builder().code("USUARIOS_EDITAR")
+                        .name("Editar usuários").build());
+        atendenteProfile.getFunctionalities().add(editar);
+        profileRepository.saveAndFlush(atendenteProfile);
+
+        Cookie atendenteAccess = login("atendente@meraki.com", "senha-atendente");
+
+        mockMvc.perform(patch("/usuario/me")
+                        .cookie(atendenteAccess)
+                        .with(csrf(atendenteAccess))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"profileName\":\"Gerente\"}"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(patch("/usuario/{id}", gerenteUser.getId())
+                        .cookie(atendenteAccess)
+                        .with(csrf(atendenteAccess))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"senha-tomada-conta\"}"))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -972,6 +1067,13 @@ class AuthenticationIntegrationTest {
     private RequestPostProcessor csrf(Cookie accessToken) {
         return request -> {
             request.addHeader("X-XSRF-TOKEN", tokensCsrfPorAccessToken.get(accessToken.getValue()));
+            return request;
+        };
+    }
+
+    private RequestPostProcessor remoteIp(String ip) {
+        return request -> {
+            request.setRemoteAddr(ip);
             return request;
         };
     }

@@ -66,11 +66,6 @@ public class WebhookMercadoPagoController {
     }
 
     private String resolverOrigemIp(HttpServletRequest request) {
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        if (forwardedFor != null && !forwardedFor.isBlank()) {
-            int virgula = forwardedFor.indexOf(',');
-            return virgula > 0 ? forwardedFor.substring(0, virgula).trim() : forwardedFor.trim();
-        }
         return request.getRemoteAddr();
     }
 }

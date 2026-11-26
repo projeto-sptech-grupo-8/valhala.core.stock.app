@@ -36,6 +36,7 @@ import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPedidoCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusReservaEstoque;
 import valhalla.core.stock.app.modules.caixa.sessao.enums.StatusSessaoCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.TipoDescontoPedido;
+import valhalla.core.stock.app.modules.caixa.exception.AutorizacaoCaixaNegadaException;
 import valhalla.core.stock.app.modules.caixa.exception.PedidoEstadoInvalidoException;
 import valhalla.core.stock.app.modules.caixa.exception.SessaoCaixaEstadoInvalidoException;
 import valhalla.core.stock.app.modules.caixa.configuracao.mapper.ConfiguracaoCaixaMapper;
@@ -398,7 +399,7 @@ public class PedidoCaixaService {
         return montarDetalhe(pedidoSalvo, itensFinais, pagamentos);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = AutorizacaoCaixaNegadaException.class)
     @PreAuthorize("""
             @permissionAuthorizationService.hasPermission(
                 'CAIXA_OPERAR',
@@ -571,7 +572,7 @@ public class PedidoCaixaService {
         return montarDetalhe(pedidoSalvo, itens, pagamentos);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = AutorizacaoCaixaNegadaException.class)
     @PreAuthorize("""
             @permissionAuthorizationService.hasPermission(
                 'CAIXA_OPERAR',
@@ -737,7 +738,7 @@ public class PedidoCaixaService {
         return montarDetalhe(pedidoSalvo, itens, pagamentos);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = AutorizacaoCaixaNegadaException.class)
     @PreAuthorize("""
             @permissionAuthorizationService.hasPermission(
                 'CAIXA_OPERAR',
@@ -1061,7 +1062,7 @@ public class PedidoCaixaService {
         return montarDetalhe(pedidoSalvo, itens, todosPagamentos);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = AutorizacaoCaixaNegadaException.class)
     @PreAuthorize("""
             @permissionAuthorizationService.hasPermission(
                 'CAIXA_OPERAR',

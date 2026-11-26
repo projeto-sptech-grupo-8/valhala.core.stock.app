@@ -13,6 +13,7 @@ import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -36,7 +37,7 @@ public class AccessTokenStateValidator implements OAuth2TokenValidator<Jwt> {
                     token.getClaimAsString("sessionJti")
             );
 
-            UserEntity user = userRepository.findById(userId).orElse(null);
+            UserEntity user = userRepository.findWithAccessGraphById(userId).orElse(null);
             if (user == null
                     || !user.isActive()
                     || !token.getClaimAsString("establishmentId").equals(
@@ -58,12 +59,21 @@ public class AccessTokenStateValidator implements OAuth2TokenValidator<Jwt> {
 
     private boolean hasCurrentAuthorizations(Jwt token, UserEntity user) {
         List<String> roles = token.getClaimAsStringList("roles");
-        Set<String> expectedRoles = CustomUserDetailsService.authoritiesFor(user).stream()
+        List<String> permissions = token.getClaimAsStringList("permissions");
+        var authorities = CustomUserDetailsService.authoritiesFor(user);
+        Set<String> expectedRoles = authorities.stream()
                 .map(authority -> authority.getAuthority())
                 .filter(authority -> authority.startsWith("ROLE_"))
                 .map(authority -> authority.substring("ROLE_".length()))
-                .collect(java.util.stream.Collectors.toSet());
+                .collect(Collectors.toSet());
+        Set<String> expectedPermissions = authorities.stream()
+                .map(authority -> authority.getAuthority())
+                .filter(authority -> !authority.startsWith("ROLE_"))
+                .collect(Collectors.toSet());
         return roles != null
-                && expectedRoles.equals(Set.copyOf(roles));
+                && expectedRoles.equals(Set.copyOf(roles))
+                && (permissions == null
+                        ? expectedPermissions.isEmpty()
+                        : expectedPermissions.equals(Set.copyOf(permissions)));
     }
 }

@@ -30,7 +30,7 @@ import java.util.UUID;
         prefix = "app.mercado-pago.point",
         name = "modo",
         havingValue = "MOCK",
-        matchIfMissing = true
+        matchIfMissing = false
 )
 @RequestMapping("/dev/mercado-pago/point")
 @Tag(name = "Simulador Point (Dev/Test)", description = "Simula eventos da maquininha Point Smart 2 localmente quando MP_POINT_MODO=MOCK.")

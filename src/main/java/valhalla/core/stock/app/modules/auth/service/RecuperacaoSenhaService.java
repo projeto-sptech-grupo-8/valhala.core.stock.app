@@ -11,8 +11,10 @@ import org.springframework.web.util.UriComponentsBuilder;
 import valhalla.core.stock.app.modules.auth.config.RecuperacaoSenhaProperties;
 import valhalla.core.stock.app.modules.auth.entity.PasswordResetTokenEntity;
 import valhalla.core.stock.app.modules.auth.repository.PasswordResetTokenRepository;
+import valhalla.core.stock.app.modules.auth.security.CsrfTokenStore;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
+import valhalla.core.stock.app.modules.users.service.UserAccessHistoryService;
 import valhalla.core.stock.app.shared.error.InvalidPasswordResetTokenException;
 import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 
@@ -51,6 +53,8 @@ public class RecuperacaoSenhaService {
     private final EmailRecuperacaoSenha emailRecuperacaoSenha;
     private final RecuperacaoSenhaProperties properties;
     private final BusinessEventLogger businessEventLogger;
+    private final UserAccessHistoryService userAccessHistoryService;
+    private final CsrfTokenStore csrfTokenStore;
 
     public RecuperacaoSenhaService(
             UserRepository userRepository,
@@ -59,7 +63,9 @@ public class RecuperacaoSenhaService {
             TokenStateService tokenStateService,
             EmailRecuperacaoSenha emailRecuperacaoSenha,
             RecuperacaoSenhaProperties properties,
-            BusinessEventLogger businessEventLogger
+            BusinessEventLogger businessEventLogger,
+            UserAccessHistoryService userAccessHistoryService,
+            CsrfTokenStore csrfTokenStore
     ) {
         this.userRepository = userRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
@@ -68,6 +74,8 @@ public class RecuperacaoSenhaService {
         this.emailRecuperacaoSenha = emailRecuperacaoSenha;
         this.properties = properties;
         this.businessEventLogger = businessEventLogger;
+        this.userAccessHistoryService = userAccessHistoryService;
+        this.csrfTokenStore = csrfTokenStore;
     }
 
     @Transactional
@@ -116,6 +124,13 @@ public class RecuperacaoSenhaService {
 
     @Transactional
     public void redefinir(String token, String novaSenha) {
+        if (novaSenha == null || novaSenha.isBlank()) {
+            throw new IllegalArgumentException("A nova senha é obrigatória");
+        }
+        if (novaSenha.getBytes(StandardCharsets.UTF_8).length > 72) {
+            throw new IllegalArgumentException("A senha excede o limite de 72 bytes");
+        }
+
         PasswordResetTokenEntity tokenRecuperacao = passwordResetTokenRepository
                 .findByTokenHash(hash(token))
                 .orElseThrow(() -> new InvalidPasswordResetTokenException(MENSAGEM_TOKEN_INVALIDO));
@@ -136,7 +151,8 @@ public class RecuperacaoSenhaService {
         userRepository.save(usuario);
 
         passwordResetTokenRepository.invalidarPendentes(usuario.getId(), agora);
-        tokenStateService.revokeAll(usuario.getId());
+        tokenStateService.revokeAll(usuario.getId()).ifPresent(csrfTokenStore::remover);
+        userAccessHistoryService.registrarSenhaAlterada(usuario);
         businessEventLogger.success("auth.password-reset.completed", "user", usuario.getId());
     }
 
