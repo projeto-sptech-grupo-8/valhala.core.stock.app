@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -33,6 +34,7 @@ import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
 import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
 import valhalla.core.stock.app.modules.estoque.entity.UnidadeConsumoDrink;
+import valhalla.core.stock.app.modules.estoque.exception.EstoqueReservadoConflitoException;
 import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkRepository;
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRepository;
@@ -71,6 +73,7 @@ import tools.jackson.databind.util.RawValue;
 @Service
 public class MovimentacaoEstoqueService {
 
+    static final int LIMITE_REGISTROS_EXPORTACAO = 10_000;
     private static final BigDecimal ZERO = BigDecimal.ZERO;
     private static final Set<TipoMovimentacaoEstoque> TIPOS_DIRETOS = Set.of(
             TipoMovimentacaoEstoque.ENTRADA,
@@ -171,15 +174,23 @@ public class MovimentacaoEstoqueService {
                 0, 100, ordenarPor, direcao,
                 Set.of("ocorridoEm", "tipo", "quantidade", "saldoPosterior")
         );
-        List<MovimentacaoEstoqueEntity> movimentacoes = movimentacaoEstoqueRepository.findAll(
-                especificacao, paginacaoOrdenacao.getSort()
+        Page<MovimentacaoEstoqueEntity> resultado = movimentacaoEstoqueRepository.findAll(
+                especificacao,
+                PageRequest.of(0, LIMITE_REGISTROS_EXPORTACAO + 1, paginacaoOrdenacao.getSort())
         );
+        List<MovimentacaoEstoqueEntity> movimentacoes = resultado.getContent();
+        if (resultado.getTotalElements() > LIMITE_REGISTROS_EXPORTACAO
+                || movimentacoes.size() > LIMITE_REGISTROS_EXPORTACAO) {
+            throw new IllegalArgumentException(
+                    "A exportação excede o limite máximo de " + LIMITE_REGISTROS_EXPORTACAO
+                            + " registros. Refine os filtros ou o período antes de exportar."
+            );
+        }
         Map<UUID, String> nomesUsuarios = nomesUsuariosPorId(movimentacoes);
-        Map<Long, List<MovimentacaoLoteResponseDto>> lotes = lotesPorMovimentacao(movimentacoes);
         return movimentacoes.stream()
                 .map(movimentacao -> paraResposta(movimentacao,
                         nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado"),
-                        lotes.getOrDefault(movimentacao.getId(), List.of())))
+                        List.of()))
                 .toList();
     }
 
@@ -335,9 +346,11 @@ public class MovimentacaoEstoqueService {
 
         EstrategiaMovimentacaoEstoque estrategia = estrategiaPara(TipoMovimentacaoEstoque.SAIDA_DRINK);
         estrategia.validar(commandBase);
-        itens.forEach(item -> estrategia.calcularSaldoPosterior(
-                item.estoque().getQuantidadeAtual(), item.quantidade()
-        ));
+        itens.forEach(item -> {
+            BigDecimal saldoAnterior = item.estoque().getQuantidadeAtual();
+            BigDecimal saldoPosterior = estrategia.calcularSaldoPosterior(saldoAnterior, item.quantidade());
+            validarSaldoLivreParaDebito(item.estoque(), saldoAnterior, saldoPosterior);
+        });
 
         UUID usuarioId = obterIdUsuarioAutenticado();
         String usuarioNome = nomeUsuario(usuarioId);
@@ -608,11 +621,12 @@ public class MovimentacaoEstoqueService {
         }
         BigDecimal saldoAnterior = estoque.getQuantidadeAtual();
         BigDecimal saldoPosterior = saldoAnterior.subtract(quantidade);
-        if (saldoPosterior.compareTo(ZERO) < 0) {
+        BigDecimal reservado = estoque.getQuantidadeReservada() == null ? ZERO : estoque.getQuantidadeReservada();
+        if (saldoPosterior.compareTo(ZERO) < 0 || saldoPosterior.compareTo(reservado) < 0) {
             throw new EstoqueInsuficientePedidoException(
                     "Saldo de estoque insuficiente para o produto " + estoque.getProduto().getNome(),
                     estoque.getProduto().getNome(),
-                    saldoAnterior
+                    saldoAnterior.subtract(reservado).max(ZERO)
             );
         }
 
@@ -754,7 +768,11 @@ public class MovimentacaoEstoqueService {
         if (!produto.isFardo() || produto.getUnidadesPorFardo() == null || produto.getUnidadesPorFardo() < 2) {
             throw new IllegalArgumentException("O produto informado não possui configuração de fardo");
         }
-        return quantidade.multiply(BigDecimal.valueOf(produto.getUnidadesPorFardo()));
+        BigDecimal unidades = quantidade.multiply(BigDecimal.valueOf(produto.getUnidadesPorFardo()));
+        if (produto.isFracionado() && produto.getVolumeEmbalagemMl() != null) {
+            return unidades.multiply(produto.getVolumeEmbalagemMl());
+        }
+        return unidades;
     }
 
     private String comporMotivoMovimentacao(String motivo, BigDecimal quantidadeInformada, boolean emFardo) {
@@ -809,6 +827,7 @@ public class MovimentacaoEstoqueService {
         estrategia.validar(command);
         BigDecimal saldoAnterior = estoque.getQuantidadeAtual();
         BigDecimal saldoPosterior = estrategia.calcularSaldoPosterior(saldoAnterior, command.quantidade());
+        validarSaldoLivreParaDebito(estoque, saldoAnterior, saldoPosterior);
         // lotes antes do saldo: a reconciliação compara a soma dos lotes com o saldo ainda não alterado
         List<Alocacao> alocacoes = controleLotes.movimentar(
                 estoque, estrategia.politicaLote(), command.quantidade(),
@@ -823,6 +842,33 @@ public class MovimentacaoEstoqueService {
         return paraResposta(movimentacao, usuarioNome, alocacoes.stream()
                 .map(alocacao -> paraLoteResposta(alocacao.lote(), alocacao.quantidade()))
                 .toList());
+    }
+
+    private void validarSaldoLivreParaDebito(
+            EstoqueEntity estoque,
+            BigDecimal saldoAnterior,
+            BigDecimal saldoPosterior
+    ) {
+        if (saldoPosterior.compareTo(saldoAnterior) >= 0) {
+            return;
+        }
+        BigDecimal reservado = estoque.getQuantidadeReservada() == null ? ZERO : estoque.getQuantidadeReservada();
+        if (saldoPosterior.compareTo(reservado) < 0) {
+            BigDecimal disponivelLivre = saldoAnterior.subtract(reservado).max(ZERO);
+            String nomeProduto = estoque.getProduto() != null ? estoque.getProduto().getNome() : "produto";
+            throw new EstoqueReservadoConflitoException(
+                    "Saldo livre insuficiente para " + nomeProduto + ": "
+                            + formatarQuantidade(reservado) + " reservado(s) em pedidos em andamento "
+                            + "(disponível livre: " + formatarQuantidade(disponivelLivre) + ")",
+                    nomeProduto,
+                    disponivelLivre,
+                    reservado
+            );
+        }
+    }
+
+    private static String formatarQuantidade(BigDecimal valor) {
+        return valor.signum() == 0 ? "0" : valor.stripTrailingZeros().toPlainString();
     }
 
     private MovimentacaoEstoqueEntity salvarHistorico(

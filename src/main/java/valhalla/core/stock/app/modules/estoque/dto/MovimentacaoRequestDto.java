@@ -34,7 +34,7 @@ public record MovimentacaoRequestDto(
         @Size(max = 50, message = "O número da nota fiscal deve ter no máximo 50 caracteres")
         String numeroNotaFiscal,
 
-        @Schema(description = "Quando true, a quantidade informada está em fardos e será convertida automaticamente para unidades.", example = "false")
+        @Schema(description = "Quando true, a quantidade informada está em fardos e será convertida automaticamente para a unidade-base do estoque (unidades, ou ML se fracionado).", example = "false")
         Boolean emFardo,
 
         @Schema(description = "Validade do lote, em yyyy-MM-dd. Só em ENTRADA e AJUSTE_POSITIVO.", example = "2027-03-31")

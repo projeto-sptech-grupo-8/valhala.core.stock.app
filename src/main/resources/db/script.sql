@@ -298,6 +298,7 @@ CREATE TABLE estoque (
     quantidade_atual NUMERIC(12,3) NOT NULL DEFAULT 0,
     quantidade_reservada NUMERIC(12,3) NOT NULL DEFAULT 0,
     estoque_minimo NUMERIC(12,3),
+    versao BIGINT NOT NULL DEFAULT 0,
     atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT uq_estoque_produto UNIQUE (produto_id),

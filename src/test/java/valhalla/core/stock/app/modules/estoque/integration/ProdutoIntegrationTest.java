@@ -2,6 +2,7 @@ package valhalla.core.stock.app.modules.estoque.integration;
 
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -9,7 +10,11 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.estoque.entity.CategoriaEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
+import valhalla.core.stock.app.modules.estoque.repository.LoteEstoqueRepository;
 
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -17,6 +22,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Transactional
 class ProdutoIntegrationTest extends EstoqueIntegrationTestSupport {
+
+    @Autowired
+    private LoteEstoqueRepository loteEstoqueRepository;
 
     @Test
     void endpointsDeProdutoExigemAutenticacaoEPermissoesAdequadas() throws Exception {
@@ -85,11 +93,18 @@ class ProdutoIntegrationTest extends EstoqueIntegrationTestSupport {
         String semHistoricoId = com.jayway.jsonpath.JsonPath.read(
                 semHistoricoRes.getResponse().getContentAsString(), "$.id").toString();
 
+        Integer estoqueIdSemHistorico = estoqueRepository.findByProdutoId(UUID.fromString(semHistoricoId))
+                .orElseThrow().getId();
+        assertThat(loteEstoqueRepository.findAllByEstoqueId(estoqueIdSemHistorico))
+                .singleElement()
+                .satisfies(lote -> assertThat(lote.getQuantidadeAtual()).isEqualByComparingTo("0"));
+
         mockMvc.perform(delete("/produtos/{id}", semHistoricoId).cookie(gerente).with(csrf(gerente)))
                 .andExpect(status().isNoContent());
         mockMvc.perform(get("/produtos/{id}", semHistoricoId).cookie(gerente))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.ativo").value(false));
+        assertThat(loteEstoqueRepository.findAllByEstoqueId(estoqueIdSemHistorico)).hasSize(1);
 
         // Reativação e inativação via PATCH funcionam quando não há histórico
         mockMvc.perform(patch("/produtos/{id}", semHistoricoId).cookie(gerente).with(csrf(gerente))
@@ -258,6 +273,27 @@ class ProdutoIntegrationTest extends EstoqueIntegrationTestSupport {
                 .andExpect(jsonPath("$.itens[0].codigo").value("L2611A"))
                 .andExpect(jsonPath("$.itens[0].validade").value("2027-06-30"))
                 .andExpect(jsonPath("$.itens[0].quantidadeAtual").value(18));
+    }
+
+    @Test
+    void criaProdutoFracionadoComFardoEConverteQuantidadeInicialEmMl() throws Exception {
+        CategoriaEntity destilados = categoria("Destilados");
+        Cookie gerente = autenticarGerente("gerente-fardo-fracionado@meraki.com");
+
+        mockMvc.perform(post("/produtos").cookie(gerente).with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nome":"Vodka Importada 1L","categoriaId":%d,"unidadeMedida":"garrafa",
+                                 "precoVenda":120.00,"precoCusto":70.00,"tipo":"PADRAO",
+                                 "fracionado":true,"volumeEmbalagemMl":1000,
+                                 "fardo":true,"unidadesPorFardo":6,
+                                 "quantidadeInicial":2,"quantidadeInicialEmFardos":true}
+                                """.formatted(destilados.getId())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.fracionado").value(true))
+                .andExpect(jsonPath("$.fardo").value(true))
+                .andExpect(jsonPath("$.unidadesPorFardo").value(6))
+                .andExpect(jsonPath("$.quantidadeEstoque").value(12000));
     }
 
     private String novoProduto(int categoriaId) {

@@ -264,11 +264,12 @@ class ProdutoServiceTest {
 
         autenticarNoEstabelecimento(estabelecimentoId);
         when(produtoRepository.findById(produto.getId())).thenReturn(Optional.of(produto));
-        when(estoqueRepository.findByProdutoId(produto.getId())).thenReturn(Optional.of(estoqueZerado));
+        when(estoqueRepository.findByProdutoIdForUpdate(produto.getId())).thenReturn(Optional.of(estoqueZerado));
 
         produtoService.excluirProduto(produto.getId());
 
         assertThat(produto.isAtivo()).isFalse();
+        verify(estoqueRepository).findByProdutoIdForUpdate(produto.getId());
         verify(produtoRepository).saveAndFlush(produto);
         verify(estoqueRepository, never()).deleteByProdutoId(any());
         verify(produtoRepository, never()).delete(any(ProdutoEntity.class));
@@ -329,7 +330,7 @@ class ProdutoServiceTest {
         estoquePositivo.setQuantidadeAtual(BigDecimal.ONE);
         estoquePositivo.setQuantidadeReservada(BigDecimal.ZERO);
         when(produtoRepository.findById(comSaldo.getId())).thenReturn(Optional.of(comSaldo));
-        when(estoqueRepository.findByProdutoId(comSaldo.getId())).thenReturn(Optional.of(estoquePositivo));
+        when(estoqueRepository.findByProdutoIdForUpdate(comSaldo.getId())).thenReturn(Optional.of(estoquePositivo));
         assertThatThrownBy(() -> produtoService.excluirProduto(comSaldo.getId()))
                 .isInstanceOf(ProdutoPossuiMovimentacoesException.class)
                 .hasMessage("Produto não pode ser inativado porque possui saldo em estoque");
@@ -340,7 +341,7 @@ class ProdutoServiceTest {
         estoqueComReserva.setQuantidadeAtual(BigDecimal.ZERO);
         estoqueComReserva.setQuantidadeReservada(BigDecimal.ONE);
         when(produtoRepository.findById(comReservaEstoque.getId())).thenReturn(Optional.of(comReservaEstoque));
-        when(estoqueRepository.findByProdutoId(comReservaEstoque.getId())).thenReturn(Optional.of(estoqueComReserva));
+        when(estoqueRepository.findByProdutoIdForUpdate(comReservaEstoque.getId())).thenReturn(Optional.of(estoqueComReserva));
         assertThatThrownBy(() -> produtoService.excluirProduto(comReservaEstoque.getId()))
                 .isInstanceOf(ProdutoPossuiMovimentacoesException.class);
     }
@@ -361,6 +362,7 @@ class ProdutoServiceTest {
 
         ProdutoEntity semHistorico = produto(estabelecimentoId, categoria, "PRD-AT0002", "Energético", ProdutoTipo.PADRAO, true);
         when(produtoRepository.findById(semHistorico.getId())).thenReturn(Optional.of(semHistorico));
+        when(estoqueRepository.findByProdutoIdForUpdate(semHistorico.getId())).thenReturn(Optional.of(new EstoqueEntity()));
         when(estoqueRepository.findByProdutoId(semHistorico.getId())).thenReturn(Optional.of(new EstoqueEntity()));
         when(produtoRepository.saveAndFlush(any(ProdutoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -402,6 +404,37 @@ class ProdutoServiceTest {
         assertThat(estoqueCaptor.getValue().getQuantidadeAtual()).isEqualByComparingTo("24");
         assertThat(resposta.fardo()).isTrue();
         assertThat(resposta.unidadesPorFardo()).isEqualTo(12);
+    }
+
+    @Test
+    void criaProdutoFracionadoComFardoEConverteQuantidadeInicialParaMl() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        CategoriaEntity categoria = categoria(estabelecimentoId, true);
+        autenticarNoEstabelecimento(estabelecimentoId);
+        when(categoriaRepository.findById(1)).thenReturn(Optional.of(categoria));
+        when(produtoRepository.existsByEstabelecimentoIdAndSku(any(), anyString())).thenReturn(false);
+        when(produtoRepository.saveAndFlush(any(ProdutoEntity.class))).thenAnswer(invocation -> {
+            ProdutoEntity produto = invocation.getArgument(0);
+            produto.setId(UUID.randomUUID());
+            return produto;
+        });
+        when(estoqueRepository.saveAndFlush(any(EstoqueEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProdutoResponseDto resposta = produtoService.criarProduto(new ProdutoRequestDto(
+                "Vodka Absolut 1L", 1, "garrafa", new BigDecimal("129.90"),
+                new BigDecimal("89.90"), ProdutoTipo.PADRAO,
+                true, new BigDecimal("1000"), new BigDecimal("3000"), new BigDecimal("2"),
+                true, 6, true
+        ));
+
+        ArgumentCaptor<EstoqueEntity> estoqueCaptor = ArgumentCaptor.forClass(EstoqueEntity.class);
+        verify(estoqueRepository).saveAndFlush(estoqueCaptor.capture());
+
+        assertThat(estoqueCaptor.getValue().getQuantidadeAtual()).isEqualByComparingTo("12000");
+        assertThat(resposta.quantidadeEstoque()).isEqualByComparingTo("12000");
+        verify(movimentacaoEstoqueService).registrarEntradaInicial(
+                estoqueCaptor.getValue(), new BigDecimal("12000"), null, null
+        );
     }
 
     @Test
@@ -496,8 +529,8 @@ class ProdutoServiceTest {
         ProdutoEntity vodka = produto(estabelecimentoId, categoria, "PRD-AAAA0001", "Vodka", ProdutoTipo.PADRAO, true);
         UUID idFiltro = vodka.getId();
 
-        when(produtoRepository.findAll(any(Specification.class), any(org.springframework.data.domain.Sort.class)))
-                .thenReturn(List.of(vodka));
+        when(produtoRepository.findAll(any(Specification.class), any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(vodka)));
         when(estoqueRepository.findAllByProdutoIdIn(anyCollection())).thenReturn(List.of());
 
         List<ProdutoResponseDto> exportados = produtoService.listarProdutosParaExportacao(
@@ -506,7 +539,18 @@ class ProdutoServiceTest {
         assertThat(exportados).hasSize(1);
 
         ArgumentCaptor<Specification<ProdutoEntity>> specCaptor = ArgumentCaptor.forClass(Specification.class);
-        verify(produtoRepository).findAll(specCaptor.capture(), any(org.springframework.data.domain.Sort.class));
+        verify(produtoRepository).findAll(specCaptor.capture(), any(org.springframework.data.domain.Pageable.class));
+
+        when(produtoRepository.findAll(any(Specification.class), any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(new PageImpl<>(
+                        List.of(vodka),
+                        PageRequest.of(0, ProdutoService.LIMITE_REGISTROS_EXPORTACAO + 1),
+                        ProdutoService.LIMITE_REGISTROS_EXPORTACAO + 1L
+                ));
+        assertThatThrownBy(() -> produtoService.listarProdutosParaExportacao(
+                null, null, null, null, null, "nome", DirecaoOrdenacao.ASC
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("limite máximo");
 
         Predicate predicate = org.mockito.Mockito.mock(Predicate.class);
         Expression expr = org.mockito.Mockito.mock(Expression.class);
@@ -585,11 +629,11 @@ class ProdutoServiceTest {
         ))).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Não é permitido alterar fracionamento ou volume de produto que já possui estoque ou movimentações");
 
-        // Atualização de estoque mínimo e categoria válida
+        // Atualização de estoque mínimo e categoria válida usando lock pessimista
         EstoqueEntity estoque = new EstoqueEntity();
         estoque.setProduto(padraoSemEstoque);
         estoque.setQuantidadeAtual(BigDecimal.TEN);
-        when(estoqueRepository.findByProdutoId(padraoSemEstoque.getId())).thenReturn(Optional.of(estoque));
+        when(estoqueRepository.findByProdutoIdForUpdate(padraoSemEstoque.getId())).thenReturn(Optional.of(estoque));
         when(categoriaRepository.findById(1)).thenReturn(Optional.of(categoria));
         when(produtoRepository.saveAndFlush(any(ProdutoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -598,6 +642,7 @@ class ProdutoServiceTest {
                 false, null, new BigDecimal("4"), true, 6, true
         ));
         assertThat(atualizado.estoqueMinimo()).isEqualByComparingTo("4");
+        verify(estoqueRepository).findByProdutoIdForUpdate(padraoSemEstoque.getId());
         verify(estoqueRepository).save(estoque);
     }
 

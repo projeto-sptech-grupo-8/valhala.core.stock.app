@@ -1,7 +1,9 @@
 package valhalla.core.stock.app.shared.exceptionhandler;
 
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.persistence.OptimisticLockException;
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
@@ -40,6 +42,7 @@ import valhalla.core.stock.app.modules.caixa.exception.TerminalOcupadoPointExcep
 import valhalla.core.stock.app.modules.caixa.exception.WebhookAssinaturaInvalidaException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaJaExisteException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaPossuiProdutosException;
+import valhalla.core.stock.app.modules.estoque.exception.EstoqueReservadoConflitoException;
 import valhalla.core.stock.app.modules.estoque.exception.ProdutoPossuiMovimentacoesException;
 
 import java.time.LocalDateTime;
@@ -152,6 +155,32 @@ public class GlobalExceptionHandler {
             ProdutoPossuiMovimentacoesException exception
     ) {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(EstoqueReservadoConflitoException.class)
+    public ResponseEntity<ApiErrorResponse> handleEstoqueReservadoConflito(
+            EstoqueReservadoConflitoException exception
+    ) {
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                exception.getMessage(),
+                Map.of(
+                        "estoque",
+                        "Saldo livre disponível de " + exception.getProdutoNome()
+                                + ": " + exception.getDisponivelLivre().stripTrailingZeros().toPlainString()
+                )
+        );
+    }
+
+    @ExceptionHandler({OptimisticLockingFailureException.class, OptimisticLockException.class})
+    public ResponseEntity<ApiErrorResponse> handleOptimisticLock(Exception exception) {
+        LOGGER.atWarn().addKeyValue("event", "concurrency.optimistic-lock.conflict")
+                .log("Optimistic lock conflict");
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                "O registro foi alterado simultaneamente por outra operação. Atualize os dados e tente novamente.",
+                Map.of()
+        );
     }
 
     @ExceptionHandler(ConfiguracaoCaixaInvalidaException.class)

@@ -1,12 +1,14 @@
 package valhalla.core.stock.app.shared.exceptionhandler;
 
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.persistence.OptimisticLockException;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Path;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -29,8 +31,10 @@ import valhalla.core.stock.app.modules.caixa.exception.TaxaPagamentoJaExisteExce
 import valhalla.core.stock.app.modules.caixa.exception.TerminalCaixaJaExisteException;
 import valhalla.core.stock.app.modules.caixa.exception.TerminalOcupadoPointException;
 import valhalla.core.stock.app.modules.caixa.exception.WebhookAssinaturaInvalidaException;
+import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaJaExisteException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaPossuiProdutosException;
+import valhalla.core.stock.app.modules.estoque.exception.EstoqueReservadoConflitoException;
 import valhalla.core.stock.app.modules.estoque.exception.ProdutoPossuiMovimentacoesException;
 import valhalla.core.stock.app.shared.error.AccessConfigurationConflictException;
 import valhalla.core.stock.app.shared.error.CnpjAlreadyExistsException;
@@ -113,6 +117,26 @@ class GlobalExceptionHandlerTest {
                 handler.handleProdutoPossuiMovimentacoes(new ProdutoPossuiMovimentacoesException("Produto com movimentações", new RuntimeException())),
                 HttpStatus.CONFLICT,
                 "Produto com movimentações"
+        );
+
+        ResponseEntity<ApiErrorResponse> conflitoReserva = handler.handleEstoqueReservadoConflito(
+                new EstoqueReservadoConflitoException(
+                        "Saldo livre insuficiente", "Vodka", new BigDecimal("4.000"), new BigDecimal("6")
+                )
+        );
+        assertStatus(conflitoReserva, HttpStatus.CONFLICT, "Saldo livre insuficiente");
+        assertThat(conflitoReserva.getBody().fieldErrors())
+                .containsEntry("estoque", "Saldo livre disponível de Vodka: 4");
+
+        assertStatus(
+                handler.handleOptimisticLock(new ObjectOptimisticLockingFailureException(EstoqueEntity.class, 1)),
+                HttpStatus.CONFLICT,
+                "O registro foi alterado simultaneamente por outra operação. Atualize os dados e tente novamente."
+        );
+        assertStatus(
+                handler.handleOptimisticLock(new OptimisticLockException("conflito")),
+                HttpStatus.CONFLICT,
+                "O registro foi alterado simultaneamente por outra operação. Atualize os dados e tente novamente."
         );
     }
 

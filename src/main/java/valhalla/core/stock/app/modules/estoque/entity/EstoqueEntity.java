@@ -33,6 +33,10 @@ public class EstoqueEntity {
     @Column(name = "estoque_minimo", precision = 12, scale = 3)
     private BigDecimal estoqueMinimo;
 
+    @Version
+    @Column(name = "versao", nullable = false)
+    private Long versao;
+
     @UpdateTimestamp
     @Column(name = "atualizado_em", nullable = false)
     private LocalDateTime atualizadoEm;

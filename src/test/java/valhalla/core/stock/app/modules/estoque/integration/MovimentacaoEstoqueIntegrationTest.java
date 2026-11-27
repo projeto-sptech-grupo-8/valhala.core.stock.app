@@ -9,6 +9,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.estoque.entity.CategoriaEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ComposicaoDrinkEntity;
+import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.UnidadeConsumoDrink;
 import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkRepository;
@@ -118,6 +119,58 @@ class MovimentacaoEstoqueIntegrationTest extends EstoqueIntegrationTestSupport {
             org.assertj.core.api.Assertions.assertThat(sheet.getRow(1).getCell(1).getStringCellValue()).isEqualTo("Red Bull");
             org.assertj.core.api.Assertions.assertThat(sheet.getRow(1).getCell(2).getStringCellValue()).isEqualTo("Entrada");
         }
+    }
+
+    @Test
+    void retornaConflito409AoTentarDebitoQueInvadeQuantidadeReservada() throws Exception {
+        CategoriaEntity categoria = categoria("Bebidas");
+        ProdutoEntity energetico = produtoPadrao("Red Bull", categoria, false, "10");
+        EstoqueEntity estoque = estoqueRepository.findByProdutoId(energetico.getId()).orElseThrow();
+        estoque.setQuantidadeReservada(new BigDecimal("6"));
+        estoqueRepository.saveAndFlush(estoque);
+
+        ProdutoEntity drink = drink("Combo Energético", categoria);
+        salvarIngrediente(drink, energetico, "5", UnidadeConsumoDrink.UN);
+
+        Cookie operador = autenticarComPermissoes("operador-reserva@meraki.com",
+                "MOVIMENTAR_ESTOQUE", "VISUALIZAR_ESTOQUE");
+
+        mockMvc.perform(post("/movimentacoes-estoque").cookie(operador).with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON).content(movimentacao(energetico, "SAIDA", "5")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.fieldErrors.estoque").exists());
+
+        mockMvc.perform(post("/movimentacoes-estoque").cookie(operador).with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON).content(movimentacao(energetico, "PERDA", "5")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.fieldErrors.estoque").exists());
+
+        mockMvc.perform(post("/movimentacoes-estoque/saida-drink").cookie(operador).with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"drinkId\":\"%s\",\"quantidade\":1,\"motivo\":\"Balcão\"}".formatted(drink.getId())))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.fieldErrors.estoque").exists());
+    }
+
+    @Test
+    void converteEntradaEmFardoParaMlQuandoProdutoEhFracionadoViaHttp() throws Exception {
+        CategoriaEntity categoria = categoria("Destilados");
+        ProdutoEntity vodka = produtoPadrao("Vodka Importada", categoria, true, "0");
+        vodka.setFardo(true);
+        vodka.setUnidadesPorFardo(6);
+        produtoRepository.saveAndFlush(vodka);
+
+        Cookie operador = autenticarComPermissoes("operador-fardo-ml@meraki.com", "MOVIMENTAR_ESTOQUE");
+
+        mockMvc.perform(post("/movimentacoes-estoque").cookie(operador).with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"produtoId":"%s","tipo":"ENTRADA","quantidade":2,"emFardo":true,"motivo":"Caixa fechada"}
+                                """.formatted(vodka.getId())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.quantidade").value(12000))
+                .andExpect(jsonPath("$.unidadeEstoque").value("ML"))
+                .andExpect(jsonPath("$.saldoPosterior").value(12000));
     }
 
     private String movimentacao(ProdutoEntity produto, String tipo, String quantidade) {

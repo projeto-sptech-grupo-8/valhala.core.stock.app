@@ -63,7 +63,7 @@ public record ProdutoRequestDto(
         @Schema(description = "Quantidade de unidades contidas em um fardo. Obrigatório quando fardo=true.", example = "12")
         Integer unidadesPorFardo,
 
-        @Schema(description = "Quando true, a quantidade inicial informada é multiplicada por unidadesPorFardo.", example = "false")
+        @Schema(description = "Quando true, a quantidade inicial informada é multiplicada por unidadesPorFardo (e pelo volumeEmbalagemMl, se o produto for fracionado).", example = "false")
         Boolean quantidadeInicialEmFardos,
 
         @Size(max = 100, message = "O lote deve ter no máximo 100 caracteres")
