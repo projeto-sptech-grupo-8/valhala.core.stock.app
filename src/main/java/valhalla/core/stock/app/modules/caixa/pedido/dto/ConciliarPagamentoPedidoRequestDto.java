@@ -15,6 +15,19 @@ public record ConciliarPagamentoPedidoRequestDto(
 
         @Size(max = 255, message = "A referência do comprovante deve ter no máximo 255 caracteres")
         @Schema(description = "NSU ou referência atualizada do comprovante", nullable = true)
-        String comprovanteReferencia
+        String comprovanteReferencia,
+
+        @Schema(description = "E-mail do autorizador com CAIXA_RESOLVER_DIVERGENCIA (obrigatório quando aprovado = true se o operador não possuir)", nullable = true)
+        String autorizadorEmail,
+
+        @Schema(description = "Senha do autorizador com CAIXA_RESOLVER_DIVERGENCIA (obrigatória quando aprovado = true se o operador não possuir)", nullable = true)
+        String autorizadorSenha
 ) {
+    public ConciliarPagamentoPedidoRequestDto(
+            Boolean aprovado,
+            String motivo,
+            String comprovanteReferencia
+    ) {
+        this(aprovado, motivo, comprovanteReferencia, null, null);
+    }
 }

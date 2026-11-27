@@ -1034,4 +1034,119 @@ class PedidoCaixaPointIntegrationTest extends CaixaIntegrationTestSupport {
                 .first()
                 .satisfies(l -> assertThat(l.getQuantidadeAtual()).isEqualByComparingTo("1.000"));
     }
+
+    @Test
+    void estornoPedidoPointEmDuasFasesRetrySeguroECancelamentoDeAcaoNecessaria() throws Exception {
+        UsuarioAutenticado gerente = autenticarGerente("gerente.point.estorno@meraki.com");
+        UsuarioAutenticado operador = autenticarComPermissoes("operador.point.estorno@meraki.com", PERMISSOES_ATENDENTE);
+
+        CaixaEntity caixa = caixa(estabelecimento, "Caixa Point Estorno");
+        String terminalUuid = cadastrarTerminal(gerente, caixa.getId(), "PAX_A910__SMARTPOS_EST_01", "Smart Estorno");
+        habilitarPointNaConfiguracao(true);
+        abrirSessao(operador, caixa.getId(), "50.00");
+
+        CategoriaEntity cat = categoria("Destilados Point Estorno");
+        ProdutoEntity whisky = produtoPadrao("Glenfiddich", cat, false, "120.00", "250.00", null, "5.000");
+
+        // 1) Cria pedido Point, aprova na maquininha e testa estorno em 2 fases (502 transitório -> retry -> ESTORNADO)
+        String pedidoId = criarPedidoSimples(operador, "Mesa Estorno", whisky.getId(), 1);
+        MvcResult cob = mockMvc.perform(post("/caixa/pedidos/{id}/pagamentos", pedidoId)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "forma": "CREDITO",
+                                  "valor": 250.00,
+                                  "terminalCaixaId": "%s",
+                                  "chaveIdempotencia": "point-estorno-01"
+                                }
+                                """.formatted(terminalUuid)))
+                .andExpect(status().isOk())
+                .andReturn();
+        String pagId = JsonPath.read(cob.getResponse().getContentAsString(), "$.pagamentos[0].id");
+        String orderId = JsonPath.read(cob.getResponse().getContentAsString(), "$.pagamentos[0].orderExternaId");
+
+        mockMvc.perform(post("/dev/mercado-pago/point/orders/{orderId}/simular", orderId)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"processed\",\"paymentStatus\":\"accredited\",\"dispararWebhook\":true}"))
+                .andExpect(status().isOk());
+
+        mockPointClient.configurarProximaFalhaEstorno(new IntegracaoMercadoPagoException(
+                "Timeout ao estornar no Mercado Pago", HttpStatus.GATEWAY_TIMEOUT, true
+        ));
+
+        mockMvc.perform(post("/caixa/pedidos/{id}/estorno", pedidoId)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "motivo": "Cancelamento pós aprovação",
+                                  "autorizadorEmail": "gerente.point.estorno@meraki.com",
+                                  "autorizadorSenha": "%s"
+                                }
+                                """.formatted(SENHA)))
+                .andExpect(status().isGatewayTimeout());
+
+        assertThat(pagamentoPedidoRepository.findById(UUID.fromString(pagId)).orElseThrow().getStatus())
+                .isEqualTo(StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO);
+
+        // Retry do estorno agora sucede no MockMercadoPagoPointClient e devolve estoque
+        mockMvc.perform(post("/caixa/pedidos/{id}/estorno", pedidoId)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "motivo": "Cancelamento pós aprovação",
+                                  "autorizadorEmail": "gerente.point.estorno@meraki.com",
+                                  "autorizadorSenha": "%s"
+                                }
+                                """.formatted(SENHA)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ESTORNADO"))
+                .andExpect(jsonPath("$.pagamentos[0].status").value("ESTORNADO"));
+
+        assertThat(estoqueRepository.findByProdutoId(whisky.getId()).orElseThrow().getQuantidadeAtual())
+                .isEqualByComparingTo("5.000");
+
+        // 2) Pagamento em ACAO_NECESSARIA pode ser cancelado via cancelamento-point liberando terminal e reserva
+        String pedidoAcaoId = criarPedidoSimples(operador, "Mesa Acao", whisky.getId(), 1);
+        MvcResult cobAcao = mockMvc.perform(post("/caixa/pedidos/{id}/pagamentos", pedidoAcaoId)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "forma": "DEBITO",
+                                  "valor": 250.00,
+                                  "terminalCaixaId": "%s",
+                                  "chaveIdempotencia": "point-acao-01"
+                                }
+                                """.formatted(terminalUuid)))
+                .andExpect(status().isOk())
+                .andReturn();
+        String pagAcaoId = JsonPath.read(cobAcao.getResponse().getContentAsString(), "$.pagamentos[0].id");
+        String orderAcaoId = JsonPath.read(cobAcao.getResponse().getContentAsString(), "$.pagamentos[0].orderExternaId");
+
+        mockPointClient.atualizarStatusMock(orderAcaoId, "action_required", "verify_on_device", "pending");
+        mockMvc.perform(post("/caixa/pedidos/{p}/pagamentos/{pag}/sincronizar", pedidoAcaoId, pagAcaoId)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pagamentos[0].status").value("ACAO_NECESSARIA"));
+
+        mockMvc.perform(post("/caixa/pedidos/{p}/pagamentos/{pag}/cancelamento-point", pedidoAcaoId, pagAcaoId)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("EM_ATENDIMENTO"))
+                .andExpect(jsonPath("$.pagamentos[0].status").value("CANCELADO"));
+
+        assertThat(estoqueRepository.findByProdutoId(whisky.getId()).orElseThrow().getQuantidadeReservada())
+                .isEqualByComparingTo("0.000");
+    }
 }

@@ -1,5 +1,7 @@
 package valhalla.core.stock.app.modules.caixa.pedido.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -26,9 +28,9 @@ import valhalla.core.stock.app.modules.caixa.pedido.enums.CanalPedidoCaixa;
 import valhalla.core.stock.app.modules.caixa.configuracao.entity.ConfiguracaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.configuracao.enums.FormaPagamentoCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.ItemPedidoEntity;
+import valhalla.core.stock.app.modules.caixa.sessao.entity.MovimentacaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PedidoEntity;
-import valhalla.core.stock.app.modules.caixa.pedido.entity.SequenciaDocumentoEntity;
 import valhalla.core.stock.app.modules.caixa.sessao.entity.SessaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusDescontoPedido;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPagamentoPedido;
@@ -36,14 +38,18 @@ import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPedidoCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusReservaEstoque;
 import valhalla.core.stock.app.modules.caixa.sessao.enums.StatusSessaoCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.TipoDescontoPedido;
+import valhalla.core.stock.app.modules.caixa.sessao.enums.TipoMovimentacaoCaixa;
 import valhalla.core.stock.app.modules.caixa.exception.AutorizacaoCaixaNegadaException;
+import valhalla.core.stock.app.modules.caixa.exception.IntegracaoMercadoPagoException;
 import valhalla.core.stock.app.modules.caixa.exception.PedidoEstadoInvalidoException;
+import valhalla.core.stock.app.modules.caixa.exception.SaldoInsuficienteCaixaException;
 import valhalla.core.stock.app.modules.caixa.exception.SessaoCaixaEstadoInvalidoException;
 import valhalla.core.stock.app.modules.caixa.configuracao.mapper.ConfiguracaoCaixaMapper;
 import valhalla.core.stock.app.modules.caixa.pedido.mapper.PagamentoPedidoMapper;
 import valhalla.core.stock.app.modules.caixa.pedido.mapper.PedidoCaixaMapper;
 import valhalla.core.stock.app.modules.caixa.configuracao.repository.ConfiguracaoCaixaRepository;
 import valhalla.core.stock.app.modules.caixa.pedido.repository.ItemPedidoRepository;
+import valhalla.core.stock.app.modules.caixa.sessao.repository.MovimentacaoCaixaRepository;
 import valhalla.core.stock.app.modules.caixa.pedido.repository.PagamentoPedidoRepository;
 import valhalla.core.stock.app.modules.caixa.pedido.repository.PedidoRepository;
 import valhalla.core.stock.app.modules.caixa.pedido.repository.SequenciaDocumentoRepository;
@@ -70,6 +76,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -77,10 +84,12 @@ import valhalla.core.stock.app.modules.caixa.fiscal.entity.NotaFiscalEntity;
 import valhalla.core.stock.app.modules.caixa.fiscal.mapper.NotaFiscalMapper;
 import valhalla.core.stock.app.modules.caixa.fiscal.service.NotaFiscalCaixaService;
 import valhalla.core.stock.app.modules.caixa.pedido.strategy.ProcessadorPagamento;
+import valhalla.core.stock.app.modules.caixa.point.client.dto.OrderPointResultado;
 import valhalla.core.stock.app.modules.caixa.point.service.OrquestradorPagamentoPointService;
 import valhalla.core.stock.app.modules.caixa.security.AutorizadorOperacaoCaixaService;
 import valhalla.core.stock.app.modules.caixa.security.ContextoCaixa;
 import valhalla.core.stock.app.modules.caixa.sessao.service.AuditoriaCaixaService;
+import valhalla.core.stock.app.modules.caixa.sessao.service.CalculadoraFechamentoCaixa;
 import valhalla.core.stock.app.modules.caixa.sessao.service.EventoAuditoriaCaixa;
 
 @Service
@@ -97,6 +106,8 @@ public class PedidoCaixaService {
     private final PagamentoPedidoRepository pagamentoPedidoRepository;
     private final SequenciaDocumentoRepository sequenciaDocumentoRepository;
     private final SessaoCaixaRepository sessaoCaixaRepository;
+    private final MovimentacaoCaixaRepository movimentacaoCaixaRepository;
+    private final CalculadoraFechamentoCaixa calculadoraFechamentoCaixa;
     private final ConfiguracaoCaixaRepository configuracaoCaixaRepository;
     private final ProdutoRepository produtoRepository;
     private final UserRepository userRepository;
@@ -118,6 +129,8 @@ public class PedidoCaixaService {
             PagamentoPedidoRepository pagamentoPedidoRepository,
             SequenciaDocumentoRepository sequenciaDocumentoRepository,
             SessaoCaixaRepository sessaoCaixaRepository,
+            MovimentacaoCaixaRepository movimentacaoCaixaRepository,
+            CalculadoraFechamentoCaixa calculadoraFechamentoCaixa,
             ConfiguracaoCaixaRepository configuracaoCaixaRepository,
             ProdutoRepository produtoRepository,
             UserRepository userRepository,
@@ -137,6 +150,8 @@ public class PedidoCaixaService {
         this.pagamentoPedidoRepository = pagamentoPedidoRepository;
         this.sequenciaDocumentoRepository = sequenciaDocumentoRepository;
         this.sessaoCaixaRepository = sessaoCaixaRepository;
+        this.movimentacaoCaixaRepository = movimentacaoCaixaRepository;
+        this.calculadoraFechamentoCaixa = calculadoraFechamentoCaixa;
         this.configuracaoCaixaRepository = configuracaoCaixaRepository;
         this.produtoRepository = produtoRepository;
         this.userRepository = userRepository;
@@ -488,6 +503,7 @@ public class PedidoCaixaService {
                     objectMapper.valueToTree(dadosAnteriores),
                     objectMapper.valueToTree(snapshotDesconto(pedidoSalvo))
             );
+            pedidoSalvo = concluirPedidoSeDescontoQuitouSaldo(pedidoSalvo, itens, pagamentos, usuarioId);
             return montarDetalhe(pedidoSalvo, itens, pagamentos);
         }
 
@@ -529,6 +545,7 @@ public class PedidoCaixaService {
                     objectMapper.valueToTree(dadosAnteriores),
                     objectMapper.valueToTree(snapshotDesconto(pedidoSalvo))
             );
+            pedidoSalvo = concluirPedidoSeDescontoQuitouSaldo(pedidoSalvo, itens, pagamentos, usuarioId);
             return montarDetalhe(pedidoSalvo, itens, pagamentos);
         }
 
@@ -626,6 +643,15 @@ public class PedidoCaixaService {
             if (novoTotal.compareTo(ZERO) <= 0) {
                 throw new PedidoEstadoInvalidoException("O desconto solicitado excede o subtotal atual do pedido");
             }
+            BigDecimal totalComprometido = pagamentos.stream()
+                    .filter(PagamentoPedidoEntity::compoeSaldoEmAberto)
+                    .map(PagamentoPedidoEntity::getValor)
+                    .reduce(ZERO, BigDecimal::add);
+            if (novoTotal.compareTo(totalComprometido) < 0) {
+                throw new PedidoEstadoInvalidoException(
+                        "O desconto reduz o total do pedido abaixo do valor já pago ou em processamento"
+                );
+            }
             pedido.setDesconto(valorSolicitado);
             pedido.setTotal(novoTotal);
             pedido.setStatusDesconto(StatusDescontoPedido.APROVADO);
@@ -653,6 +679,7 @@ public class PedidoCaixaService {
                     objectMapper.valueToTree(dadosAnteriores),
                     objectMapper.valueToTree(snapshotDesconto(pedidoSalvo))
             );
+            pedidoSalvo = concluirPedidoSeDescontoQuitouSaldo(pedidoSalvo, itens, pagamentos, usuarioId);
             return montarDetalhe(pedidoSalvo, itens, pagamentos);
         }
 
@@ -838,7 +865,20 @@ public class PedidoCaixaService {
         if (deveUsarIntegracaoPoint(dto)) {
             return orquestradorPagamentoPointService.iniciarPagamentoPoint(id, dto);
         }
-        return transactionTemplate.execute(status -> registrarPagamentoSincrono(id, dto));
+        String chaveIdempotenciaSolicitada = normalizarTexto(dto.chaveIdempotencia());
+        try {
+            return transactionTemplate.execute(status -> registrarPagamentoSincrono(id, dto));
+        } catch (DataIntegrityViolationException excecao) {
+            if (chaveIdempotenciaSolicitada != null) {
+                PedidoCaixaDetalheResponseDto recuperado = transactionTemplate.execute(status ->
+                        recuperarDetalhePorIdempotencia(id, chaveIdempotenciaSolicitada)
+                );
+                if (recuperado != null) {
+                    return recuperado;
+                }
+            }
+            throw excecao;
+        }
     }
 
     private boolean deveUsarIntegracaoPoint(RegistrarPagamentoPedidoRequestDto dto) {
@@ -916,7 +956,7 @@ public class PedidoCaixaService {
                 dto
         );
 
-        PagamentoPedidoEntity pagamentoSalvo = salvarPagamentoComIdempotencia(novoPagamento);
+        PagamentoPedidoEntity pagamentoSalvo = pagamentoPedidoRepository.saveAndFlush(novoPagamento);
         List<PagamentoPedidoEntity> todosPagamentos = new ArrayList<>(pagamentosExistentes);
         todosPagamentos.add(pagamentoSalvo);
 
@@ -960,10 +1000,14 @@ public class PedidoCaixaService {
                 .toList();
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = AutorizacaoCaixaNegadaException.class)
     @PreAuthorize("""
             @permissionAuthorizationService.hasPermission(
                 'CAIXA_OPERAR',
+                authentication
+            )
+            || @permissionAuthorizationService.hasPermission(
+                'CAIXA_RESOLVER_DIVERGENCIA',
                 authentication
             )
             """)
@@ -988,9 +1032,11 @@ public class PedidoCaixaService {
                 .buscarParaAtualizacao(pagamentoId, pedido.getId())
                 .orElseThrow(() -> new EntityNotFoundException("Pagamento não encontrado para este pedido"));
 
-        if (pagamento.getStatus() != StatusPagamentoPedido.PENDENTE_CONCILIACAO) {
+        if (pagamento.getStatus() != StatusPagamentoPedido.PENDENTE_CONCILIACAO
+                && pagamento.getStatus() != StatusPagamentoPedido.ACAO_NECESSARIA
+                && pagamento.getStatus() != StatusPagamentoPedido.PENDENTE) {
             throw new PedidoEstadoInvalidoException(
-                    "Somente pagamentos com status PENDENTE_CONCILIACAO podem ser conciliados manualmente"
+                    "Somente pagamentos pendentes ou que requerem ação podem ser conciliados manualmente"
             );
         }
 
@@ -1002,8 +1048,18 @@ public class PedidoCaixaService {
 
         Map<String, Object> estadoAnterior = snapshotPagamento(pagamento);
         LocalDateTime agora = LocalDateTime.now();
+        UUID autorizadorId = null;
+        String autorizadorNome = null;
 
         if (Boolean.TRUE.equals(dto.aprovado())) {
+            var autorizador = autorizadorOperacaoCaixaService.exigirAutorizador(
+                    "CAIXA_RESOLVER_DIVERGENCIA",
+                    dto.autorizadorEmail(),
+                    dto.autorizadorSenha(),
+                    "Permissão CAIXA_RESOLVER_DIVERGENCIA necessária para aprovar conciliação manual de pagamento"
+            );
+            autorizadorId = autorizador.usuarioId();
+            autorizadorNome = autorizador.nome();
             pagamento.setStatus(StatusPagamentoPedido.APROVADO);
             pagamento.setPagoEm(agora);
         } else {
@@ -1020,13 +1076,28 @@ public class PedidoCaixaService {
 
         PagamentoPedidoEntity pagamentoSalvo = pagamentoPedidoRepository.saveAndFlush(pagamento);
 
+        List<PagamentoPedidoEntity> todosPagamentos =
+                pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedido.getId());
+
         if (pagamentoSalvo.getStatus() == StatusPagamentoPedido.CANCELADO
                 && "MERCADO_PAGO".equals(pagamentoSalvo.getProvedor())) {
-            reservaEstoqueService.liberarReservasAtivasDoPedido(
-                    pedido.getId(),
-                    StatusReservaEstoque.LIBERADA,
-                    motivo
+            boolean possuiOutroPointAtivo = todosPagamentos.stream().anyMatch(p ->
+                    !p.getId().equals(pagamentoSalvo.getId())
+                            && "MERCADO_PAGO".equals(p.getProvedor())
+                            && (p.getStatus() == StatusPagamentoPedido.PENDENTE
+                                    || p.getStatus() == StatusPagamentoPedido.PENDENTE_NA_POINT
+                                    || p.getStatus() == StatusPagamentoPedido.EM_TERMINAL
+                                    || p.getStatus() == StatusPagamentoPedido.CANCELAMENTO_SOLICITADO
+                                    || p.getStatus() == StatusPagamentoPedido.ACAO_NECESSARIA
+                                    || p.getStatus() == StatusPagamentoPedido.PENDENTE_CONCILIACAO)
             );
+            if (!possuiOutroPointAtivo) {
+                reservaEstoqueService.liberarReservasAtivasDoPedido(
+                        pedido.getId(),
+                        StatusReservaEstoque.LIBERADA,
+                        motivo
+                );
+            }
         }
 
         auditoriaCaixaService.registrar(
@@ -1046,15 +1117,13 @@ public class PedidoCaixaService {
                 pedido.getId(),
                 pedido.getIdentificadorAtendimento(),
                 pagamentoSalvo.getId(),
-                null,
-                null,
+                autorizadorId,
+                autorizadorNome,
                 objectMapper.valueToTree(estadoAnterior),
                 objectMapper.valueToTree(snapshotPagamento(pagamentoSalvo))
         );
 
         List<ItemPedidoEntity> itens = itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedido.getId());
-        List<PagamentoPedidoEntity> todosPagamentos =
-                pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedido.getId());
 
         atualizarStatusPedidoAposPagamento(pedido, itens, todosPagamentos, usuarioId);
         PedidoEntity pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
@@ -1062,7 +1131,6 @@ public class PedidoCaixaService {
         return montarDetalhe(pedidoSalvo, itens, todosPagamentos);
     }
 
-    @Transactional(noRollbackFor = AutorizacaoCaixaNegadaException.class)
     @PreAuthorize("""
             @permissionAuthorizationService.hasPermission(
                 'CAIXA_OPERAR',
@@ -1079,13 +1147,16 @@ public class PedidoCaixaService {
     ) {
         UUID estabelecimentoId = contextoCaixa.estabelecimentoId();
         UUID usuarioId = contextoCaixa.usuarioId();
+        String motivo = dto.motivo().trim();
 
-        PedidoEntity pedido = buscarParaAtualizacao(id);
-        if (pedido.getStatus() != StatusPedidoCaixa.CONCLUIDO) {
-            throw new PedidoEstadoInvalidoException(
-                    "Somente pedidos com status CONCLUIDO podem ser estornados"
-            );
-        }
+        transactionTemplate.executeWithoutResult(status -> {
+            PedidoEntity pedido = buscarDoEstabelecimento(id);
+            if (pedido.getStatus() != StatusPedidoCaixa.CONCLUIDO) {
+                throw new PedidoEstadoInvalidoException(
+                        "Somente pedidos com status CONCLUIDO podem ser estornados"
+                );
+            }
+        });
 
         var autorizador = autorizadorOperacaoCaixaService.exigirAutorizador(
                 "CAIXA_ESTORNAR",
@@ -1094,67 +1165,223 @@ public class PedidoCaixaService {
                 "Permissão CAIXA_ESTORNAR necessária para estornar um pedido concluído"
         );
 
-        String motivo = dto.motivo().trim();
-        LocalDateTime agora = LocalDateTime.now();
-
-        List<ItemPedidoEntity> itens = itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedido.getId());
-        List<PagamentoPedidoEntity> pagamentos =
-                pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedido.getId());
-
-        for (PagamentoPedidoEntity pagamento : pagamentos) {
-            if (pagamento.getStatus() == StatusPagamentoPedido.APROVADO) {
-                BigDecimal baseEstorno = pagamento.getValorCobrado() != null
-                        ? pagamento.getValorCobrado()
-                        : pagamento.getValor();
-                pagamento.setStatus(StatusPagamentoPedido.ESTORNADO);
-                pagamento.setValorEstornado(baseEstorno.setScale(2, RoundingMode.HALF_UP));
-                pagamento.setMotivoEstorno(motivo);
-                pagamento.setEstornadoEm(agora);
-                pagamento.setEstornadoPorUsuarioId(autorizador.usuarioId());
-                pagamentoPedidoRepository.save(pagamento);
+        Fase1EstornoPedido fase1 = transactionTemplate.execute(status -> {
+            PedidoEntity pedido = buscarParaAtualizacao(id);
+            if (pedido.getStatus() != StatusPedidoCaixa.CONCLUIDO) {
+                throw new PedidoEstadoInvalidoException(
+                        "Somente pedidos com status CONCLUIDO podem ser estornados"
+                );
             }
+
+            List<PagamentoPedidoEntity> pagamentos =
+                    pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedido.getId());
+            List<PagamentoPedidoEntity> pagamentosEstornar = pagamentos.stream()
+                    .filter(p -> p.getStatus() == StatusPagamentoPedido.APROVADO
+                            || p.getStatus() == StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO)
+                    .toList();
+
+            LocalDateTime agora = LocalDateTime.now();
+            validarEAplicarGavetaParaEstornoDinheiro(
+                    pedido,
+                    pagamentosEstornar,
+                    estabelecimentoId,
+                    usuarioId,
+                    autorizador.usuarioId(),
+                    motivo,
+                    agora,
+                    false
+            );
+
+            List<AlvoEstornoPoint> alvosPoint = new ArrayList<>();
+            for (PagamentoPedidoEntity pagamento : pagamentosEstornar) {
+                if ("MERCADO_PAGO".equals(pagamento.getProvedor())
+                        && pagamento.getOrderExternaId() != null
+                        && !pagamento.getOrderExternaId().isBlank()) {
+                    if (pagamento.getStatus() != StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO) {
+                        pagamento.setStatus(StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO);
+                        pagamento.setMotivoEstorno(motivo);
+                        pagamentoPedidoRepository.save(pagamento);
+                    }
+                    alvosPoint.add(new AlvoEstornoPoint(pagamento.getId(), pagamento.getOrderExternaId()));
+                }
+            }
+            if (!alvosPoint.isEmpty()) {
+                pagamentoPedidoRepository.flush();
+                return new Fase1EstornoPedido(null, alvosPoint);
+            }
+
+            PedidoCaixaDetalheResponseDto concluido = finalizarEstornoPedidoEmTx(
+                    pedido,
+                    estabelecimentoId,
+                    usuarioId,
+                    autorizador,
+                    motivo,
+                    Map.of()
+            );
+            return new Fase1EstornoPedido(concluido, List.of());
+        });
+
+        if (fase1 == null) {
+            throw new IllegalStateException("Falha inesperada na preparação do estorno do pedido");
         }
-        pagamentoPedidoRepository.flush();
+        if (fase1.detalheFinalizado() != null) {
+            return fase1.detalheFinalizado();
+        }
 
-        movimentacaoEstoqueService.estornarEstoquePedido(pedido, itens, autorizador.usuarioId());
-
-        pedido.setStatus(StatusPedidoCaixa.ESTORNADO);
-        pedido.setMotivoEstorno(motivo);
-        pedido.setEstornadoPorUsuarioId(autorizador.usuarioId());
-        pedido.setEstornadoEm(agora);
-
-        PedidoEntity pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
-
-        notaFiscalCaixaService.cancelarAutomaticamenteNoEstornoDoPedido(
-                pedidoSalvo,
-                motivo,
-                usuarioId,
-                autorizador.usuarioId(),
-                autorizador.nome()
+        Map<UUID, OrderPointResultado> resultadosPoint = executarEstornosExternosPoint(
+                id,
+                fase1.alvosPoint()
         );
 
-        auditoriaCaixaService.registrar(
-                estabelecimentoId,
-                usuarioId,
-                pedidoSalvo.getSessaoCaixaId(),
-                EventoAuditoriaCaixa.PAGAMENTO_ESTORNADO,
-                EventoAuditoriaCaixa.ENTIDADE_PEDIDO,
-                pedidoSalvo.getId().toString(),
-                "Pedido #" + pedidoSalvo.getNumero() + " estornado integralmente com devolução ao estoque",
-                pedidoSalvo.getTotal(),
-                motivo,
-                pedidoSalvo.getId(),
-                pedidoSalvo.getIdentificadorAtendimento(),
-                null,
-                autorizador.usuarioId(),
-                autorizador.nome(),
-                null,
-                objectMapper.valueToTree(snapshotPedido(pedidoSalvo, itens))
+        return transactionTemplate.execute(status -> {
+            PedidoEntity pedido = buscarParaAtualizacao(id);
+            if (pedido.getStatus() != StatusPedidoCaixa.CONCLUIDO) {
+                throw new PedidoEstadoInvalidoException(
+                        "Somente pedidos com status CONCLUIDO podem ser estornados"
+                );
+            }
+            return finalizarEstornoPedidoEmTx(
+                    pedido,
+                    estabelecimentoId,
+                    usuarioId,
+                    autorizador,
+                    motivo,
+                    resultadosPoint
+            );
+        });
+    }
+
+    @PreAuthorize("""
+            @permissionAuthorizationService.hasPermission(
+                'CAIXA_OPERAR',
+                authentication
+            )
+            || @permissionAuthorizationService.hasPermission(
+                'CAIXA_ESTORNAR',
+                authentication
+            )
+            """)
+    public PedidoCaixaDetalheResponseDto estornarPagamento(
+            UUID pedidoId,
+            UUID pagamentoId,
+            EstornarPedidoCaixaRequestDto dto
+    ) {
+        UUID estabelecimentoId = contextoCaixa.estabelecimentoId();
+        UUID usuarioId = contextoCaixa.usuarioId();
+        String motivo = dto.motivo().trim();
+
+        transactionTemplate.executeWithoutResult(status -> {
+            PedidoEntity pedido = buscarDoEstabelecimento(pedidoId);
+            if (!pedido.getStatus().estaAberto()) {
+                throw new PedidoEstadoInvalidoException(
+                        "Somente pedidos em aberto permitem estorno individual de pagamento"
+                );
+            }
+            PagamentoPedidoEntity pagamento = pagamentoPedidoRepository
+                    .buscarParaAtualizacao(pagamentoId, pedido.getId())
+                    .orElseThrow(() -> new EntityNotFoundException("Pagamento não encontrado para este pedido"));
+            if (pagamento.getStatus() != StatusPagamentoPedido.APROVADO
+                    && pagamento.getStatus() != StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO) {
+                throw new PedidoEstadoInvalidoException(
+                        "Somente pagamentos aprovados podem ser estornados"
+                );
+            }
+        });
+
+        var autorizador = autorizadorOperacaoCaixaService.exigirAutorizador(
+                "CAIXA_ESTORNAR",
+                dto.autorizadorEmail(),
+                dto.autorizadorSenha(),
+                "Permissão CAIXA_ESTORNAR necessária para estornar um pagamento"
         );
 
-        businessEventLogger.success("cash.order.refunded", "cash_order", pedidoSalvo.getId());
+        Fase1EstornoPedido fase1 = transactionTemplate.execute(status -> {
+            PedidoEntity pedido = buscarParaAtualizacao(pedidoId);
+            if (!pedido.getStatus().estaAberto()) {
+                throw new PedidoEstadoInvalidoException(
+                        "Somente pedidos em aberto permitem estorno individual de pagamento"
+                );
+            }
+            PagamentoPedidoEntity pagamento = pagamentoPedidoRepository
+                    .buscarParaAtualizacao(pagamentoId, pedido.getId())
+                    .orElseThrow(() -> new EntityNotFoundException("Pagamento não encontrado para este pedido"));
+            if (pagamento.getStatus() != StatusPagamentoPedido.APROVADO
+                    && pagamento.getStatus() != StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO) {
+                throw new PedidoEstadoInvalidoException(
+                        "Somente pagamentos aprovados podem ser estornados"
+                );
+            }
 
-        return montarDetalhe(pedidoSalvo, itens, pagamentos);
+            LocalDateTime agora = LocalDateTime.now();
+            validarEAplicarGavetaParaEstornoDinheiro(
+                    pedido,
+                    List.of(pagamento),
+                    estabelecimentoId,
+                    usuarioId,
+                    autorizador.usuarioId(),
+                    motivo,
+                    agora,
+                    false
+            );
+
+            if ("MERCADO_PAGO".equals(pagamento.getProvedor())
+                    && pagamento.getOrderExternaId() != null
+                    && !pagamento.getOrderExternaId().isBlank()) {
+                if (pagamento.getStatus() != StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO) {
+                    pagamento.setStatus(StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO);
+                    pagamento.setMotivoEstorno(motivo);
+                    pagamentoPedidoRepository.saveAndFlush(pagamento);
+                }
+                return new Fase1EstornoPedido(
+                        null,
+                        List.of(new AlvoEstornoPoint(pagamento.getId(), pagamento.getOrderExternaId()))
+                );
+            }
+
+            PedidoCaixaDetalheResponseDto concluido = finalizarEstornoPagamentoEmTx(
+                    pedido,
+                    pagamento,
+                    estabelecimentoId,
+                    usuarioId,
+                    autorizador,
+                    motivo,
+                    null
+            );
+            return new Fase1EstornoPedido(concluido, List.of());
+        });
+
+        if (fase1 == null) {
+            throw new IllegalStateException("Falha inesperada na preparação do estorno do pagamento");
+        }
+        if (fase1.detalheFinalizado() != null) {
+            return fase1.detalheFinalizado();
+        }
+
+        Map<UUID, OrderPointResultado> resultadosPoint = executarEstornosExternosPoint(
+                pedidoId,
+                fase1.alvosPoint()
+        );
+
+        return transactionTemplate.execute(status -> {
+            PedidoEntity pedido = buscarParaAtualizacao(pedidoId);
+            if (!pedido.getStatus().estaAberto()) {
+                throw new PedidoEstadoInvalidoException(
+                        "Somente pedidos em aberto permitem estorno individual de pagamento"
+                );
+            }
+            PagamentoPedidoEntity pagamento = pagamentoPedidoRepository
+                    .buscarParaAtualizacao(pagamentoId, pedido.getId())
+                    .orElseThrow(() -> new EntityNotFoundException("Pagamento não encontrado para este pedido"));
+            return finalizarEstornoPagamentoEmTx(
+                    pedido,
+                    pagamento,
+                    estabelecimentoId,
+                    usuarioId,
+                    autorizador,
+                    motivo,
+                    resultadosPoint.get(pagamentoId)
+            );
+        });
     }
 
     private void atualizarStatusPedidoAposPagamento(
@@ -1164,11 +1391,22 @@ public class PedidoCaixaService {
             UUID operadorUsuarioId
     ) {
         BigDecimal totalAprovado = PedidoCaixaMapper.calcularTotalPagoAprovado(pagamentos);
+        boolean possuiPendentePoint = pagamentos.stream().anyMatch(p ->
+                "MERCADO_PAGO".equals(p.getProvedor()) && (
+                        p.getStatus() == StatusPagamentoPedido.PENDENTE
+                                || p.getStatus() == StatusPagamentoPedido.PENDENTE_NA_POINT
+                                || p.getStatus() == StatusPagamentoPedido.EM_TERMINAL
+                                || p.getStatus() == StatusPagamentoPedido.CANCELAMENTO_SOLICITADO
+                                || p.getStatus() == StatusPagamentoPedido.ACAO_NECESSARIA
+                )
+        );
         boolean possuiPendente = pagamentos.stream().anyMatch(p ->
                 p.getStatus() == StatusPagamentoPedido.PENDENTE
                         || p.getStatus() == StatusPagamentoPedido.PENDENTE_CONCILIACAO
                         || p.getStatus() == StatusPagamentoPedido.PENDENTE_NA_POINT
                         || p.getStatus() == StatusPagamentoPedido.EM_TERMINAL
+                        || p.getStatus() == StatusPagamentoPedido.CANCELAMENTO_SOLICITADO
+                        || p.getStatus() == StatusPagamentoPedido.ACAO_NECESSARIA
         );
 
         if (totalAprovado.compareTo(pedido.getTotal()) >= 0 && pedido.getTotal().compareTo(ZERO) > 0) {
@@ -1179,7 +1417,9 @@ public class PedidoCaixaService {
             return;
         }
 
-        if (totalAprovado.compareTo(ZERO) > 0) {
+        if (possuiPendentePoint) {
+            pedido.setStatus(StatusPedidoCaixa.AGUARDANDO_MAQUINA);
+        } else if (totalAprovado.compareTo(ZERO) > 0) {
             pedido.setStatus(StatusPedidoCaixa.PAGAMENTO_PARCIAL);
         } else if (possuiPendente) {
             pedido.setStatus(StatusPedidoCaixa.AGUARDANDO_PAGAMENTO);
@@ -1188,36 +1428,38 @@ public class PedidoCaixaService {
         }
     }
 
-    private PagamentoPedidoEntity salvarPagamentoComIdempotencia(PagamentoPedidoEntity pagamento) {
-        try {
-            return pagamentoPedidoRepository.saveAndFlush(pagamento);
-        } catch (DataIntegrityViolationException excecao) {
-            if (pagamento.getChaveIdempotencia() != null) {
-                return pagamentoPedidoRepository
-                        .findByPedidoIdAndChaveIdempotencia(pagamento.getPedidoId(), pagamento.getChaveIdempotencia())
-                        .orElseThrow(() -> excecao);
-            }
-            throw excecao;
+    private PedidoEntity concluirPedidoSeDescontoQuitouSaldo(
+            PedidoEntity pedido,
+            List<ItemPedidoEntity> itens,
+            List<PagamentoPedidoEntity> pagamentos,
+            UUID usuarioId
+    ) {
+        BigDecimal totalAprovado = PedidoCaixaMapper.calcularTotalPagoAprovado(pagamentos);
+        if (totalAprovado.compareTo(pedido.getTotal()) >= 0 && pedido.getTotal().compareTo(ZERO) > 0) {
+            atualizarStatusPedidoAposPagamento(pedido, itens, pagamentos, usuarioId);
+            return pedidoRepository.saveAndFlush(pedido);
         }
+        return pedido;
+    }
+
+    private PedidoCaixaDetalheResponseDto recuperarDetalhePorIdempotencia(
+            UUID pedidoId,
+            String chaveIdempotencia
+    ) {
+        PedidoEntity pedido = buscarDoEstabelecimento(pedidoId);
+        Optional<PagamentoPedidoEntity> existente = pagamentoPedidoRepository
+                .findByPedidoIdAndChaveIdempotencia(pedido.getId(), chaveIdempotencia);
+        if (existente.isEmpty()) {
+            return null;
+        }
+        List<ItemPedidoEntity> itens = itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedido.getId());
+        List<PagamentoPedidoEntity> pagamentos =
+                pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedido.getId());
+        return montarDetalhe(pedido, itens, pagamentos);
     }
 
     private Long gerarProximoNumeroPedido(UUID estabelecimentoId) {
-        SequenciaDocumentoEntity sequencia = sequenciaDocumentoRepository
-                .buscarParaAtualizacao(estabelecimentoId, TIPO_DOCUMENTO_PEDIDO)
-                .orElseGet(() -> {
-                    SequenciaDocumentoEntity nova = new SequenciaDocumentoEntity();
-                    nova.setEstabelecimentoId(estabelecimentoId);
-                    nova.setTipo(TIPO_DOCUMENTO_PEDIDO);
-                    nova.setUltimoNumero(0L);
-                    nova.setAtualizadoEm(LocalDateTime.now());
-                    return sequenciaDocumentoRepository.saveAndFlush(nova);
-                });
-
-        long proximo = (sequencia.getUltimoNumero() == null ? 0L : sequencia.getUltimoNumero()) + 1L;
-        sequencia.setUltimoNumero(proximo);
-        sequencia.setAtualizadoEm(LocalDateTime.now());
-        sequenciaDocumentoRepository.saveAndFlush(sequencia);
-        return proximo;
+        return sequenciaDocumentoRepository.proximoNumero(estabelecimentoId, TIPO_DOCUMENTO_PEDIDO);
     }
 
     private SessaoCaixaEntity resolverSessaoAberta(
@@ -1540,13 +1782,12 @@ public class PedidoCaixaService {
     }
 
     private PedidoEntity buscarParaAtualizacao(UUID id) {
-        PedidoEntity pedido = pedidoRepository.findById(id)
+        PedidoEntity pedido = pedidoRepository.buscarPorIdParaAtualizacao(id)
                 .orElseThrow(() -> new EntityNotFoundException("Pedido não encontrado"));
         if (!pedido.getEstabelecimentoId().equals(contextoCaixa.estabelecimentoId())) {
             throw new AccessDeniedException("Acesso negado");
         }
-        return pedidoRepository.buscarParaAtualizacao(id, contextoCaixa.estabelecimentoId())
-                .orElseThrow(() -> new EntityNotFoundException("Pedido não encontrado"));
+        return pedido;
     }
 
     private ConfiguracaoCaixaEntity obterConfiguracao(UUID estabelecimentoId) {
@@ -1642,6 +1883,345 @@ public class PedidoCaixaService {
         map.put("pagoEm", pagamento.getPagoEm() == null ? null : pagamento.getPagoEm().toString());
         map.put("canceladoEm", pagamento.getCanceladoEm() == null ? null : pagamento.getCanceladoEm().toString());
         return map;
+    }
+
+    private Map<UUID, OrderPointResultado> executarEstornosExternosPoint(
+            UUID pedidoId,
+            List<AlvoEstornoPoint> alvosPoint
+    ) {
+        Map<UUID, OrderPointResultado> resultados = new LinkedHashMap<>();
+        try {
+            for (AlvoEstornoPoint alvo : alvosPoint) {
+                OrderPointResultado resultado = orquestradorPagamentoPointService.estornarOrderExterna(
+                        alvo.orderExternaId(),
+                        alvo.pagamentoId()
+                );
+                resultados.put(alvo.pagamentoId(), resultado);
+            }
+            return resultados;
+        } catch (IntegracaoMercadoPagoException excecao) {
+            if (!excecao.isErroTransitorio()) {
+                List<UUID> naoConfirmados = alvosPoint.stream()
+                        .map(AlvoEstornoPoint::pagamentoId)
+                        .filter(id -> !resultados.containsKey(id))
+                        .toList();
+                reverterEstornoEmAndamento(pedidoId, naoConfirmados);
+            }
+            throw excecao;
+        }
+    }
+
+    private void reverterEstornoEmAndamento(UUID pedidoId, List<UUID> pagamentoIds) {
+        if (pagamentoIds.isEmpty()) {
+            return;
+        }
+        transactionTemplate.executeWithoutResult(status -> {
+            for (UUID pagId : pagamentoIds) {
+                pagamentoPedidoRepository.buscarParaAtualizacao(pagId, pedidoId)
+                        .filter(p -> p.getStatus() == StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO)
+                        .ifPresent(p -> {
+                            p.setStatus(StatusPagamentoPedido.APROVADO);
+                            p.setMotivoEstorno(null);
+                            pagamentoPedidoRepository.saveAndFlush(p);
+                        });
+            }
+        });
+    }
+
+    private PedidoCaixaDetalheResponseDto finalizarEstornoPedidoEmTx(
+            PedidoEntity pedido,
+            UUID estabelecimentoId,
+            UUID usuarioId,
+            AutorizadorOperacaoCaixaService.AutorizadorResolvido autorizador,
+            String motivo,
+            Map<UUID, OrderPointResultado> resultadosPoint
+    ) {
+        LocalDateTime agora = LocalDateTime.now();
+        List<ItemPedidoEntity> itens = itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedido.getId());
+        List<PagamentoPedidoEntity> pagamentos =
+                pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedido.getId());
+        List<PagamentoPedidoEntity> pagamentosEstornar = pagamentos.stream()
+                .filter(p -> p.getStatus() == StatusPagamentoPedido.APROVADO
+                        || p.getStatus() == StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO)
+                .toList();
+
+        validarEAplicarGavetaParaEstornoDinheiro(
+                pedido,
+                pagamentosEstornar,
+                estabelecimentoId,
+                usuarioId,
+                autorizador.usuarioId(),
+                motivo,
+                agora,
+                true
+        );
+
+        for (PagamentoPedidoEntity pagamento : pagamentosEstornar) {
+            aplicarDadosEstornoPagamento(pagamento, resultadosPoint.get(pagamento.getId()), motivo, agora, autorizador.usuarioId());
+            pagamentoPedidoRepository.save(pagamento);
+        }
+        pagamentoPedidoRepository.flush();
+
+        movimentacaoEstoqueService.estornarEstoquePedido(pedido, itens, autorizador.usuarioId());
+
+        pedido.setStatus(StatusPedidoCaixa.ESTORNADO);
+        pedido.setMotivoEstorno(motivo);
+        pedido.setEstornadoPorUsuarioId(autorizador.usuarioId());
+        pedido.setEstornadoEm(agora);
+
+        PedidoEntity pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
+
+        notaFiscalCaixaService.cancelarAutomaticamenteNoEstornoDoPedido(
+                pedidoSalvo,
+                motivo,
+                usuarioId,
+                autorizador.usuarioId(),
+                autorizador.nome()
+        );
+
+        auditoriaCaixaService.registrar(
+                estabelecimentoId,
+                usuarioId,
+                pedidoSalvo.getSessaoCaixaId(),
+                EventoAuditoriaCaixa.PAGAMENTO_ESTORNADO,
+                EventoAuditoriaCaixa.ENTIDADE_PEDIDO,
+                pedidoSalvo.getId().toString(),
+                "Pedido #" + pedidoSalvo.getNumero() + " estornado integralmente com devolução ao estoque",
+                pedidoSalvo.getTotal(),
+                motivo,
+                pedidoSalvo.getId(),
+                pedidoSalvo.getIdentificadorAtendimento(),
+                null,
+                autorizador.usuarioId(),
+                autorizador.nome(),
+                null,
+                objectMapper.valueToTree(snapshotPedido(pedidoSalvo, itens))
+        );
+
+        businessEventLogger.success("cash.order.refunded", "cash_order", pedidoSalvo.getId());
+
+        return montarDetalhe(pedidoSalvo, itens, pagamentos);
+    }
+
+    private PedidoCaixaDetalheResponseDto finalizarEstornoPagamentoEmTx(
+            PedidoEntity pedido,
+            PagamentoPedidoEntity pagamento,
+            UUID estabelecimentoId,
+            UUID usuarioId,
+            AutorizadorOperacaoCaixaService.AutorizadorResolvido autorizador,
+            String motivo,
+            OrderPointResultado resultadoPoint
+    ) {
+        LocalDateTime agora = LocalDateTime.now();
+        if (pagamento.getStatus() == StatusPagamentoPedido.ESTORNADO) {
+            List<ItemPedidoEntity> itens = itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedido.getId());
+            List<PagamentoPedidoEntity> pagamentos =
+                    pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedido.getId());
+            return montarDetalhe(pedido, itens, pagamentos);
+        }
+        if (pagamento.getStatus() != StatusPagamentoPedido.APROVADO
+                && pagamento.getStatus() != StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO) {
+            throw new PedidoEstadoInvalidoException("Somente pagamentos aprovados podem ser estornados");
+        }
+
+        validarEAplicarGavetaParaEstornoDinheiro(
+                pedido,
+                List.of(pagamento),
+                estabelecimentoId,
+                usuarioId,
+                autorizador.usuarioId(),
+                motivo,
+                agora,
+                true
+        );
+
+        aplicarDadosEstornoPagamento(pagamento, resultadoPoint, motivo, agora, autorizador.usuarioId());
+        PagamentoPedidoEntity pagamentoSalvo = pagamentoPedidoRepository.saveAndFlush(pagamento);
+
+        List<ItemPedidoEntity> itens = itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedido.getId());
+        List<PagamentoPedidoEntity> pagamentos =
+                pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedido.getId());
+
+        atualizarStatusPedidoAposPagamento(pedido, itens, pagamentos, usuarioId);
+        PedidoEntity pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
+
+        auditoriaCaixaService.registrar(
+                estabelecimentoId,
+                usuarioId,
+                pagamentoSalvo.getSessaoCaixaId(),
+                EventoAuditoriaCaixa.PAGAMENTO_ESTORNADO,
+                EventoAuditoriaCaixa.ENTIDADE_PAGAMENTO_PEDIDO,
+                pagamentoSalvo.getId().toString(),
+                "Pagamento " + pagamentoSalvo.getForma() + " estornado no pedido #" + pedidoSalvo.getNumero(),
+                pagamentoSalvo.getValorEstornado(),
+                motivo,
+                pedidoSalvo.getId(),
+                pedidoSalvo.getIdentificadorAtendimento(),
+                pagamentoSalvo.getId(),
+                autorizador.usuarioId(),
+                autorizador.nome(),
+                null,
+                objectMapper.valueToTree(snapshotPagamento(pagamentoSalvo))
+        );
+
+        businessEventLogger.success("cash.payment.refunded", "cash_payment", pagamentoSalvo.getId());
+
+        return montarDetalhe(pedidoSalvo, itens, pagamentos);
+    }
+
+    private void aplicarDadosEstornoPagamento(
+            PagamentoPedidoEntity pagamento,
+            OrderPointResultado resultadoPoint,
+            String motivo,
+            LocalDateTime agora,
+            UUID autorizadorId
+    ) {
+        if (resultadoPoint != null) {
+            JsonNode rawDados = parseJsonSilencioso(resultadoPoint.rawJson());
+            if (rawDados != null) {
+                pagamento.setComprovanteDados(rawDados);
+            }
+            if (resultadoPoint.statusDetail() != null) {
+                pagamento.setStatusDetalhe(resultadoPoint.statusDetail());
+            }
+        }
+        BigDecimal baseEstorno = pagamento.getValorCobrado() != null
+                ? pagamento.getValorCobrado()
+                : pagamento.getValor();
+        pagamento.setStatus(StatusPagamentoPedido.ESTORNADO);
+        pagamento.setValorEstornado(baseEstorno.setScale(2, RoundingMode.HALF_UP));
+        pagamento.setMotivoEstorno(motivo);
+        pagamento.setEstornadoEm(agora);
+        pagamento.setEstornadoPorUsuarioId(autorizadorId);
+    }
+
+    private void validarEAplicarGavetaParaEstornoDinheiro(
+            PedidoEntity pedido,
+            List<PagamentoPedidoEntity> pagamentosEstornar,
+            UUID estabelecimentoId,
+            UUID usuarioId,
+            UUID autorizadorId,
+            String motivo,
+            LocalDateTime agora,
+            boolean registrarSangriaSeSessaoEncerrada
+    ) {
+        Map<UUID, BigDecimal> totaisDinheiroPorSessao = new LinkedHashMap<>();
+        for (PagamentoPedidoEntity pagamento : pagamentosEstornar) {
+            if (pagamento.getForma() == FormaPagamentoCaixa.DINHEIRO) {
+                totaisDinheiroPorSessao.merge(
+                        pagamento.getSessaoCaixaId(),
+                        pagamento.getValor().setScale(2, RoundingMode.HALF_UP),
+                        BigDecimal::add
+                );
+            }
+        }
+        if (totaisDinheiroPorSessao.isEmpty()) {
+            return;
+        }
+
+        for (Map.Entry<UUID, BigDecimal> entrada : totaisDinheiroPorSessao.entrySet()) {
+            UUID sessaoOrigemId = entrada.getKey();
+            BigDecimal valorGrupo = entrada.getValue().setScale(2, RoundingMode.HALF_UP);
+
+            SessaoCaixaEntity sessaoOrigem = sessaoOrigemId == null
+                    ? null
+                    : sessaoCaixaRepository.buscarParaAtualizacao(sessaoOrigemId).orElse(null);
+
+            if (sessaoOrigem != null && sessaoOrigem.isAberta()) {
+                BigDecimal disponivel = calculadoraFechamentoCaixa.calcularDinheiroDisponivel(
+                        sessaoOrigem,
+                        pagamentoPedidoRepository.findBySessaoCaixaIdOrderByCriadoEmAsc(sessaoOrigem.getId()),
+                        movimentacaoCaixaRepository.findBySessaoCaixaIdOrderByOcorridoEmAsc(sessaoOrigem.getId())
+                );
+                if (valorGrupo.compareTo(disponivel) > 0) {
+                    throw new SaldoInsuficienteCaixaException(
+                            "Não há dinheiro suficiente no caixa para realizar o estorno em espécie",
+                            disponivel
+                    );
+                }
+                continue;
+            }
+
+            SessaoCaixaEntity sessaoAberta = resolverSessaoAbertaParaEstornoEmDinheiro(
+                    estabelecimentoId,
+                    usuarioId,
+                    autorizadorId
+            );
+            SessaoCaixaEntity sessaoTravada = sessaoCaixaRepository
+                    .buscarParaAtualizacao(sessaoAberta.getId())
+                    .orElseThrow(() -> new EntityNotFoundException("Sessão de caixa não encontrada"));
+            BigDecimal disponivel = calculadoraFechamentoCaixa.calcularDinheiroDisponivel(
+                    sessaoTravada,
+                    pagamentoPedidoRepository.findBySessaoCaixaIdOrderByCriadoEmAsc(sessaoTravada.getId()),
+                    movimentacaoCaixaRepository.findBySessaoCaixaIdOrderByOcorridoEmAsc(sessaoTravada.getId())
+            );
+            if (valorGrupo.compareTo(disponivel) > 0) {
+                throw new SaldoInsuficienteCaixaException(
+                        "Não há dinheiro suficiente no caixa para realizar o estorno em espécie",
+                        disponivel
+                );
+            }
+            if (registrarSangriaSeSessaoEncerrada) {
+                MovimentacaoCaixaEntity sangria = new MovimentacaoCaixaEntity();
+                sangria.setSessaoCaixaId(sessaoTravada.getId());
+                sangria.setTipo(TipoMovimentacaoCaixa.SANGRIA);
+                sangria.setValor(valorGrupo);
+                sangria.setMotivo("Estorno em dinheiro do pedido #" + pedido.getNumero() + ": " + motivo);
+                sangria.setUsuarioId(autorizadorId);
+                sangria.setOcorridoEm(agora);
+                movimentacaoCaixaRepository.saveAndFlush(sangria);
+            }
+        }
+    }
+
+    private SessaoCaixaEntity resolverSessaoAbertaParaEstornoEmDinheiro(
+            UUID estabelecimentoId,
+            UUID usuarioId,
+            UUID autorizadorId
+    ) {
+        Optional<SessaoCaixaEntity> doOperador = sessaoCaixaRepository
+                .findFirstByEstabelecimentoIdAndOperadorUsuarioIdAndStatusOrderByAbertaEmDesc(
+                        estabelecimentoId,
+                        usuarioId,
+                        StatusSessaoCaixa.ABERTA
+                );
+        if (doOperador.isPresent()) {
+            return doOperador.get();
+        }
+        if (autorizadorId != null && !autorizadorId.equals(usuarioId)) {
+            Optional<SessaoCaixaEntity> doAutorizador = sessaoCaixaRepository
+                    .findFirstByEstabelecimentoIdAndOperadorUsuarioIdAndStatusOrderByAbertaEmDesc(
+                            estabelecimentoId,
+                            autorizadorId,
+                            StatusSessaoCaixa.ABERTA
+                    );
+            if (doAutorizador.isPresent()) {
+                return doAutorizador.get();
+            }
+        }
+        throw new SessaoCaixaEstadoInvalidoException(
+                "É necessário possuir uma sessão de caixa aberta para realizar o estorno em dinheiro de uma sessão encerrada"
+        );
+    }
+
+    private JsonNode parseJsonSilencioso(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(json);
+        } catch (JsonProcessingException ignored) {
+            return null;
+        }
+    }
+
+    private record AlvoEstornoPoint(UUID pagamentoId, String orderExternaId) {
+    }
+
+    private record Fase1EstornoPedido(
+            PedidoCaixaDetalheResponseDto detalheFinalizado,
+            List<AlvoEstornoPoint> alvosPoint
+    ) {
     }
 
     private String normalizarTexto(String valor) {

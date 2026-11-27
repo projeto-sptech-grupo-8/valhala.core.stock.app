@@ -120,26 +120,42 @@ class ReconciliacaoPointSchedulerTest {
                 pagPago.getId(), resPago, OrigemAuditoriaCaixa.SISTEMA, null
         )).thenReturn(pagAtualizadoAprovado);
 
-        // 2. Pedido onde consulta e cancelamento falham -> força timeout local
+        // 2. Pedido onde Order não existe mais no MP (404) -> força expiração local
         PagamentoPedidoEntity pagExp = new PagamentoPedidoEntity();
         pagExp.setId(UUID.randomUUID());
         pagExp.setProvedor("MERCADO_PAGO");
         pagExp.setStatus(StatusPagamentoPedido.PENDENTE_NA_POINT);
-        pagExp.setOrderExternaId("ORD-EXP");
+        pagExp.setOrderExternaId("ORD-EXP-404");
         when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoExpirar))
                 .thenReturn(List.of(pagExp), List.of(pagExp));
-        when(mercadoPagoPointClient.consultarOrder("ORD-EXP")).thenThrow(new RuntimeException("Timeout consulta"));
-        when(mercadoPagoPointClient.cancelarOrder("ORD-EXP", "EXP-" + pagExp.getId()))
-                .thenThrow(new IntegracaoMercadoPagoException("Falha cancel", HttpStatus.BAD_GATEWAY, true));
+        when(mercadoPagoPointClient.consultarOrder("ORD-EXP-404"))
+                .thenThrow(new IntegracaoMercadoPagoException("Não encontrada", HttpStatus.NOT_FOUND, false));
 
-        // 3. Pedido com reserva órfã (sem pagamento ativo) -> libera reservas
+        // 3. Pedido com falha transitória/rede na consulta ao MP -> NÃO expira localmente
+        UUID pedidoRede = UUID.randomUUID();
+        PagamentoPedidoEntity pagRede = new PagamentoPedidoEntity();
+        pagRede.setId(UUID.randomUUID());
+        pagRede.setProvedor("MERCADO_PAGO");
+        pagRede.setStatus(StatusPagamentoPedido.ACAO_NECESSARIA);
+        pagRede.setOrderExternaId("ORD-REDE");
+        when(reservaEstoqueRepository.listarPedidosComReservasExpiradas(any()))
+                .thenReturn(List.of(pedidoJaPago, pedidoExpirar, pedidoRede, pedidoOrfao));
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoRede))
+                .thenReturn(List.of(pagRede), List.of(pagRede));
+        when(mercadoPagoPointClient.consultarOrder("ORD-REDE"))
+                .thenThrow(new IntegracaoMercadoPagoException("Timeout MP", HttpStatus.GATEWAY_TIMEOUT, true));
+
+        // 4. Pedido com reserva órfã (sem pagamento ativo) -> libera reservas
         when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoOrfao)).thenReturn(List.of());
 
         int tratados = scheduler.expirarReservasVencidas();
-        assertThat(tratados).isEqualTo(3);
+        assertThat(tratados).isEqualTo(4);
 
         verify(transicaoPagamentoPointService).expirarPagamentoPorTimeout(
                 eq(pagExp.getId()), any()
+        );
+        verify(transicaoPagamentoPointService, never()).expirarPagamentoPorTimeout(
+                eq(pagRede.getId()), any()
         );
         verify(reservaEstoqueService).liberarReservasAtivasDoPedido(
                 eq(pedidoOrfao), eq(StatusReservaEstoque.EXPIRADA), any()

@@ -31,6 +31,9 @@ public interface PagamentoPedidoRepository extends JpaRepository<PagamentoPedido
 
     Optional<PagamentoPedidoEntity> findByReferenciaExterna(String referenciaExterna);
 
+    @Query("select p.pedidoId from PagamentoPedidoEntity p where p.id = :id")
+    Optional<UUID> buscarPedidoIdPorPagamentoId(@Param("id") UUID id);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select p from PagamentoPedidoEntity p

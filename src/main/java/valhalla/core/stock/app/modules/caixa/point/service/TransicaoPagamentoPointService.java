@@ -68,17 +68,14 @@ public class TransicaoPagamentoPointService {
             OrigemAuditoriaCaixa origemAuditoria,
             UUID atorUsuarioId
     ) {
-        PagamentoPedidoEntity pagamentoBase = pagamentoPedidoRepository.findById(pagamentoId)
+        UUID pedidoId = pagamentoPedidoRepository.buscarPedidoIdPorPagamentoId(pagamentoId)
                 .orElseThrow(() -> new EntityNotFoundException("Pagamento Point não encontrado"));
 
-        PedidoEntity pedido = pedidoRepository.buscarParaAtualizacao(
-                        pagamentoBase.getPedidoId(),
-                        buscarEstabelecimentoPedido(pagamentoBase.getPedidoId())
-                )
+        PedidoEntity pedido = pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)
                 .orElseThrow(() -> new EntityNotFoundException("Pedido não encontrado para atualização Point"));
 
         PagamentoPedidoEntity pagamento = pagamentoPedidoRepository
-                .buscarParaAtualizacao(pagamentoBase.getId(), pedido.getId())
+                .buscarParaAtualizacao(pagamentoId, pedido.getId())
                 .orElseThrow(() -> new EntityNotFoundException("Pagamento Point não encontrado"));
 
         if (resultado.orderId() != null && pagamento.getOrderExternaId() == null) {
@@ -213,17 +210,14 @@ public class TransicaoPagamentoPointService {
 
     @Transactional
     public PagamentoPedidoEntity expirarPagamentoPorTimeout(UUID pagamentoId, String motivo) {
-        PagamentoPedidoEntity pagamentoBase = pagamentoPedidoRepository.findById(pagamentoId)
+        UUID pedidoId = pagamentoPedidoRepository.buscarPedidoIdPorPagamentoId(pagamentoId)
                 .orElseThrow(() -> new EntityNotFoundException("Pagamento Point não encontrado"));
 
-        PedidoEntity pedido = pedidoRepository.buscarParaAtualizacao(
-                        pagamentoBase.getPedidoId(),
-                        buscarEstabelecimentoPedido(pagamentoBase.getPedidoId())
-                )
+        PedidoEntity pedido = pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)
                 .orElseThrow(() -> new EntityNotFoundException("Pedido não encontrado para expiração Point"));
 
         PagamentoPedidoEntity pagamento = pagamentoPedidoRepository
-                .buscarParaAtualizacao(pagamentoBase.getId(), pedido.getId())
+                .buscarParaAtualizacao(pagamentoId, pedido.getId())
                 .orElseThrow(() -> new EntityNotFoundException("Pagamento Point não encontrado"));
 
         if (pagamento.getStatus() == StatusPagamentoPedido.APROVADO
@@ -316,6 +310,9 @@ public class TransicaoPagamentoPointService {
                                 || p.getStatus() == StatusPagamentoPedido.PENDENTE_NA_POINT
                                 || p.getStatus() == StatusPagamentoPedido.EM_TERMINAL
                                 || p.getStatus() == StatusPagamentoPedido.CANCELAMENTO_SOLICITADO
+                                || p.getStatus() == StatusPagamentoPedido.ACAO_NECESSARIA
+                                || (p.getStatus() == StatusPagamentoPedido.PENDENTE_CONCILIACAO
+                                        && "MERCADO_PAGO".equals(p.getProvedor()))
                 )
         );
 
@@ -357,19 +354,29 @@ public class TransicaoPagamentoPointService {
             BigDecimal esperado = pagamento.getValorCobrado() != null
                     ? pagamento.getValorCobrado()
                     : pagamento.getValor();
-            if (resultado.totalAmount().compareTo(esperado) != 0) {
+            boolean jurosCobradoPeloMp = "buyer".equals(
+                    OrquestradorPagamentoPointService.resolverInstallmentsCost(pagamento)
+            );
+            if (jurosCobradoPeloMp) {
+                if (resultado.totalAmount().compareTo(esperado) < 0) {
+                    throw new IllegalStateException(
+                            "Divergência de valor ao aprovar pagamento Point: mínimo esperado R$ "
+                                    + esperado + ", recebido R$ " + resultado.totalAmount()
+                    );
+                }
+                if (resultado.totalAmount().compareTo(esperado) > 0) {
+                    BigDecimal totalRecebido = resultado.totalAmount().setScale(2, RoundingMode.HALF_UP);
+                    BigDecimal valorBase = pagamento.getValor() != null ? pagamento.getValor() : ZERO;
+                    pagamento.setValorCobrado(totalRecebido);
+                    pagamento.setValorJuros(totalRecebido.subtract(valorBase).max(ZERO).setScale(2, RoundingMode.HALF_UP));
+                }
+            } else if (resultado.totalAmount().compareTo(esperado) != 0) {
                 throw new IllegalStateException(
                         "Divergência de valor ao aprovar pagamento Point: esperado R$ "
                                 + esperado + ", recebido R$ " + resultado.totalAmount()
                 );
             }
         }
-    }
-
-    private UUID buscarEstabelecimentoPedido(UUID pedidoId) {
-        return pedidoRepository.findById(pedidoId)
-                .orElseThrow(() -> new EntityNotFoundException("Pedido não encontrado"))
-                .getEstabelecimentoId();
     }
 
     private boolean isAprovado(String statusMp, String paymentStatusMp) {

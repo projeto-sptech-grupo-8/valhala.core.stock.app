@@ -2,6 +2,7 @@ package valhalla.core.stock.app.modules.caixa.point.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import valhalla.core.stock.app.modules.caixa.point.client.MercadoPagoPointClient;
@@ -30,7 +31,9 @@ public class ReconciliacaoPointScheduler {
     private static final Set<StatusPagamentoPedido> STATUS_RECONCILIACAO = EnumSet.of(
             StatusPagamentoPedido.PENDENTE_NA_POINT,
             StatusPagamentoPedido.EM_TERMINAL,
-            StatusPagamentoPedido.CANCELAMENTO_SOLICITADO
+            StatusPagamentoPedido.CANCELAMENTO_SOLICITADO,
+            StatusPagamentoPedido.ACAO_NECESSARIA,
+            StatusPagamentoPedido.PENDENTE_CONCILIACAO
     );
 
     private static final Set<StatusPagamentoPedido> STATUS_PENDENTES_EXPIRACAO = EnumSet.of(
@@ -38,6 +41,7 @@ public class ReconciliacaoPointScheduler {
             StatusPagamentoPedido.PENDENTE_NA_POINT,
             StatusPagamentoPedido.EM_TERMINAL,
             StatusPagamentoPedido.CANCELAMENTO_SOLICITADO,
+            StatusPagamentoPedido.ACAO_NECESSARIA,
             StatusPagamentoPedido.PENDENTE_CONCILIACAO
     );
 
@@ -128,37 +132,9 @@ public class ReconciliacaoPointScheduler {
 
         for (PagamentoPedidoEntity pagamento : pointPendentes) {
             if (pagamento.getOrderExternaId() != null) {
-                try {
-                    OrderPointResultado atualMp = mercadoPagoPointClient.consultarOrder(pagamento.getOrderExternaId());
-                    PagamentoPedidoEntity atualizado = transicaoPagamentoPointService.aplicarResultadoOrder(
-                            pagamento.getId(),
-                            atualMp,
-                            OrigemAuditoriaCaixa.SISTEMA,
-                            null
-                    );
-                    if (!STATUS_PENDENTES_EXPIRACAO.contains(atualizado.getStatus())) {
-                        continue;
-                    }
-                } catch (RuntimeException ex) {
-                    log.warn(
-                            "Erro ao consultar Order {} antes de expirar pagamento {}: {}",
-                            pagamento.getOrderExternaId(),
-                            pagamento.getId(),
-                            ex.getMessage()
-                    );
-                }
-
-                try {
-                    mercadoPagoPointClient.cancelarOrder(
-                            pagamento.getOrderExternaId(),
-                            "EXP-" + pagamento.getId()
-                    );
-                } catch (IntegracaoMercadoPagoException ex) {
-                    log.debug(
-                            "Cancelamento remoto pré-expiração da Order {} retornou: {}",
-                            pagamento.getOrderExternaId(),
-                            ex.getMessage()
-                    );
+                boolean podeExpirarLocalmente = tentarSincronizarOuCancelarAntesDeExpirar(pagamento);
+                if (!podeExpirarLocalmente) {
+                    continue;
                 }
             }
 
@@ -178,6 +154,93 @@ public class ReconciliacaoPointScheduler {
                     StatusReservaEstoque.EXPIRADA,
                     "Reserva de estoque expirada por timeout"
             );
+        }
+    }
+
+    private boolean tentarSincronizarOuCancelarAntesDeExpirar(PagamentoPedidoEntity pagamento) {
+        String orderExternaId = pagamento.getOrderExternaId();
+        try {
+            OrderPointResultado atualMp = mercadoPagoPointClient.consultarOrder(orderExternaId);
+            PagamentoPedidoEntity atualizado = transicaoPagamentoPointService.aplicarResultadoOrder(
+                    pagamento.getId(),
+                    atualMp,
+                    OrigemAuditoriaCaixa.SISTEMA,
+                    null
+            );
+            if (!STATUS_PENDENTES_EXPIRACAO.contains(atualizado.getStatus())) {
+                return false;
+            }
+        } catch (IntegracaoMercadoPagoException ex) {
+            if (ex.getHttpStatus() == HttpStatus.NOT_FOUND) {
+                log.info(
+                        "Order {} não localizada no Mercado Pago durante expiração do pagamento {}; expirando localmente",
+                        orderExternaId,
+                        pagamento.getId()
+                );
+                return true;
+            }
+            log.warn(
+                    "Falha ao consultar Order {} antes de expirar pagamento {}; mantendo para próximo ciclo: {}",
+                    orderExternaId,
+                    pagamento.getId(),
+                    ex.getMessage()
+            );
+            return false;
+        } catch (RuntimeException ex) {
+            log.warn(
+                    "Erro inesperado ao consultar Order {} antes de expirar pagamento {}; mantendo para próximo ciclo: {}",
+                    orderExternaId,
+                    pagamento.getId(),
+                    ex.getMessage()
+            );
+            return false;
+        }
+
+        try {
+            mercadoPagoPointClient.cancelarOrder(
+                    orderExternaId,
+                    "EXP-" + pagamento.getId()
+            );
+            return true;
+        } catch (IntegracaoMercadoPagoException ex) {
+            if (ex.getHttpStatus() == HttpStatus.NOT_FOUND) {
+                return true;
+            }
+            if (ex.isErroTransitorio()) {
+                log.warn(
+                        "Erro transitório ao cancelar Order {} na pré-expiração do pagamento {}; mantendo para próximo ciclo: {}",
+                        orderExternaId,
+                        pagamento.getId(),
+                        ex.getMessage()
+                );
+                return false;
+            }
+            try {
+                OrderPointResultado reconsulta = mercadoPagoPointClient.consultarOrder(orderExternaId);
+                PagamentoPedidoEntity atualizado = transicaoPagamentoPointService.aplicarResultadoOrder(
+                        pagamento.getId(),
+                        reconsulta,
+                        OrigemAuditoriaCaixa.SISTEMA,
+                        null
+                );
+                return STATUS_PENDENTES_EXPIRACAO.contains(atualizado.getStatus());
+            } catch (RuntimeException reex) {
+                log.warn(
+                        "Falha ao reconsultar Order {} após rejeição de cancelamento do pagamento {}; mantendo para próximo ciclo: {}",
+                        orderExternaId,
+                        pagamento.getId(),
+                        reex.getMessage()
+                );
+                return false;
+            }
+        } catch (RuntimeException ex) {
+            log.warn(
+                    "Erro inesperado ao cancelar Order {} antes de expirar pagamento {}; mantendo para próximo ciclo: {}",
+                    orderExternaId,
+                    pagamento.getId(),
+                    ex.getMessage()
+            );
+            return false;
         }
     }
 }

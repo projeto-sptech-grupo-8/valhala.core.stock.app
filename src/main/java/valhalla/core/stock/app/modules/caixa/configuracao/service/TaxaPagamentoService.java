@@ -112,7 +112,7 @@ public class TaxaPagamentoService {
             """)
     public TaxaPagamentoResponseDto criarTaxa(TaxaPagamentoRequestDto dto) {
         validarFormaEParcelas(dto.forma(), dto.parcelas());
-        validarPercentual(dto.taxaPercentual(), dto.repassarAoCliente());
+        validarPercentual(dto.taxaPercentual());
 
         UUID estabelecimentoId = contextoCaixa.estabelecimentoId();
         UUID usuarioId = contextoCaixa.usuarioId();
@@ -165,7 +165,7 @@ public class TaxaPagamentoService {
             )
             """)
     public TaxaPagamentoResponseDto atualizarTaxa(UUID id, TaxaPagamentoAtualizacaoRequestDto dto) {
-        validarPercentual(dto.taxaPercentual(), dto.repassarAoCliente());
+        validarPercentual(dto.taxaPercentual());
 
         UUID usuarioId = contextoCaixa.usuarioId();
         TaxaPagamentoEntity taxa = buscarDoEstabelecimento(id);
@@ -247,11 +247,10 @@ public class TaxaPagamentoService {
         }
     }
 
-    private void validarPercentual(BigDecimal taxaPercentual, Boolean repassarAoCliente) {
-        if (Boolean.TRUE.equals(repassarAoCliente)
-                && taxaPercentual.compareTo(new BigDecimal("100")) >= 0) {
+    private void validarPercentual(BigDecimal taxaPercentual) {
+        if (taxaPercentual.compareTo(new BigDecimal("100")) >= 0) {
             throw new ConfiguracaoCaixaInvalidaException(
-                    "A taxa percentual deve ser menor que 100% quando repassada ao cliente"
+                    "A taxa percentual deve ser menor que 100%"
             );
         }
     }

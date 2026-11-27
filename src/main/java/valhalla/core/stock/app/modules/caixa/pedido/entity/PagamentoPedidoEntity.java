@@ -191,6 +191,9 @@ public class PagamentoPedidoEntity {
                 || status == StatusPagamentoPedido.PENDENTE
                 || status == StatusPagamentoPedido.PENDENTE_NA_POINT
                 || status == StatusPagamentoPedido.EM_TERMINAL
-                || status == StatusPagamentoPedido.PENDENTE_CONCILIACAO;
+                || status == StatusPagamentoPedido.CANCELAMENTO_SOLICITADO
+                || status == StatusPagamentoPedido.ACAO_NECESSARIA
+                || status == StatusPagamentoPedido.PENDENTE_CONCILIACAO
+                || status == StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO;
     }
 }

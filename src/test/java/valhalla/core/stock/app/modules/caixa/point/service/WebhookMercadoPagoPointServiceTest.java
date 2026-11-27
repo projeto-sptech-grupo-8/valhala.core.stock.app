@@ -11,6 +11,7 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 import valhalla.core.stock.app.modules.caixa.exception.IntegracaoMercadoPagoException;
+import valhalla.core.stock.app.modules.caixa.exception.WebhookAssinaturaInvalidaException;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.repository.PagamentoPedidoRepository;
 import valhalla.core.stock.app.modules.caixa.point.client.MercadoPagoPointClient;
@@ -21,6 +22,7 @@ import valhalla.core.stock.app.modules.caixa.point.repository.EventoWebhookPagam
 import valhalla.core.stock.app.modules.caixa.sessao.enums.OrigemAuditoriaCaixa;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -194,5 +196,49 @@ class WebhookMercadoPagoPointServiceTest {
                 null, null, null, null, "req-err", "127.0.0.1"
         )).isInstanceOf(IntegracaoMercadoPagoException.class);
         assertThat(novo.getStatusProcessamento()).isEqualTo(StatusProcessamentoWebhook.ERRO);
+    }
+
+    @Test
+    void processarWebhookBloqueiaParameterConfusionEConcorrenciaEmProcessamentoRecente() {
+        assertThatThrownBy(() -> service.processarWebhook(
+                "{\"id\":\"EVT-CONF-1\",\"type\":\"order\",\"data\":{\"id\":\"ORD-REAL\"}}",
+                "ORD-FALSO", null, null, "sig", "req-conf-1", "127.0.0.1"
+        )).isInstanceOf(WebhookAssinaturaInvalidaException.class)
+                .hasMessageContaining("Divergência entre data.id da query e do corpo JSON");
+
+        assertThatThrownBy(() -> service.processarWebhook(
+                "{\"id\":\"EVT-CONF-2\",\"type\":\"order\",\"data\":{\"id\":\"ORD-A\"}}",
+                "ORD-A", "ORD-B", null, "sig", "req-conf-2", "127.0.0.1"
+        )).isInstanceOf(WebhookAssinaturaInvalidaException.class)
+                .hasMessageContaining("Divergência entre os parâmetros data.id e id");
+
+        EventoWebhookPagamentoEntity emProcessamentoRecente = new EventoWebhookPagamentoEntity();
+        emProcessamentoRecente.setId(50L);
+        emProcessamentoRecente.setStatusProcessamento(StatusProcessamentoWebhook.PROCESSANDO);
+        emProcessamentoRecente.setAtualizadoEm(LocalDateTime.now());
+        when(eventoWebhookRepository.buscarPorProvedorEEventoParaAtualizacao("MERCADO_PAGO", "EVT-PROC"))
+                .thenReturn(Optional.of(emProcessamentoRecente));
+
+        StatusProcessamentoWebhook statusConcorrente = service.processarWebhook(
+                "{\"id\":\"EVT-PROC\",\"type\":\"order\",\"data\":{\"id\":\"ORD-PROC\"}}",
+                "ORD-PROC", null, null, "sig", "req-proc", "127.0.0.1"
+        );
+        assertThat(statusConcorrente).isEqualTo(StatusProcessamentoWebhook.PROCESSANDO);
+        verify(mercadoPagoPointClient, never()).consultarOrder("ORD-PROC");
+
+        // Evento travado em PROCESSANDO há > 60s pode ser retomado
+        emProcessamentoRecente.setAtualizadoEm(LocalDateTime.now().minusSeconds(90));
+        emProcessamentoRecente.setTentativas(1);
+        when(eventoWebhookRepository.buscarPorIdParaAtualizacao(50L))
+                .thenReturn(Optional.of(emProcessamentoRecente));
+        when(mercadoPagoPointClient.consultarOrder("ORD-PROC"))
+                .thenThrow(new IntegracaoMercadoPagoException("Não encontrada", HttpStatus.NOT_FOUND, false));
+
+        StatusProcessamentoWebhook retomado = service.processarWebhook(
+                "{\"id\":\"EVT-PROC\",\"type\":\"order\",\"data\":{\"id\":\"ORD-PROC\"}}",
+                "ORD-PROC", null, null, "sig", "req-proc", "127.0.0.1"
+        );
+        assertThat(retomado).isEqualTo(StatusProcessamentoWebhook.IGNORADO);
+        assertThat(emProcessamentoRecente.getTentativas()).isEqualTo(2);
     }
 }

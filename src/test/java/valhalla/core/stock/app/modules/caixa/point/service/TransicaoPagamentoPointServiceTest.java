@@ -6,6 +6,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import valhalla.core.stock.app.modules.caixa.configuracao.enums.FormaPagamentoCaixa;
+import valhalla.core.stock.app.modules.caixa.configuracao.enums.PoliticaJurosCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PedidoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPagamentoPedido;
@@ -70,9 +71,8 @@ class TransicaoPagamentoPointServiceTest {
         pagamento.setValor(new BigDecimal("100.00"));
         pagamento.setValorCobrado(new BigDecimal("100.00"));
 
-        when(pagamentoPedidoRepository.findById(pagId)).thenReturn(Optional.of(pagamento));
-        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-        when(pedidoRepository.buscarParaAtualizacao(pedidoId, estabId)).thenReturn(Optional.of(pedido));
+        when(pagamentoPedidoRepository.buscarPedidoIdPorPagamentoId(pagId)).thenReturn(Optional.of(pedidoId));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
         when(pagamentoPedidoRepository.buscarParaAtualizacao(pagId, pedidoId)).thenReturn(Optional.of(pagamento));
         lenient().when(pagamentoPedidoRepository.saveAndFlush(any(PagamentoPedidoEntity.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
@@ -135,9 +135,8 @@ class TransicaoPagamentoPointServiceTest {
         pagamento.setStatus(StatusPagamentoPedido.EM_TERMINAL);
         pagamento.setValor(new BigDecimal("100.00"));
 
-        when(pagamentoPedidoRepository.findById(pagId)).thenReturn(Optional.of(pagamento));
-        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-        when(pedidoRepository.buscarParaAtualizacao(pedidoId, estabId)).thenReturn(Optional.of(pedido));
+        when(pagamentoPedidoRepository.buscarPedidoIdPorPagamentoId(pagId)).thenReturn(Optional.of(pedidoId));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
         when(pagamentoPedidoRepository.buscarParaAtualizacao(pagId, pedidoId)).thenReturn(Optional.of(pagamento));
         lenient().when(pagamentoPedidoRepository.saveAndFlush(any(PagamentoPedidoEntity.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
@@ -173,6 +172,51 @@ class TransicaoPagamentoPointServiceTest {
         assertThat(pagamento.getStatus()).isEqualTo(StatusPagamentoPedido.EXPIRADO);
         assertThat(pagamento.getMotivoCancelamento()).isEqualTo("Tempo limite na Point excedido");
         verify(pagamentoPedidoRepository, never()).delete(any());
+    }
+
+    @Test
+    void validarConsistenciaZeroTrustAceitaJurosDoCompradorNoMpEAjustaValorCobrado() {
+        UUID estabId = UUID.randomUUID();
+        UUID pedidoId = UUID.randomUUID();
+        UUID pagId = UUID.randomUUID();
+
+        PedidoEntity pedido = new PedidoEntity();
+        pedido.setId(pedidoId);
+        pedido.setEstabelecimentoId(estabId);
+        pedido.setOperadorUsuarioId(UUID.randomUUID());
+        pedido.setStatus(StatusPedidoCaixa.AGUARDANDO_MAQUINA);
+        pedido.setTotal(new BigDecimal("100.00"));
+
+        PagamentoPedidoEntity pagamento = new PagamentoPedidoEntity();
+        pagamento.setId(pagId);
+        pagamento.setPedidoId(pedidoId);
+        pagamento.setForma(FormaPagamentoCaixa.CREDITO);
+        pagamento.setStatus(StatusPagamentoPedido.EM_TERMINAL);
+        pagamento.setReferenciaExterna("REF-BUYER");
+        pagamento.setPoliticaJuros(PoliticaJurosCaixa.REPASSADA_AO_CLIENTE);
+        pagamento.setValor(new BigDecimal("100.00"));
+        pagamento.setValorCobrado(new BigDecimal("100.00"));
+        pagamento.setValorJuros(BigDecimal.ZERO);
+
+        when(pagamentoPedidoRepository.buscarPedidoIdPorPagamentoId(pagId)).thenReturn(Optional.of(pedidoId));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
+        when(pagamentoPedidoRepository.buscarParaAtualizacao(pagId, pedidoId)).thenReturn(Optional.of(pagamento));
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoId)).thenReturn(List.of(pagamento));
+        when(itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedidoId)).thenReturn(List.of());
+        when(pagamentoPedidoRepository.saveAndFlush(any(PagamentoPedidoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(pedidoRepository.saveAndFlush(any(PedidoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThatThrownBy(() -> service.aplicarResultadoOrder(
+                pagId, res("processed", "accredited", "REF-BUYER", "99.00"), OrigemAuditoriaCaixa.WEBHOOK, null
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("mínimo esperado");
+
+        service.aplicarResultadoOrder(
+                pagId, res("processed", "accredited", "REF-BUYER", "108.50"), OrigemAuditoriaCaixa.WEBHOOK, null
+        );
+        assertThat(pagamento.getStatus()).isEqualTo(StatusPagamentoPedido.APROVADO);
+        assertThat(pagamento.getValorCobrado()).isEqualByComparingTo("108.50");
+        assertThat(pagamento.getValorJuros()).isEqualByComparingTo("8.50");
     }
 
     private OrderPointResultado res(String status, String paymentStatus, String extRef, String amount) {

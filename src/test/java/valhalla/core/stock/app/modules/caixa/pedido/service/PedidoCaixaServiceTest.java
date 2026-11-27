@@ -25,13 +25,16 @@ import valhalla.core.stock.app.modules.caixa.configuracao.entity.ConfiguracaoCai
 import valhalla.core.stock.app.modules.caixa.configuracao.enums.FormaPagamentoCaixa;
 import valhalla.core.stock.app.modules.caixa.configuracao.mapper.ConfiguracaoCaixaMapper;
 import valhalla.core.stock.app.modules.caixa.configuracao.repository.ConfiguracaoCaixaRepository;
+import valhalla.core.stock.app.modules.caixa.exception.IntegracaoMercadoPagoException;
 import valhalla.core.stock.app.modules.caixa.exception.PedidoEstadoInvalidoException;
+import valhalla.core.stock.app.modules.caixa.exception.SaldoInsuficienteCaixaException;
 import valhalla.core.stock.app.modules.caixa.exception.SessaoCaixaEstadoInvalidoException;
 import valhalla.core.stock.app.modules.caixa.fiscal.service.NotaFiscalCaixaService;
 import valhalla.core.stock.app.modules.caixa.pedido.dto.CancelarPedidoCaixaRequestDto;
 import valhalla.core.stock.app.modules.caixa.pedido.dto.ConciliarPagamentoPedidoRequestDto;
 import valhalla.core.stock.app.modules.caixa.pedido.dto.DecisaoDescontoPedidoRequestDto;
 import valhalla.core.stock.app.modules.caixa.pedido.dto.DescontoPedidoCaixaRequestDto;
+import valhalla.core.stock.app.modules.caixa.pedido.dto.EstornarPedidoCaixaRequestDto;
 import valhalla.core.stock.app.modules.caixa.pedido.dto.ItemPedidoCaixaRequestDto;
 import valhalla.core.stock.app.modules.caixa.pedido.dto.PedidoCaixaAtualizacaoRequestDto;
 import valhalla.core.stock.app.modules.caixa.pedido.dto.PedidoCaixaDetalheResponseDto;
@@ -41,7 +44,6 @@ import valhalla.core.stock.app.modules.caixa.pedido.dto.RegistrarPagamentoPedido
 import valhalla.core.stock.app.modules.caixa.pedido.entity.ItemPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PedidoEntity;
-import valhalla.core.stock.app.modules.caixa.pedido.entity.SequenciaDocumentoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.CanalPedidoCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusDescontoPedido;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPagamentoPedido;
@@ -52,13 +54,19 @@ import valhalla.core.stock.app.modules.caixa.pedido.repository.PagamentoPedidoRe
 import valhalla.core.stock.app.modules.caixa.pedido.repository.PedidoRepository;
 import valhalla.core.stock.app.modules.caixa.pedido.repository.SequenciaDocumentoRepository;
 import valhalla.core.stock.app.modules.caixa.pedido.strategy.ProcessadorPagamento;
+import valhalla.core.stock.app.modules.caixa.point.client.dto.OrderPointResultado;
 import valhalla.core.stock.app.modules.caixa.point.service.OrquestradorPagamentoPointService;
 import valhalla.core.stock.app.modules.caixa.security.AutorizadorOperacaoCaixaService;
 import valhalla.core.stock.app.modules.caixa.security.ContextoCaixa;
+import valhalla.core.stock.app.modules.caixa.sessao.entity.MovimentacaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.sessao.entity.SessaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.sessao.enums.StatusSessaoCaixa;
+import valhalla.core.stock.app.modules.caixa.sessao.enums.TipoMovimentacaoCaixa;
+import valhalla.core.stock.app.modules.caixa.sessao.repository.MovimentacaoCaixaRepository;
 import valhalla.core.stock.app.modules.caixa.sessao.repository.SessaoCaixaRepository;
 import valhalla.core.stock.app.modules.caixa.sessao.service.AuditoriaCaixaService;
+import valhalla.core.stock.app.modules.caixa.sessao.service.CalculadoraFechamentoCaixa;
+import valhalla.core.stock.app.modules.caixa.sessao.service.EventoAuditoriaCaixa;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
 import valhalla.core.stock.app.modules.estoque.service.MovimentacaoEstoqueService;
@@ -80,8 +88,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import org.springframework.http.HttpStatus;
+import java.util.function.Consumer;
 
 @ExtendWith(MockitoExtension.class)
 class PedidoCaixaServiceTest {
@@ -91,6 +104,7 @@ class PedidoCaixaServiceTest {
     @Mock private PagamentoPedidoRepository pagamentoPedidoRepository;
     @Mock private SequenciaDocumentoRepository sequenciaDocumentoRepository;
     @Mock private SessaoCaixaRepository sessaoCaixaRepository;
+    @Mock private MovimentacaoCaixaRepository movimentacaoCaixaRepository;
     @Mock private ConfiguracaoCaixaRepository configuracaoCaixaRepository;
     @Mock private ProdutoRepository produtoRepository;
     @Mock private UserRepository userRepository;
@@ -113,6 +127,11 @@ class PedidoCaixaServiceTest {
             public <T> T execute(TransactionCallback<T> action) {
                 return action.doInTransaction(mock(TransactionStatus.class));
             }
+
+            @Override
+            public void executeWithoutResult(Consumer<TransactionStatus> action) {
+                action.accept(mock(TransactionStatus.class));
+            }
         };
         service = new PedidoCaixaService(
                 pedidoRepository,
@@ -120,6 +139,8 @@ class PedidoCaixaServiceTest {
                 pagamentoPedidoRepository,
                 sequenciaDocumentoRepository,
                 sessaoCaixaRepository,
+                movimentacaoCaixaRepository,
+                new CalculadoraFechamentoCaixa(),
                 configuracaoCaixaRepository,
                 produtoRepository,
                 userRepository,
@@ -223,8 +244,7 @@ class PedidoCaixaServiceTest {
 
         PedidoEntity pedido = pedidoBase(estabId, userId, UUID.randomUUID(), "100.00");
         pedido.setId(pedidoId);
-        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-        when(pedidoRepository.buscarParaAtualizacao(pedidoId, estabId)).thenReturn(Optional.of(pedido));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
         when(pedidoRepository.saveAndFlush(any(PedidoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
 
         // Sem itens -> erro
@@ -339,8 +359,7 @@ class PedidoCaixaServiceTest {
         pedido.setDesconto(new BigDecimal("80.00"));
         pedido.setTotal(new BigDecimal("20.00"));
 
-        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-        when(pedidoRepository.buscarParaAtualizacao(pedidoId, estabId)).thenReturn(Optional.of(pedido));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
         when(pedidoRepository.saveAndFlush(any(PedidoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
 
         // Pagamento ativo impede edição
@@ -408,7 +427,7 @@ class PedidoCaixaServiceTest {
         PedidoEntity pedido = pedidoBase(estabId, userId, UUID.randomUUID(), "50.00");
         pedido.setId(pedidoId);
         when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-        when(pedidoRepository.buscarParaAtualizacao(pedidoId, estabId)).thenReturn(Optional.of(pedido));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
 
         // Cancelar pedido com itens sem motivo
         when(itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedidoId)).thenReturn(List.of(item(1L, pedidoId, "50.00")));
@@ -434,7 +453,26 @@ class PedidoCaixaServiceTest {
                 pedidoId, pagamentoId, new ConciliarPagamentoPedidoRequestDto(false, " ", null)
         )).isInstanceOf(IllegalArgumentException.class);
 
+        // Conciliar ACAO_NECESSARIA aprovando exige CAIXA_RESOLVER_DIVERGENCIA
+        pag.setStatus(StatusPagamentoPedido.ACAO_NECESSARIA);
+        when(autorizadorOperacaoCaixaService.exigirAutorizador(
+                eq("CAIXA_RESOLVER_DIVERGENCIA"), any(), any(), any()
+        )).thenReturn(new AutorizadorOperacaoCaixaService.AutorizadorResolvido(UUID.randomUUID(), "Gerente"));
+        when(pagamentoPedidoRepository.saveAndFlush(any(PagamentoPedidoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(pedidoRepository.saveAndFlush(any(PedidoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoId)).thenReturn(List.of(pag));
+        PedidoCaixaDetalheResponseDto conciliado = service.conciliarPagamento(
+                pedidoId, pagamentoId, new ConciliarPagamentoPedidoRequestDto(true, "Conferido", null, "g@m.com", "123")
+        );
+        assertThat(conciliado.status()).isEqualTo(StatusPedidoCaixa.CONCLUIDO);
+        verify(auditoriaCaixaService).registrar(
+                eq(estabId), eq(userId), any(), eq(EventoAuditoriaCaixa.CONCILIACAO_MANUAL),
+                any(), any(), any(), any(), any(), eq(pedidoId), any(), eq(pagamentoId), any(), eq("Gerente"), any(), any()
+        );
+
         // Registrar pagamento: Point habilitada redireciona para Orquestrador
+        pedido.setStatus(StatusPedidoCaixa.EM_ATENDIMENTO);
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoId)).thenReturn(List.of());
         ConfiguracaoCaixaEntity configPoint = ConfiguracaoCaixaMapper.criarPadrao(estabId);
         configPoint.setPointHabilitado(true);
         when(configuracaoCaixaRepository.findByEstabelecimentoId(estabId)).thenReturn(Optional.of(configPoint));
@@ -444,7 +482,7 @@ class PedidoCaixaServiceTest {
         service.registrarPagamento(pedidoId, reqPix);
         verify(orquestradorPagamentoPointService).iniciarPagamentoPoint(pedidoId, reqPix);
 
-        // Contingência manual + DataIntegrityViolationException na idempotência
+        // Contingência manual + DataIntegrityViolationException recuperada em nova transação
         RegistrarPagamentoPedidoRequestDto reqDinheiro = new RegistrarPagamentoPedidoRequestDto(
                 FormaPagamentoCaixa.DINHEIRO, new BigDecimal("50.00"), 1, new BigDecimal("50.00"), "idem-dup", null
         );
@@ -466,10 +504,119 @@ class PedidoCaixaServiceTest {
         when(pagamentoPedidoRepository.saveAndFlush(novoPag)).thenThrow(new DataIntegrityViolationException("uq"));
         when(pagamentoPedidoRepository.findByPedidoIdAndChaveIdempotencia(pedidoId, "idem-dup"))
                 .thenReturn(Optional.empty(), Optional.of(novoPag));
-        when(pedidoRepository.saveAndFlush(any(PedidoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoId))
+                .thenReturn(List.of(), List.of(novoPag));
 
         PedidoCaixaDetalheResponseDto pago = service.registrarPagamento(pedidoId, reqDinheiro);
-        assertThat(pago.status()).isEqualTo(StatusPedidoCaixa.CONCLUIDO);
+        assertThat(pago.pagamentos()).hasSize(1);
+    }
+
+    @Test
+    void estornarPedidoEPagamentoExecutaSagaPointEProtegeGavetaDinheiro() {
+        UUID estabId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID gerenteId = UUID.randomUUID();
+        UUID pedidoId = UUID.randomUUID();
+        UUID sessaoId = UUID.randomUUID();
+        when(contextoCaixa.estabelecimentoId()).thenReturn(estabId);
+        when(contextoCaixa.usuarioId()).thenReturn(userId);
+        when(autorizadorOperacaoCaixaService.exigirAutorizador(eq("CAIXA_ESTORNAR"), any(), any(), any()))
+                .thenReturn(new AutorizadorOperacaoCaixaService.AutorizadorResolvido(gerenteId, "Gerente"));
+
+        PedidoEntity pedido = pedidoBase(estabId, userId, sessaoId, "100.00");
+        pedido.setId(pedidoId);
+        pedido.setStatus(StatusPedidoCaixa.CONCLUIDO);
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
+        when(itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedidoId)).thenReturn(List.of());
+        when(pedidoRepository.saveAndFlush(any(PedidoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(pagamentoPedidoRepository.saveAndFlush(any(PagamentoPedidoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // 1) Estorno Point: falha não-transitória reverte ESTORNO_EM_ANDAMENTO -> APROVADO
+        PagamentoPedidoEntity pagPoint = new PagamentoPedidoEntity();
+        pagPoint.setId(UUID.randomUUID());
+        pagPoint.setPedidoId(pedidoId);
+        pagPoint.setSessaoCaixaId(sessaoId);
+        pagPoint.setProvedor("MERCADO_PAGO");
+        pagPoint.setOrderExternaId("ORD-EST-1");
+        pagPoint.setForma(FormaPagamentoCaixa.PIX);
+        pagPoint.setStatus(StatusPagamentoPedido.APROVADO);
+        pagPoint.setValor(new BigDecimal("100.00"));
+        pagPoint.setValorCobrado(new BigDecimal("100.00"));
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoId)).thenReturn(List.of(pagPoint));
+        when(pagamentoPedidoRepository.buscarParaAtualizacao(pagPoint.getId(), pedidoId)).thenReturn(Optional.of(pagPoint));
+        when(orquestradorPagamentoPointService.estornarOrderExterna("ORD-EST-1", pagPoint.getId()))
+                .thenThrow(new IntegracaoMercadoPagoException("Erro 400", HttpStatus.BAD_REQUEST, false))
+                .thenThrow(new IntegracaoMercadoPagoException("Timeout", HttpStatus.GATEWAY_TIMEOUT, true))
+                .thenReturn(new OrderPointResultado(
+                        "ORD-EST-1", "refunded", "refunded", "PAY-1", "refunded", "REF-1", new BigDecimal("100.00"), "{\"status\":\"refunded\"}"
+                ));
+
+        assertThatThrownBy(() -> service.estornarPedido(
+                pedidoId, new EstornarPedidoCaixaRequestDto("Cliente desistiu", "g@m.com", "123")
+        )).isInstanceOf(IntegracaoMercadoPagoException.class);
+        assertThat(pagPoint.getStatus()).isEqualTo(StatusPagamentoPedido.APROVADO);
+
+        // Falha transitória mantém ESTORNO_EM_ANDAMENTO para retry seguro
+        assertThatThrownBy(() -> service.estornarPedido(
+                pedidoId, new EstornarPedidoCaixaRequestDto("Cliente desistiu", "g@m.com", "123")
+        )).isInstanceOf(IntegracaoMercadoPagoException.class);
+        assertThat(pagPoint.getStatus()).isEqualTo(StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO);
+
+        // Retry conclui o estorno com sucesso
+        PedidoCaixaDetalheResponseDto estornado = service.estornarPedido(
+                pedidoId, new EstornarPedidoCaixaRequestDto("Cliente desistiu", "g@m.com", "123")
+        );
+        assertThat(estornado.status()).isEqualTo(StatusPedidoCaixa.ESTORNADO);
+        assertThat(pagPoint.getStatus()).isEqualTo(StatusPagamentoPedido.ESTORNADO);
+
+        // 2) Estorno individual em DINHEIRO: sessão aberta sem saldo -> 409; sessão fechada -> grava SANGRIA na nova sessão
+        pedido.setStatus(StatusPedidoCaixa.PAGAMENTO_PARCIAL);
+        PagamentoPedidoEntity pagDinheiro = new PagamentoPedidoEntity();
+        pagDinheiro.setId(UUID.randomUUID());
+        pagDinheiro.setPedidoId(pedidoId);
+        pagDinheiro.setSessaoCaixaId(sessaoId);
+        pagDinheiro.setProvedor("INTERNO");
+        pagDinheiro.setForma(FormaPagamentoCaixa.DINHEIRO);
+        pagDinheiro.setStatus(StatusPagamentoPedido.APROVADO);
+        pagDinheiro.setValor(new BigDecimal("50.00"));
+        when(pagamentoPedidoRepository.buscarParaAtualizacao(pagDinheiro.getId(), pedidoId))
+                .thenReturn(Optional.of(pagDinheiro));
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoId))
+                .thenReturn(List.of(pagDinheiro));
+
+        SessaoCaixaEntity sessaoAberta = sessao(sessaoId, estabId, userId, StatusSessaoCaixa.ABERTA);
+        sessaoAberta.setFundoTroco(BigDecimal.ZERO);
+        when(sessaoCaixaRepository.buscarParaAtualizacao(sessaoId)).thenReturn(Optional.of(sessaoAberta));
+        when(pagamentoPedidoRepository.findBySessaoCaixaIdOrderByCriadoEmAsc(sessaoId)).thenReturn(List.of());
+        when(movimentacaoCaixaRepository.findBySessaoCaixaIdOrderByOcorridoEmAsc(sessaoId)).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.estornarPagamento(
+                pedidoId, pagDinheiro.getId(), new EstornarPedidoCaixaRequestDto("Erro troco", "g@m.com", "123")
+        )).isInstanceOf(SaldoInsuficienteCaixaException.class);
+
+        // Sessão original fechada, nova sessão aberta com fundo de troco de R$ 80 -> grava SANGRIA de R$ 50
+        sessaoAberta.setStatus(StatusSessaoCaixa.FECHADA);
+        UUID sessaoAtualId = UUID.randomUUID();
+        SessaoCaixaEntity sessaoAtual = sessao(sessaoAtualId, estabId, userId, StatusSessaoCaixa.ABERTA);
+        sessaoAtual.setFundoTroco(new BigDecimal("80.00"));
+        when(sessaoCaixaRepository.findFirstByEstabelecimentoIdAndOperadorUsuarioIdAndStatusOrderByAbertaEmDesc(
+                estabId, userId, StatusSessaoCaixa.ABERTA
+        )).thenReturn(Optional.of(sessaoAtual));
+        when(sessaoCaixaRepository.buscarParaAtualizacao(sessaoAtualId)).thenReturn(Optional.of(sessaoAtual));
+        when(pagamentoPedidoRepository.findBySessaoCaixaIdOrderByCriadoEmAsc(sessaoAtualId)).thenReturn(List.of());
+        when(movimentacaoCaixaRepository.findBySessaoCaixaIdOrderByOcorridoEmAsc(sessaoAtualId)).thenReturn(List.of());
+
+        PedidoCaixaDetalheResponseDto estornoIndividual = service.estornarPagamento(
+                pedidoId, pagDinheiro.getId(), new EstornarPedidoCaixaRequestDto("Devolver ao cliente", "g@m.com", "123")
+        );
+        assertThat(estornoIndividual.status()).isEqualTo(StatusPedidoCaixa.EM_ATENDIMENTO);
+        assertThat(pagDinheiro.getStatus()).isEqualTo(StatusPagamentoPedido.ESTORNADO);
+        ArgumentCaptor<MovimentacaoCaixaEntity> sangriaCaptor = ArgumentCaptor.forClass(MovimentacaoCaixaEntity.class);
+        verify(movimentacaoCaixaRepository).saveAndFlush(sangriaCaptor.capture());
+        assertThat(sangriaCaptor.getValue().getTipo()).isEqualTo(TipoMovimentacaoCaixa.SANGRIA);
+        assertThat(sangriaCaptor.getValue().getValor()).isEqualByComparingTo("50.00");
+        verify(movimentacaoEstoqueService, times(1)).estornarEstoquePedido(any(), any(), any());
     }
 
     private PedidoEntity pedidoBase(UUID estabId, UUID userId, UUID sessaoId, String valor) {

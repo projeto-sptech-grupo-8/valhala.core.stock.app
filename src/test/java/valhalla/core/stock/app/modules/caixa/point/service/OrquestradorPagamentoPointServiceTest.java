@@ -59,6 +59,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -160,7 +161,7 @@ class OrquestradorPagamentoPointServiceTest {
 
         PedidoEntity pedido = pedido(pedidoId, estabId, userId, new BigDecimal("100.00"));
         when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-        when(pedidoRepository.buscarParaAtualizacao(pedidoId, estabId)).thenReturn(Optional.of(pedido));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
 
         // Pedido sem itens -> erro
         when(itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedidoId)).thenReturn(List.of());
@@ -270,6 +271,21 @@ class OrquestradorPagamentoPointServiceTest {
         )).isInstanceOf(IntegracaoMercadoPagoException.class);
         assertThat(pag2.getStatus()).isEqualTo(StatusPagamentoPedido.RECUSADO);
         verify(reservaEstoqueService).liberarReservasAtivasDoPedido(eq(pedidoId), eq(StatusReservaEstoque.LIBERADA), any());
+
+        // Falha inesperada (RuntimeException genérica) na Fase 2 também compensa para PENDENTE_CONCILIACAO
+        UUID pagId3 = UUID.randomUUID();
+        PagamentoPedidoEntity pag3 = pagamento(pagId3, pedidoId, StatusPagamentoPedido.PENDENTE);
+        when(processadorPagamentoPoint.prepararPagamentoPendente(any(), any(), any(), any(), any(), any()))
+                .thenReturn(pag3);
+        when(pagamentoPedidoRepository.buscarParaAtualizacao(pagId3, pedidoId)).thenReturn(Optional.of(pag3));
+        doThrow(new IllegalStateException("Falha inesperada de serialização"))
+                .when(mercadoPagoPointClient).criarOrderPoint(any());
+
+        assertThatThrownBy(() -> service.iniciarPagamentoPoint(
+                pedidoId, req(new BigDecimal("100.00"), null, terminalCaixaId)
+        )).isInstanceOf(IllegalStateException.class);
+        assertThat(pag3.getStatus()).isEqualTo(StatusPagamentoPedido.PENDENTE_CONCILIACAO);
+        assertThat(pag3.getStatusDetalhe()).isEqualTo("ERRO_INESPERADO_ENVIO_MP");
     }
 
     @Test
@@ -283,7 +299,7 @@ class OrquestradorPagamentoPointServiceTest {
 
         PedidoEntity pedido = pedido(pedidoId, estabId, userId, new BigDecimal("50.00"));
         when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-        when(pedidoRepository.buscarParaAtualizacao(pedidoId, estabId)).thenReturn(Optional.of(pedido));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
         lenient().when(pedidoRepository.saveAndFlush(any(PedidoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(pagamentoPedidoRepository.saveAndFlush(any(PagamentoPedidoEntity.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
@@ -350,6 +366,57 @@ class OrquestradorPagamentoPointServiceTest {
         comOrder.setOrderExternaId("ORD-123");
         service.sincronizarCobrancaPoint(pedidoId, pagamentoId);
         verify(mercadoPagoPointClient, org.mockito.Mockito.times(2)).consultarOrder("ORD-123");
+
+        // Cancelamento de PENDENTE local e ACAO_NECESSARIA remoto
+        PagamentoPedidoEntity pendenteLocal = pagamento(pagamentoId, pedidoId, StatusPagamentoPedido.PENDENTE);
+        pendenteLocal.setOrderExternaId(null);
+        when(pagamentoPedidoRepository.buscarParaAtualizacao(pagamentoId, pedidoId)).thenReturn(Optional.of(pendenteLocal));
+        service.cancelarCobrancaPoint(pedidoId, pagamentoId);
+        assertThat(pendenteLocal.getStatus()).isEqualTo(StatusPagamentoPedido.CANCELADO);
+
+        PagamentoPedidoEntity acaoNecessaria = pagamento(pagamentoId, pedidoId, StatusPagamentoPedido.ACAO_NECESSARIA);
+        acaoNecessaria.setOrderExternaId("ORD-ACAO");
+        when(pagamentoPedidoRepository.buscarParaAtualizacao(pagamentoId, pedidoId)).thenReturn(Optional.of(acaoNecessaria));
+        OrderPointResultado resCanceladoAcao = new OrderPointResultado(
+                "ORD-ACAO", "canceled", "canceled", null, "canceled", "REF-A", new BigDecimal("50.00"), "{}"
+        );
+        when(mercadoPagoPointClient.cancelarOrder("ORD-ACAO", pagamentoId + "-cancel"))
+                .thenReturn(resCanceladoAcao);
+        service.cancelarCobrancaPoint(pedidoId, pagamentoId);
+        verify(transicaoPagamentoPointService).aplicarResultadoOrder(
+                pagamentoId, resCanceladoAcao, OrigemAuditoriaCaixa.API, userId
+        );
+    }
+
+    @Test
+    void estornarOrderExternaTrataSucessoRecuperacaoDeJaEstornadoEFalhas() {
+        UUID pagId = UUID.randomUUID();
+        OrderPointResultado refunded = new OrderPointResultado(
+                "ORD-REF", "refunded", "refunded", "PAY-1", "refunded", "REF-1", new BigDecimal("50.00"), "{}"
+        );
+        when(mercadoPagoPointClient.estornarOrder("ORD-REF", pagId + "-refund"))
+                .thenReturn(refunded)
+                .thenThrow(new IntegracaoMercadoPagoException("Já estornado", HttpStatus.CONFLICT, false))
+                .thenThrow(new IntegracaoMercadoPagoException("Bad request", HttpStatus.BAD_REQUEST, false))
+                .thenThrow(new IntegracaoMercadoPagoException("Timeout", HttpStatus.GATEWAY_TIMEOUT, true));
+
+        assertThat(service.estornarOrderExterna("ORD-REF", pagId)).isEqualTo(refunded);
+
+        // Erro não transitório + reconsulta confirma refunded -> retorna sucesso idempotente
+        when(mercadoPagoPointClient.consultarOrder("ORD-REF"))
+                .thenReturn(refunded)
+                .thenReturn(new OrderPointResultado(
+                        "ORD-REF", "processed", "accredited", "PAY-1", "accredited", "REF-1", new BigDecimal("50.00"), "{}"
+                ));
+        assertThat(service.estornarOrderExterna("ORD-REF", pagId)).isEqualTo(refunded);
+
+        // Erro não transitório quando não foi estornado -> propaga exceção
+        assertThatThrownBy(() -> service.estornarOrderExterna("ORD-REF", pagId))
+                .isInstanceOf(IntegracaoMercadoPagoException.class);
+
+        // Erro transitório -> propaga direto
+        assertThatThrownBy(() -> service.estornarOrderExterna("ORD-REF", pagId))
+                .isInstanceOf(IntegracaoMercadoPagoException.class);
     }
 
     private RegistrarPagamentoPedidoRequestDto req(BigDecimal valor, String idem, UUID terminalId) {

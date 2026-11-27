@@ -123,7 +123,17 @@ class TaxaPagamentoServiceTest {
         assertThatThrownBy(() -> service.criarTaxa(new TaxaPagamentoRequestDto(
                 FormaPagamentoCaixa.CREDITO, 2, new BigDecimal("100.0000"), BigDecimal.ZERO, true, true
         ))).isInstanceOf(ConfiguracaoCaixaInvalidaException.class)
-                .hasMessage("A taxa percentual deve ser menor que 100% quando repassada ao cliente");
+                .hasMessage("A taxa percentual deve ser menor que 100%");
+
+        assertThatThrownBy(() -> service.criarTaxa(new TaxaPagamentoRequestDto(
+                FormaPagamentoCaixa.CREDITO, 2, new BigDecimal("100.0000"), BigDecimal.ZERO, false, true
+        ))).isInstanceOf(ConfiguracaoCaixaInvalidaException.class)
+                .hasMessage("A taxa percentual deve ser menor que 100%");
+
+        assertThatThrownBy(() -> service.criarTaxa(new TaxaPagamentoRequestDto(
+                FormaPagamentoCaixa.CREDITO, 2, new BigDecimal("105.0000"), BigDecimal.ZERO, null, true
+        ))).isInstanceOf(ConfiguracaoCaixaInvalidaException.class)
+                .hasMessage("A taxa percentual deve ser menor que 100%");
 
         when(taxaPagamentoRepository.existsByEstabelecimentoIdAndFormaAndParcelas(
                 estabelecimentoId, FormaPagamentoCaixa.CREDITO, 3

@@ -43,7 +43,6 @@ import valhalla.core.stock.app.modules.caixa.pedido.dto.PedidoCaixaResumoRespons
 import valhalla.core.stock.app.modules.caixa.pedido.entity.ItemPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PedidoEntity;
-import valhalla.core.stock.app.modules.caixa.pedido.entity.SequenciaDocumentoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.CanalPedidoCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusDescontoPedido;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPagamentoPedido;
@@ -184,15 +183,13 @@ class NotaFiscalCaixaServiceTest {
 
         PedidoEntity emAtendimento = pedidoConcluido(estabelecimentoId, pedidoId);
         emAtendimento.setStatus(StatusPedidoCaixa.EM_ATENDIMENTO);
-        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(emAtendimento));
-        when(pedidoRepository.buscarParaAtualizacao(pedidoId, estabelecimentoId)).thenReturn(Optional.of(emAtendimento));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(emAtendimento));
 
         assertThatThrownBy(() -> service.emitirNfce(new EmitirNfceRequestDto(pedidoId, null, null)))
                 .isInstanceOf(PedidoEstadoInvalidoException.class);
 
         PedidoEntity concluido = pedidoConcluido(estabelecimentoId, pedidoId);
-        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(concluido));
-        when(pedidoRepository.buscarParaAtualizacao(pedidoId, estabelecimentoId)).thenReturn(Optional.of(concluido));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(concluido));
         when(notaFiscalRepository.existsByPedidoIdAndStatus(pedidoId, StatusNotaFiscal.AUTORIZADA))
                 .thenReturn(true);
 
@@ -248,10 +245,8 @@ class NotaFiscalCaixaServiceTest {
         prod1.setUnidadeMedida("un");
         when(produtoRepository.findAllById(any())).thenReturn(List.of(prod1));
 
-        SequenciaDocumentoEntity seq = new SequenciaDocumentoEntity();
-        seq.setUltimoNumero(4L);
-        when(sequenciaDocumentoRepository.buscarParaAtualizacao(estabelecimentoId, "NFCE"))
-                .thenReturn(Optional.of(seq));
+        when(sequenciaDocumentoRepository.proximoNumero(estabelecimentoId, "NFCE"))
+                .thenReturn(5L);
 
         when(provedorEmissaoFiscal.emitirNfce(any(SolicitacaoEmissaoFiscal.class)))
                 .thenAnswer(inv -> {

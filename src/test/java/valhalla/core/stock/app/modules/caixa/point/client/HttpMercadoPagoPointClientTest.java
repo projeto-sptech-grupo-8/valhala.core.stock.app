@@ -119,6 +119,11 @@ class HttpMercadoPagoPointClientTest {
                                 {"id":"ORD-HTTP-01","status":"canceled","status_detail":"canceled_by_user","external_reference":"VHL-01","total_amount":"55.90"}
                                 """);
                     }
+                    if ("POST".equals(method) && "/v1/orders/ORD-HTTP-01/refund".equals(path)) {
+                        return respostaHttp(200, """
+                                {"id":"ORD-HTTP-01","status":"refunded","status_detail":"refunded","external_reference":"VHL-01","total_amount":"55.90"}
+                                """);
+                    }
                     if ("GET".equals(method) && "/terminals/v1/list".equals(path)) {
                         return respostaHttp(200, """
                                 {
@@ -184,6 +189,15 @@ class HttpMercadoPagoPointClientTest {
 
         OrderPointResultado canceladaSemIdemp = client.cancelarOrder("ORD-HTTP-01", " ");
         assertThat(canceladaSemIdemp.status()).isEqualTo("canceled");
+        assertThat(ultimaRequisicao.get().headers().firstValue("X-Idempotency-Key")).isEmpty();
+
+        OrderPointResultado estornada = client.estornarOrder("ORD-HTTP-01", "refund-01");
+        assertThat(estornada.status()).isEqualTo("refunded");
+        assertThat(ultimaRequisicao.get().headers().firstValue("X-Idempotency-Key"))
+                .contains("refund-01");
+
+        OrderPointResultado estornadaSemIdemp = client.estornarOrder("ORD-HTTP-01", null);
+        assertThat(estornadaSemIdemp.status()).isEqualTo("refunded");
         assertThat(ultimaRequisicao.get().headers().firstValue("X-Idempotency-Key")).isEmpty();
 
         List<TerminalMercadoPagoDto> terminais = client.listarTerminais();
@@ -393,6 +407,26 @@ class HttpMercadoPagoPointClientTest {
                 " "
         ));
         assertThat(ultimoBody.get()).contains("\"installments_cost\":\"seller\"");
+    }
+
+    @Test
+    void rejeitaOrderIdInvalidoContraPathTraversalOuInjecao() {
+        HttpMercadoPagoPointClient client = criarClient();
+
+        for (String invalido : List.of("", "   ", "../users", "ORD/1?x=1", "ORD 1", "A".repeat(101))) {
+            assertThatThrownBy(() -> client.consultarOrder(invalido))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("orderId");
+            assertThatThrownBy(() -> client.cancelarOrder(invalido, "c1"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("orderId");
+            assertThatThrownBy(() -> client.estornarOrder(invalido, "r1"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("orderId");
+        }
+        assertThatThrownBy(() -> client.consultarOrder(null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("orderId");
     }
 
     private String extrairBody(HttpRequest request) throws InterruptedException {
