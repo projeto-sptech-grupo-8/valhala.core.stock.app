@@ -20,6 +20,7 @@ import org.hibernate.type.SqlTypes;
 import java.time.LocalDateTime;
 import java.util.UUID;
 import valhalla.core.stock.app.modules.caixa.point.enums.StatusProcessamentoWebhook;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Entity
 @Table(name = "evento_webhook_pagamento")
@@ -84,7 +85,7 @@ public class EventoWebhookPagamentoEntity {
 
     @PrePersist
     protected void onCreate() {
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         if (this.provedor == null || this.provedor.isBlank()) {
             this.provedor = "MERCADO_PAGO";
         }
@@ -102,6 +103,6 @@ public class EventoWebhookPagamentoEntity {
 
     @PreUpdate
     protected void onUpdate() {
-        this.atualizadoEm = LocalDateTime.now();
+        this.atualizadoEm = FusoHorarioOperacao.agora();
     }
 }

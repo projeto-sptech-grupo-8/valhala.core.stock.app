@@ -4,8 +4,8 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
 public final class RespostaArquivoExcel {
@@ -19,7 +19,7 @@ public final class RespostaArquivoExcel {
     }
 
     public static ResponseEntity<byte[]> anexo(String prefixoArquivo, byte[] conteudo) {
-        String nomeArquivo = prefixoArquivo + "-" + LocalDateTime.now().format(FORMATTER) + ".xlsx";
+        String nomeArquivo = prefixoArquivo + "-" + FusoHorarioOperacao.agora().format(FORMATTER) + ".xlsx";
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MEDIA_TYPE_EXCEL);
         headers.setContentDisposition(ContentDisposition.attachment().filename(nomeArquivo).build());

@@ -28,8 +28,8 @@ import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.LoteEstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.SituacaoValidadeLote;
-import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.LoteEstoqueRepository;
+import valhalla.core.stock.app.modules.estoque.repository.LoteEstoqueRepository.ResumoValidadeLotesProjection;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
 
@@ -41,10 +41,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -54,7 +53,6 @@ class LoteEstoqueServiceTest {
     private static final LocalDate HOJE = LocalDate.of(2026, 11, 20);
 
     @Mock private LoteEstoqueRepository loteEstoqueRepository;
-    @Mock private EstoqueRepository estoqueRepository;
     @Mock private ControleLotesEstoque controleLotes;
 
     @InjectMocks
@@ -72,16 +70,10 @@ class LoteEstoqueServiceTest {
 
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
-    void listarLotesReconciliaDivergentesEEvaluaTodosOsFiltrosESituacoes() {
+    void listarLotesConsultaEmModoLeituraEAvaliaTodosOsFiltrosESituacoes() {
         UUID estabelecimentoId = UUID.randomUUID();
         UUID produtoId = UUID.randomUUID();
         autenticar(estabelecimentoId);
-
-        EstoqueEntity estoqueReconciliar = new EstoqueEntity();
-        when(loteEstoqueRepository.idsProdutosComLotesDivergentes(estabelecimentoId))
-                .thenReturn(List.of(produtoId));
-        when(estoqueRepository.findAllByProdutoIdInForUpdate(anyList()))
-                .thenReturn(List.of(estoqueReconciliar));
 
         ProdutoEntity produtoFracionado = new ProdutoEntity();
         produtoFracionado.setId(produtoId);
@@ -115,8 +107,8 @@ class LoteEstoqueServiceTest {
             assertThat(pagina.itens().getFirst().valorCusto()).isEqualByComparingTo("50.00");
         }
 
-        verify(controleLotes, org.mockito.Mockito.atLeastOnce()).reconciliar(estoqueReconciliar);
-        verify(loteEstoqueRepository, org.mockito.Mockito.atLeastOnce()).flush();
+        verify(controleLotes, never()).reconciliar(any());
+        verify(loteEstoqueRepository, never()).flush();
 
         ArgumentCaptor<Specification<LoteEstoqueEntity>> specCaptor = ArgumentCaptor.forClass(Specification.class);
         verify(loteEstoqueRepository, org.mockito.Mockito.atLeastOnce())
@@ -146,63 +138,47 @@ class LoteEstoqueServiceTest {
     }
 
     @Test
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    void resumirAgrupaTodosOsTiposDeValidadeECalculaValoresEmRisco() {
+    void resumirDelegaAgregacaoAoRepositorioETrataValoresNulos() {
         UUID estabelecimentoId = UUID.randomUUID();
         autenticar(estabelecimentoId);
-        when(loteEstoqueRepository.idsProdutosComLotesDivergentes(estabelecimentoId)).thenReturn(List.of());
 
-        ProdutoEntity produtoPadrao = new ProdutoEntity();
-        produtoPadrao.setPrecoCusto(new BigDecimal("10.00"));
-        EstoqueEntity estoquePadrao = new EstoqueEntity();
-        estoquePadrao.setProduto(produtoPadrao);
+        ResumoValidadeLotesProjection projecao = mock(ResumoValidadeLotesProjection.class);
+        when(projecao.getLotesComSaldo()).thenReturn(5L);
+        when(projecao.getVencidos()).thenReturn(1L);
+        when(projecao.getVencemEm7Dias()).thenReturn(1L);
+        when(projecao.getVencemEm30Dias()).thenReturn(1L);
+        when(projecao.getSemValidade()).thenReturn(1L);
+        when(projecao.getValorVencido()).thenReturn(new BigDecimal("20.004"));
+        when(projecao.getValorEmRisco()).thenReturn(new BigDecimal("90.005"));
 
-        ProdutoEntity produtoSemCusto = new ProdutoEntity();
-        produtoSemCusto.setPrecoCusto(null);
-        EstoqueEntity estoqueSemCusto = new EstoqueEntity();
-        estoqueSemCusto.setProduto(produtoSemCusto);
-
-        LoteEstoqueEntity vencido = criarLote(estoquePadrao, HOJE.minusDays(1), "2");
-        LoteEstoqueEntity vence7 = criarLote(estoquePadrao, HOJE.plusDays(3), "3");
-        LoteEstoqueEntity vence30 = criarLote(estoquePadrao, HOJE.plusDays(15), "4");
-        LoteEstoqueEntity semValidade = criarLote(estoqueSemCusto, null, "5");
-        LoteEstoqueEntity valido = criarLote(estoquePadrao, HOJE.plusDays(60), "10");
-
-        when(loteEstoqueRepository.findAll(any(Specification.class)))
-                .thenReturn(List.of(vencido, vence7, vence30, semValidade, valido));
+        when(loteEstoqueRepository.resumirValidade(estabelecimentoId, HOJE, HOJE.plusDays(7), HOJE.plusDays(30)))
+                .thenReturn(projecao);
 
         ResumoValidadeLotesResponseDto resumo = loteEstoqueService.resumir();
 
+        assertThat(resumo.referencia()).isEqualTo(HOJE);
         assertThat(resumo.lotesComSaldo()).isEqualTo(5);
         assertThat(resumo.vencidos()).isEqualTo(1);
         assertThat(resumo.vencemEm7Dias()).isEqualTo(1);
         assertThat(resumo.vencemEm30Dias()).isEqualTo(1);
         assertThat(resumo.semValidade()).isEqualTo(1);
         assertThat(resumo.valorVencido()).isEqualByComparingTo("20.00");
-        assertThat(resumo.valorEmRisco()).isEqualByComparingTo("90.00");
+        assertThat(resumo.valorEmRisco()).isEqualByComparingTo("90.01");
 
-        ArgumentCaptor<Specification<LoteEstoqueEntity>> specCaptor = ArgumentCaptor.forClass(Specification.class);
-        verify(loteEstoqueRepository).findAll(specCaptor.capture());
+        ResumoValidadeLotesProjection projecaoNula = mock(ResumoValidadeLotesProjection.class);
+        when(loteEstoqueRepository.resumirValidade(estabelecimentoId, HOJE, HOJE.plusDays(7), HOJE.plusDays(30)))
+                .thenReturn(projecaoNula);
+        ResumoValidadeLotesResponseDto vazioComNulos = loteEstoqueService.resumir();
+        assertThat(vazioComNulos.lotesComSaldo()).isZero();
+        assertThat(vazioComNulos.valorVencido()).isEqualByComparingTo("0.00");
+        assertThat(vazioComNulos.valorEmRisco()).isEqualByComparingTo("0.00");
 
-        Predicate predicate = mock(Predicate.class);
-        Path path = mock(Path.class, inv -> Path.class.isAssignableFrom(inv.getMethod().getReturnType()) ? inv.getMock() : null);
-        Join join = mock(Join.class, inv -> {
-            Class<?> rt = inv.getMethod().getReturnType();
-            if (Join.class.isAssignableFrom(rt)) return inv.getMock();
-            if (Path.class.isAssignableFrom(rt)) return path;
-            return null;
-        });
-        Root<LoteEstoqueEntity> root = mock(Root.class, inv -> {
-            Class<?> rt = inv.getMethod().getReturnType();
-            if (Join.class.isAssignableFrom(rt)) return join;
-            if (Path.class.isAssignableFrom(rt)) return path;
-            return null;
-        });
-        CriteriaQuery<?> query = mock(CriteriaQuery.class);
-        CriteriaBuilder builder = mock(CriteriaBuilder.class, inv ->
-                Predicate.class.isAssignableFrom(inv.getMethod().getReturnType()) ? predicate : null);
-
-        assertThat(specCaptor.getValue().toPredicate(root, query, builder)).isNotNull();
+        when(loteEstoqueRepository.resumirValidade(estabelecimentoId, HOJE, HOJE.plusDays(7), HOJE.plusDays(30)))
+                .thenReturn(null);
+        ResumoValidadeLotesResponseDto nulo = loteEstoqueService.resumir();
+        assertThat(nulo.lotesComSaldo()).isZero();
+        assertThat(nulo.valorEmRisco()).isEqualByComparingTo("0.00");
+        verify(controleLotes, never()).reconciliar(any());
     }
 
     @Test
@@ -228,14 +204,6 @@ class LoteEstoqueServiceTest {
         SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(estabelecimentoInvalido));
         assertThatThrownBy(() -> loteEstoqueService.resumir())
                 .isInstanceOf(AccessDeniedException.class);
-    }
-
-    private LoteEstoqueEntity criarLote(EstoqueEntity estoque, LocalDate validade, String qtd) {
-        LoteEstoqueEntity lote = new LoteEstoqueEntity();
-        lote.setEstoque(estoque);
-        lote.setValidade(validade);
-        lote.setQuantidadeAtual(new BigDecimal(qtd));
-        return lote;
     }
 
     private void autenticar(UUID estabelecimentoId) {

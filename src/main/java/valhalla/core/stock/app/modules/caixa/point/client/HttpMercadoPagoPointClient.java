@@ -28,6 +28,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 @Component
 @ConditionalOnExpression(
@@ -35,6 +36,8 @@ import java.util.List;
                 + "|| '${app.mercado-pago.point.modo:PRODUCAO}'.equalsIgnoreCase('PRODUCAO')"
 )
 public class HttpMercadoPagoPointClient implements MercadoPagoPointClient {
+
+    private static final Pattern ID_EXTERNO_VALIDO = Pattern.compile("^[A-Za-z0-9_-]{1,100}$");
 
     private final MercadoPagoPointProperties properties;
     private final HttpClient httpClient;
@@ -98,7 +101,8 @@ public class HttpMercadoPagoPointClient implements MercadoPagoPointClient {
 
     @Override
     public OrderPointResultado consultarOrder(String orderId) {
-        HttpRequest request = requestBuilder("/v1/orders/" + orderId)
+        String idValidado = validarIdExterno(orderId, "orderId");
+        HttpRequest request = requestBuilder("/v1/orders/" + idValidado)
                 .GET()
                 .build();
         JsonNode json = executar(request);
@@ -107,7 +111,8 @@ public class HttpMercadoPagoPointClient implements MercadoPagoPointClient {
 
     @Override
     public OrderPointResultado cancelarOrder(String orderId, String chaveIdempotencia) {
-        HttpRequest.Builder builder = requestBuilder("/v1/orders/" + orderId + "/cancel");
+        String idValidado = validarIdExterno(orderId, "orderId");
+        HttpRequest.Builder builder = requestBuilder("/v1/orders/" + idValidado + "/cancel");
         if (chaveIdempotencia != null && !chaveIdempotencia.isBlank()) {
             builder.header("X-Idempotency-Key", chaveIdempotencia);
         }
@@ -116,6 +121,29 @@ public class HttpMercadoPagoPointClient implements MercadoPagoPointClient {
                 .build();
         JsonNode json = executar(request);
         return parseOrder(json);
+    }
+
+    @Override
+    public OrderPointResultado estornarOrder(String orderId, String chaveIdempotencia) {
+        String idValidado = validarIdExterno(orderId, "orderId");
+        HttpRequest.Builder builder = requestBuilder("/v1/orders/" + idValidado + "/refund");
+        if (chaveIdempotencia != null && !chaveIdempotencia.isBlank()) {
+            builder.header("X-Idempotency-Key", chaveIdempotencia);
+        }
+        HttpRequest request = builder
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        JsonNode json = executar(request);
+        return parseOrder(json);
+    }
+
+    private String validarIdExterno(String id, String campo) {
+        if (id == null || !ID_EXTERNO_VALIDO.matcher(id).matches()) {
+            throw new IllegalArgumentException(
+                    "Identificador externo inválido para " + campo + " no Mercado Pago"
+            );
+        }
+        return id;
     }
 
     @Override

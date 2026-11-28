@@ -24,6 +24,7 @@ import valhalla.core.stock.app.modules.caixa.configuracao.entity.TerminalCaixaEn
 import valhalla.core.stock.app.modules.caixa.configuracao.enums.FormaPagamentoCaixa;
 import valhalla.core.stock.app.modules.caixa.configuracao.enums.PoliticaJurosCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPagamentoPedido;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Entity
 @Table(name = "pagamento_pedido")
@@ -156,7 +157,7 @@ public class PagamentoPedidoEntity {
         if (id == null) {
             id = UUID.randomUUID();
         }
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         if (criadoEm == null) {
             criadoEm = agora;
         }
@@ -179,7 +180,7 @@ public class PagamentoPedidoEntity {
 
     @PreUpdate
     private void preUpdate() {
-        atualizadoEm = LocalDateTime.now();
+        atualizadoEm = FusoHorarioOperacao.agora();
     }
 
     public boolean estaAprovado() {
@@ -191,6 +192,9 @@ public class PagamentoPedidoEntity {
                 || status == StatusPagamentoPedido.PENDENTE
                 || status == StatusPagamentoPedido.PENDENTE_NA_POINT
                 || status == StatusPagamentoPedido.EM_TERMINAL
-                || status == StatusPagamentoPedido.PENDENTE_CONCILIACAO;
+                || status == StatusPagamentoPedido.CANCELAMENTO_SOLICITADO
+                || status == StatusPagamentoPedido.ACAO_NECESSARIA
+                || status == StatusPagamentoPedido.PENDENTE_CONCILIACAO
+                || status == StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO;
     }
 }

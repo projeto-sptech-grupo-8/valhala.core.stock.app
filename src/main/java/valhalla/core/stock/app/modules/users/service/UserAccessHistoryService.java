@@ -12,6 +12,7 @@ import valhalla.core.stock.app.modules.users.entity.UserAccessHistoryEntity;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserAccessHistoryRepository;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -33,7 +34,7 @@ public class UserAccessHistoryService {
 
     @Transactional
     public void registrarLoginSucesso(UserEntity user) {
-        user.setLastLoginAt(LocalDateTime.now());
+        user.setLastLoginAt(FusoHorarioOperacao.agora());
         user.setLoginAttempts(0);
         user.setLockedUntil(null);
         userRepository.save(user);
@@ -43,7 +44,7 @@ public class UserAccessHistoryService {
     @Transactional
     public void registrarSenhaIncorreta(String emailNormalizado) {
         userRepository.findByEmailIgnoreCase(emailNormalizado).ifPresent(user -> {
-            LocalDateTime agora = LocalDateTime.now();
+            LocalDateTime agora = FusoHorarioOperacao.agora();
             int attempts = user.getLoginAttempts() == null ? 0 : user.getLoginAttempts();
             if (user.getLockedUntil() != null && !user.getLockedUntil().isAfter(agora)) {
                 attempts = 0;
@@ -90,7 +91,7 @@ public class UserAccessHistoryService {
                 .sourceIp(metadata.sourceIp())
                 .device(metadata.device())
                 .userAgent(metadata.userAgent())
-                .occurredAt(LocalDateTime.now())
+                .occurredAt(FusoHorarioOperacao.agora())
                 .build();
         userAccessHistoryRepository.save(entry);
     }

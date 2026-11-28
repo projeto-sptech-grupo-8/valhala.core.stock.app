@@ -24,6 +24,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 import valhalla.core.stock.app.modules.caixa.configuracao.entity.CaixaEntity;
 import valhalla.core.stock.app.modules.caixa.sessao.enums.StatusSessaoCaixa;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Entity
 @Table(name = "sessao_caixa")
@@ -95,7 +96,7 @@ public class SessaoCaixaEntity {
 
     @PrePersist
     private void prePersist() {
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         if (abertaEm == null) {
             abertaEm = agora;
         }
@@ -112,7 +113,7 @@ public class SessaoCaixaEntity {
 
     @PreUpdate
     private void preUpdate() {
-        atualizadoEm = LocalDateTime.now();
+        atualizadoEm = FusoHorarioOperacao.agora();
     }
 
     public boolean isAberta() {

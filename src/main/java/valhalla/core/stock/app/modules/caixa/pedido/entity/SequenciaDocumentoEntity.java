@@ -10,6 +10,7 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -39,7 +40,7 @@ public class SequenciaDocumentoEntity {
     @PrePersist
     @PreUpdate
     private void atualizarTimestamp() {
-        atualizadoEm = LocalDateTime.now();
+        atualizadoEm = FusoHorarioOperacao.agora();
         if (ultimoNumero == null) {
             ultimoNumero = 0L;
         }

@@ -26,6 +26,7 @@ import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkReposit
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
 import valhalla.core.stock.app.modules.estoque.service.MovimentacaoEstoqueService;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -81,7 +82,7 @@ public class ReservaEstoqueService {
         List<ReservaEstoqueEntity> ativasExistentes = reservaEstoqueRepository
                 .buscarPorPedidoEStatusParaAtualizacao(pedido.getId(), StatusReservaEstoque.ATIVA);
 
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         LocalDateTime novaExpiracao = agora.plusSeconds(pointProperties.reservaExpiracaoSegundos());
 
         if (!ativasExistentes.isEmpty()) {
@@ -241,7 +242,7 @@ public class ReservaEstoqueService {
             }
         }
 
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         String origem = (origemMovimentacao == null || origemMovimentacao.isBlank()) ? "WEBHOOK" : origemMovimentacao;
         String motivo = "Venda concluída - Pedido #" + pedido.getNumero();
 
@@ -323,7 +324,7 @@ public class ReservaEstoqueService {
                 .stream()
                 .collect(Collectors.toMap(e -> e.getProduto().getId(), Function.identity()));
 
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         String motivoNormalizado = motivo == null || motivo.isBlank()
                 ? "Reserva liberada"
                 : (motivo.length() > 200 ? motivo.substring(0, 200) : motivo);

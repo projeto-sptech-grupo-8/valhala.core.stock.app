@@ -33,6 +33,7 @@ public class MockMercadoPagoPointClient implements MercadoPagoPointClient {
     private final Map<String, String> orderIdPorChaveIdempotencia = new ConcurrentHashMap<>();
     private final Map<String, TerminalMercadoPagoDto> terminaisPorId = new ConcurrentHashMap<>();
     private final AtomicReference<RuntimeException> proximaFalhaCriacao = new AtomicReference<>();
+    private final AtomicReference<RuntimeException> proximaFalhaEstorno = new AtomicReference<>();
 
     public MockMercadoPagoPointClient() {
         terminaisPorId.put(
@@ -120,6 +121,26 @@ public class MockMercadoPagoPointClient implements MercadoPagoPointClient {
     }
 
     @Override
+    public OrderPointResultado estornarOrder(String orderId, String chaveIdempotencia) {
+        RuntimeException falha = proximaFalhaEstorno.getAndSet(null);
+        if (falha != null) {
+            throw falha;
+        }
+        OrderPointResultado atual = consultarOrder(orderId);
+        if ("refunded".equalsIgnoreCase(atual.status())) {
+            return atual;
+        }
+        if (!"processed".equalsIgnoreCase(atual.status()) && !"paid".equalsIgnoreCase(atual.status())) {
+            throw new IntegracaoMercadoPagoException(
+                    "Somente cobranças aprovadas podem ser estornadas",
+                    HttpStatus.CONFLICT,
+                    false
+            );
+        }
+        return atualizarStatusMock(orderId, "refunded", "refunded", "refunded");
+    }
+
+    @Override
     public List<TerminalMercadoPagoDto> listarTerminais() {
         return new ArrayList<>(terminaisPorId.values());
     }
@@ -179,9 +200,14 @@ public class MockMercadoPagoPointClient implements MercadoPagoPointClient {
         proximaFalhaCriacao.set(excecao);
     }
 
+    public void configurarProximaFalhaEstorno(RuntimeException excecao) {
+        proximaFalhaEstorno.set(excecao);
+    }
+
     public void limparEstadoMock() {
         ordersPorId.clear();
         orderIdPorChaveIdempotencia.clear();
         proximaFalhaCriacao.set(null);
+        proximaFalhaEstorno.set(null);
     }
 }

@@ -2,6 +2,7 @@ package valhalla.core.stock.app.modules.estoque.service;
 
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.AccessDeniedException;
@@ -47,6 +48,7 @@ import java.util.Set;
 @Service
 public class ProdutoService {
 
+    static final int LIMITE_REGISTROS_EXPORTACAO = 10_000;
     private static final BigDecimal ZERO = BigDecimal.ZERO;
 
     private final ProdutoRepository produtoRepository;
@@ -179,7 +181,17 @@ public class ProdutoService {
                 0, 100, ordenarPor, direcao,
                 Set.of("nome", "sku", "precoVenda", "precoCusto", "criadoEm", "atualizadoEm")
         );
-        List<ProdutoEntity> produtos = produtoRepository.findAll(especificacao, paginacaoOrdenacao.getSort());
+        Page<ProdutoEntity> resultado = produtoRepository.findAll(
+                especificacao,
+                PageRequest.of(0, LIMITE_REGISTROS_EXPORTACAO + 1, paginacaoOrdenacao.getSort())
+        );
+        List<ProdutoEntity> produtos = resultado.getContent();
+        if (resultado.getTotalElements() > LIMITE_REGISTROS_EXPORTACAO || produtos.size() > LIMITE_REGISTROS_EXPORTACAO) {
+            throw new IllegalArgumentException(
+                    "A exportação excede o limite máximo de " + LIMITE_REGISTROS_EXPORTACAO
+                            + " registros. Refine os filtros antes de exportar."
+            );
+        }
         Map<UUID, EstoqueEntity> estoques = estoquesPorProduto(produtos);
         return produtos.stream()
                 .map(produto -> ProdutoMapper.paraResposta(produto, estoques.get(produto.getId())))
@@ -269,7 +281,9 @@ public class ProdutoService {
         BigDecimal quantidadeInicialBase = converterQuantidadeInicial(
                 dto.quantidadeInicial(),
                 Boolean.TRUE.equals(dto.quantidadeInicialEmFardos()),
-                dto.unidadesPorFardo()
+                dto.unidadesPorFardo(),
+                produtoSalvo.isFracionado(),
+                produtoSalvo.getVolumeEmbalagemMl()
         );
         EstoqueEntity estoque = tipo == ProdutoTipo.PADRAO
                 ? criarEstoqueInicial(produtoSalvo, quantidadeInicialBase, dto.estoqueMinimo())
@@ -307,7 +321,9 @@ public class ProdutoService {
                 : buscarCategoriaAtivaDoEstabelecimento(dto.categoriaId(), produto.getEstabelecimentoId());
         ProdutoMapper.aplicarAtualizacao(produto, dto, categoria);
 
-        EstoqueEntity estoque = estoqueRepository.findByProdutoId(produto.getId()).orElse(null);
+        EstoqueEntity estoque = dto.estoqueMinimo() != null
+                ? estoqueRepository.findByProdutoIdForUpdate(produto.getId()).orElse(null)
+                : estoqueRepository.findByProdutoId(produto.getId()).orElse(null);
         atualizarEstoqueMinimo(dto.estoqueMinimo(), produto.getTipo(), estoque);
 
         ProdutoEntity produtoSalvo = produtoRepository.saveAndFlush(produto);
@@ -354,7 +370,7 @@ public class ProdutoService {
                     "Produto não pode ser inativado porque é utilizado como ingrediente em receita de drink"
             );
         }
-        if (estoqueRepository.findByProdutoId(id)
+        if (estoqueRepository.findByProdutoIdForUpdate(id)
                 .filter(ProdutoService::temSaldoPositivo)
                 .isPresent()) {
             throw new ProdutoPossuiMovimentacoesException(
@@ -483,12 +499,18 @@ public class ProdutoService {
     private BigDecimal converterQuantidadeInicial(
             BigDecimal quantidadeInicial,
             boolean emFardos,
-            Integer unidadesPorFardo
+            Integer unidadesPorFardo,
+            boolean fracionado,
+            BigDecimal volumeEmbalagemMl
     ) {
         if (quantidadeInicial == null || !emFardos) {
             return quantidadeInicial;
         }
-        return quantidadeInicial.multiply(BigDecimal.valueOf(unidadesPorFardo));
+        BigDecimal unidades = quantidadeInicial.multiply(BigDecimal.valueOf(unidadesPorFardo));
+        if (fracionado && volumeEmbalagemMl != null) {
+            return unidades.multiply(volumeEmbalagemMl);
+        }
+        return unidades;
     }
 
     private void validarAlteracaoDeFardo(

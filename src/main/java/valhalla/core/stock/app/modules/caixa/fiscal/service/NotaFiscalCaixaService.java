@@ -35,7 +35,6 @@ import valhalla.core.stock.app.modules.caixa.pedido.dto.PedidoCaixaResumoRespons
 import valhalla.core.stock.app.modules.caixa.pedido.entity.ItemPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PedidoEntity;
-import valhalla.core.stock.app.modules.caixa.pedido.entity.SequenciaDocumentoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPedidoCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.mapper.PedidoCaixaMapper;
 import valhalla.core.stock.app.modules.caixa.pedido.repository.ItemPedidoRepository;
@@ -57,6 +56,7 @@ import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.Paginacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -213,7 +213,7 @@ public class NotaFiscalCaixaService {
         );
 
         Long numeroSequencial = gerarProximoNumeroNfce(estabelecimentoId);
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
 
         SolicitacaoEmissaoFiscal solicitacao = new SolicitacaoEmissaoFiscal(
                 estabelecimento,
@@ -745,22 +745,7 @@ public class NotaFiscalCaixaService {
     }
 
     private Long gerarProximoNumeroNfce(UUID estabelecimentoId) {
-        SequenciaDocumentoEntity sequencia = sequenciaDocumentoRepository
-                .buscarParaAtualizacao(estabelecimentoId, TIPO_SEQUENCIA_NFCE)
-                .orElseGet(() -> {
-                    SequenciaDocumentoEntity nova = new SequenciaDocumentoEntity();
-                    nova.setEstabelecimentoId(estabelecimentoId);
-                    nova.setTipo(TIPO_SEQUENCIA_NFCE);
-                    nova.setUltimoNumero(0L);
-                    nova.setAtualizadoEm(LocalDateTime.now());
-                    return sequenciaDocumentoRepository.saveAndFlush(nova);
-                });
-
-        long proximo = (sequencia.getUltimoNumero() == null ? 0L : sequencia.getUltimoNumero()) + 1L;
-        sequencia.setUltimoNumero(proximo);
-        sequencia.setAtualizadoEm(LocalDateTime.now());
-        sequenciaDocumentoRepository.saveAndFlush(sequencia);
-        return proximo;
+        return sequenciaDocumentoRepository.proximoNumero(estabelecimentoId, TIPO_SEQUENCIA_NFCE);
     }
 
     private NotaFiscalDetalheResponseDto carregarDetalheCompleto(NotaFiscalEntity nota) {
@@ -820,13 +805,12 @@ public class NotaFiscalCaixaService {
     }
 
     private PedidoEntity buscarPedidoParaAtualizacao(UUID pedidoId, UUID estabelecimentoId) {
-        PedidoEntity pedido = pedidoRepository.findById(pedidoId)
+        PedidoEntity pedido = pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)
                 .orElseThrow(() -> new EntityNotFoundException("Pedido não encontrado"));
         if (!pedido.getEstabelecimentoId().equals(estabelecimentoId)) {
             throw new AccessDeniedException("Acesso negado");
         }
-        return pedidoRepository.buscarParaAtualizacao(pedidoId, estabelecimentoId)
-                .orElseThrow(() -> new EntityNotFoundException("Pedido não encontrado"));
+        return pedido;
     }
 
     private String normalizarEValidarDocumentoConsumidor(String documento) {
@@ -839,7 +823,7 @@ public class NotaFiscalCaixaService {
                     "O documento do consumidor deve ser um CPF (11 dígitos) ou CNPJ (14 dígitos) válido"
             );
         }
-        if (apenasDigitos.chars().distinct().count() == 1) {
+        if (!valhalla.core.stock.app.shared.validation.ValidadorDocumentoFiscal.isCpfOuCnpjValido(apenasDigitos)) {
             throw new IllegalArgumentException(
                     "O documento do consumidor informado é inválido"
             );

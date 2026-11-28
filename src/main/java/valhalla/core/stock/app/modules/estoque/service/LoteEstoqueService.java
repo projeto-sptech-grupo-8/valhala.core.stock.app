@@ -16,8 +16,8 @@ import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.LoteEstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.SituacaoValidadeLote;
-import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.LoteEstoqueRepository;
+import valhalla.core.stock.app.modules.estoque.repository.LoteEstoqueRepository.ResumoValidadeLotesProjection;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.Paginacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
@@ -37,21 +37,17 @@ public class LoteEstoqueService {
     private static final Set<String> CAMPOS_ORDENACAO = Set.of("validade", "codigo", "quantidadeAtual", "criadoEm");
 
     private final LoteEstoqueRepository loteEstoqueRepository;
-    private final EstoqueRepository estoqueRepository;
     private final ControleLotesEstoque controleLotes;
 
     public LoteEstoqueService(
             LoteEstoqueRepository loteEstoqueRepository,
-            EstoqueRepository estoqueRepository,
             ControleLotesEstoque controleLotes
     ) {
         this.loteEstoqueRepository = loteEstoqueRepository;
-        this.estoqueRepository = estoqueRepository;
         this.controleLotes = controleLotes;
     }
 
-    // não é readOnly: antes de consultar, o saldo que ainda não está em lote é reconciliado como SEM-LOTE
-    @Transactional
+    @Transactional(readOnly = true)
     @PreAuthorize("@permissionAuthorizationService.hasPermission('VISUALIZAR_ESTOQUE', authentication)")
     public RespostaPaginadaDto<LoteResponseDto> listarLotes(
             UUID produtoId,
@@ -67,7 +63,6 @@ public class LoteEstoqueService {
             throw new IllegalArgumentException("venceEmDias não pode ser negativo");
         }
         UUID idEstabelecimento = obterIdEstabelecimentoAutenticado();
-        reconciliarDivergentes(idEstabelecimento);
         LocalDate hoje = controleLotes.hoje();
 
         Specification<LoteEstoqueEntity> especificacao = doEstabelecimento(idEstabelecimento);
@@ -93,55 +88,39 @@ public class LoteEstoqueService {
         return RespostaPaginadaDto.de(resultado, lote -> paraResposta(lote, hoje));
     }
 
-    @Transactional
+    @Transactional(readOnly = true)
     @PreAuthorize("@permissionAuthorizationService.hasPermission('VISUALIZAR_ESTOQUE', authentication)")
     public ResumoValidadeLotesResponseDto resumir() {
         UUID idEstabelecimento = obterIdEstabelecimentoAutenticado();
-        reconciliarDivergentes(idEstabelecimento);
         LocalDate hoje = controleLotes.hoje();
-
-        List<LoteEstoqueEntity> lotes = loteEstoqueRepository.findAll(doEstabelecimento(idEstabelecimento)
-                .and((root, query, builder) -> builder.and(
-                        builder.greaterThan(root.get("quantidadeAtual"), BigDecimal.ZERO),
-                        builder.isTrue(root.get("estoque").get("produto").get("ativo"))
-                )));
-
-        long vencidos = 0, vencem7 = 0, vencem30 = 0, semValidade = 0;
-        BigDecimal valorVencido = BigDecimal.ZERO;
-        BigDecimal valorEmRisco = BigDecimal.ZERO;
-        for (LoteEstoqueEntity lote : lotes) {
-            SituacaoValidadeLote situacao = SituacaoValidadeLote.de(lote.getValidade(), hoje);
-            BigDecimal valor = valorCusto(lote);
-            switch (situacao) {
-                case VENCIDO -> {
-                    vencidos++;
-                    valorVencido = valorVencido.add(valor);
-                    valorEmRisco = valorEmRisco.add(valor);
-                }
-                case VENCE_EM_7_DIAS -> {
-                    vencem7++;
-                    valorEmRisco = valorEmRisco.add(valor);
-                }
-                case VENCE_EM_30_DIAS -> {
-                    vencem30++;
-                    valorEmRisco = valorEmRisco.add(valor);
-                }
-                case SEM_VALIDADE -> semValidade++;
-                case VALIDO -> { }
-            }
+        ResumoValidadeLotesProjection resumo = loteEstoqueRepository.resumirValidade(
+                idEstabelecimento, hoje, hoje.plusDays(7), hoje.plusDays(30)
+        );
+        if (resumo == null) {
+            return new ResumoValidadeLotesResponseDto(
+                    hoje, 0L, 0L, 0L, 0L, 0L,
+                    BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                    BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+            );
         }
         return new ResumoValidadeLotesResponseDto(
-                hoje, lotes.size(), vencidos, vencem7, vencem30, semValidade,
-                valorVencido.setScale(2, RoundingMode.HALF_UP), valorEmRisco.setScale(2, RoundingMode.HALF_UP)
+                hoje,
+                zeroSeNulo(resumo.getLotesComSaldo()),
+                zeroSeNulo(resumo.getVencidos()),
+                zeroSeNulo(resumo.getVencemEm7Dias()),
+                zeroSeNulo(resumo.getVencemEm30Dias()),
+                zeroSeNulo(resumo.getSemValidade()),
+                zeroSeNulo(resumo.getValorVencido()).setScale(2, RoundingMode.HALF_UP),
+                zeroSeNulo(resumo.getValorEmRisco()).setScale(2, RoundingMode.HALF_UP)
         );
     }
 
-    private void reconciliarDivergentes(UUID idEstabelecimento) {
-        List<UUID> idsProdutos = loteEstoqueRepository.idsProdutosComLotesDivergentes(idEstabelecimento);
-        if (!idsProdutos.isEmpty()) {
-            estoqueRepository.findAllByProdutoIdInForUpdate(idsProdutos).forEach(controleLotes::reconciliar);
-            loteEstoqueRepository.flush();
-        }
+    private static long zeroSeNulo(Long valor) {
+        return valor == null ? 0L : valor;
+    }
+
+    private static BigDecimal zeroSeNulo(BigDecimal valor) {
+        return valor == null ? BigDecimal.ZERO : valor;
     }
 
     private Specification<LoteEstoqueEntity> doEstabelecimento(UUID idEstabelecimento) {

@@ -1,16 +1,32 @@
 package valhalla.core.stock.app.shared.exceptionhandler;
 
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.persistence.OptimisticLockException;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Path;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.MethodParameter;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.mock.http.MockHttpInputMessage;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
+import org.springframework.web.ErrorResponseException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import valhalla.core.stock.app.modules.caixa.exception.AutorizacaoCaixaNegadaException;
 import valhalla.core.stock.app.modules.caixa.exception.CaixaEstadoInvalidoException;
 import valhalla.core.stock.app.modules.caixa.exception.CaixaJaExisteException;
@@ -29,8 +45,10 @@ import valhalla.core.stock.app.modules.caixa.exception.TaxaPagamentoJaExisteExce
 import valhalla.core.stock.app.modules.caixa.exception.TerminalCaixaJaExisteException;
 import valhalla.core.stock.app.modules.caixa.exception.TerminalOcupadoPointException;
 import valhalla.core.stock.app.modules.caixa.exception.WebhookAssinaturaInvalidaException;
+import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaJaExisteException;
 import valhalla.core.stock.app.modules.estoque.exception.CategoriaPossuiProdutosException;
+import valhalla.core.stock.app.modules.estoque.exception.EstoqueReservadoConflitoException;
 import valhalla.core.stock.app.modules.estoque.exception.ProdutoPossuiMovimentacoesException;
 import valhalla.core.stock.app.shared.error.AccessConfigurationConflictException;
 import valhalla.core.stock.app.shared.error.CnpjAlreadyExistsException;
@@ -41,10 +59,13 @@ import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -113,6 +134,26 @@ class GlobalExceptionHandlerTest {
                 handler.handleProdutoPossuiMovimentacoes(new ProdutoPossuiMovimentacoesException("Produto com movimentações", new RuntimeException())),
                 HttpStatus.CONFLICT,
                 "Produto com movimentações"
+        );
+
+        ResponseEntity<ApiErrorResponse> conflitoReserva = handler.handleEstoqueReservadoConflito(
+                new EstoqueReservadoConflitoException(
+                        "Saldo livre insuficiente", "Vodka", new BigDecimal("4.000"), new BigDecimal("6")
+                )
+        );
+        assertStatus(conflitoReserva, HttpStatus.CONFLICT, "Saldo livre insuficiente");
+        assertThat(conflitoReserva.getBody().fieldErrors())
+                .containsEntry("estoque", "Saldo livre disponível de Vodka: 4");
+
+        assertStatus(
+                handler.handleOptimisticLock(new ObjectOptimisticLockingFailureException(EstoqueEntity.class, 1)),
+                HttpStatus.CONFLICT,
+                "O registro foi alterado simultaneamente por outra operação. Atualize os dados e tente novamente."
+        );
+        assertStatus(
+                handler.handleOptimisticLock(new OptimisticLockException("conflito")),
+                HttpStatus.CONFLICT,
+                "O registro foi alterado simultaneamente por outra operação. Atualize os dados e tente novamente."
         );
     }
 
@@ -260,6 +301,74 @@ class GlobalExceptionHandlerTest {
                 HttpStatus.BAD_REQUEST,
                 "Argumento inválido"
         );
+    }
+
+    @Test
+    void mapeiaFallbacksHttpIntegridadeEExcecaoInesperadaSemVazarDetalhes() {
+        assertThatThrownBy(() -> handler.handleAccessDenied(new AccessDeniedException("Negado")))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessage("Negado");
+
+        assertStatus(
+                handler.handleHttpMessageNotReadable(new HttpMessageNotReadableException(
+                        "JSON parse error: Unexpected character",
+                        new MockHttpInputMessage("{".getBytes(StandardCharsets.UTF_8))
+                )),
+                HttpStatus.BAD_REQUEST,
+                "Corpo da requisição inválido ou malformado"
+        );
+
+        ResponseEntity<ApiErrorResponse> missingParam = handler.handleMissingRequestParameter(
+                new MissingServletRequestParameterException("dias", "int")
+        );
+        assertStatus(missingParam, HttpStatus.BAD_REQUEST, "Parâmetro de consulta obrigatório ausente");
+        assertThat(missingParam.getBody().fieldErrors()).containsEntry("dias", "Parâmetro obrigatório");
+
+        ResponseEntity<ApiErrorResponse> integrity = handler.handleDataIntegrityViolation(
+                new DataIntegrityViolationException("ERROR: duplicate key value violates unique constraint \"uq_qualquer\"")
+        );
+        assertStatus(
+                integrity,
+                HttpStatus.CONFLICT,
+                "A operação violou uma restrição de integridade dos dados. Verifique os valores informados e tente novamente."
+        );
+        assertThat(integrity.getBody().message()).doesNotContain("uq_qualquer").doesNotContain("ERROR");
+
+        assertStatus(
+                handler.handleHttpErrorResponse(new NoResourceFoundException(HttpMethod.GET, "/inexistente", "")),
+                HttpStatus.NOT_FOUND,
+                "Recurso não encontrado"
+        );
+        assertStatus(
+                handler.handleHttpErrorResponse(new HttpRequestMethodNotSupportedException("DELETE", List.of("GET"))),
+                HttpStatus.METHOD_NOT_ALLOWED,
+                "Método HTTP não suportado para este endpoint"
+        );
+        assertStatus(
+                handler.handleHttpErrorResponse(new HttpMediaTypeNotSupportedException(
+                        MediaType.TEXT_PLAIN, List.of(MediaType.APPLICATION_JSON))),
+                HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                "Tipo de mídia não suportado"
+        );
+        assertStatus(
+                handler.handleHttpErrorResponse(new ErrorResponseException(
+                        HttpStatus.NOT_ACCEPTABLE,
+                        ProblemDetail.forStatus(HttpStatus.NOT_ACCEPTABLE),
+                        null
+                )),
+                HttpStatus.NOT_ACCEPTABLE,
+                HttpStatus.NOT_ACCEPTABLE.getReasonPhrase()
+        );
+
+        ResponseEntity<ApiErrorResponse> unexpected = handler.handleUnexpectedException(
+                new RuntimeException("SELECT * FROM segredo_interno")
+        );
+        assertStatus(
+                unexpected,
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Erro interno inesperado. Tente novamente mais tarde."
+        );
+        assertThat(unexpected.getBody().message()).doesNotContain("segredo_interno");
     }
 
     private void assertStatus(

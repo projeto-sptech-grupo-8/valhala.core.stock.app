@@ -20,6 +20,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 import valhalla.core.stock.app.modules.caixa.sessao.enums.OrigemAuditoriaCaixa;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Entity
 @Table(name = "auditoria_caixa")
@@ -95,7 +96,7 @@ public class AuditoriaCaixaEntity {
     @PrePersist
     private void prePersist() {
         if (ocorridoEm == null) {
-            ocorridoEm = LocalDateTime.now();
+            ocorridoEm = FusoHorarioOperacao.agora();
         }
         if (origem == null) {
             origem = OrigemAuditoriaCaixa.API;

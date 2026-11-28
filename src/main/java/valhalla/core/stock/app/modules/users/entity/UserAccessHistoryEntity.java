@@ -5,6 +5,7 @@ import lombok.*;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.time.LocalDateTime;
 
@@ -50,7 +51,7 @@ public class UserAccessHistoryEntity {
     @PrePersist
     private void prePersist() {
         if (occurredAt == null) {
-            occurredAt = LocalDateTime.now();
+            occurredAt = FusoHorarioOperacao.agora();
         }
     }
 }

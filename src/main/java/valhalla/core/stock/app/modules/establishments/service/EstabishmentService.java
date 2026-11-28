@@ -17,6 +17,7 @@ import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity
 import valhalla.core.stock.app.modules.establishments.repository.EstablishmentRepository;
 import valhalla.core.stock.app.shared.error.CnpjAlreadyExistsException;
 import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
+import valhalla.core.stock.app.shared.validation.ValidadorDocumentoFiscal;
 
 import java.util.Locale;
 import java.util.UUID;
@@ -58,6 +59,9 @@ public class EstabishmentService {
             String cnpjLimpo = dto.cnpj().replaceAll("\\D", "");
             if (cnpjLimpo.length() != 14) {
                 throw new IllegalArgumentException("O CNPJ deve conter 14 dígitos numéricos");
+            }
+            if (!ValidadorDocumentoFiscal.isCnpjValido(cnpjLimpo)) {
+                throw new IllegalArgumentException("O CNPJ informado é inválido");
             }
             if (!cnpjLimpo.equals(establishment.getCnpj())
                     && establishmentRepository.existsByCnpjAndIdNot(cnpjLimpo, establishment.getId())) {

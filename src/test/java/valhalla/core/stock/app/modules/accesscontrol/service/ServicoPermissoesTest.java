@@ -278,9 +278,38 @@ class ServicoPermissoesTest {
 
         servicoPermissoes.substituirSobrescritasPermissaoUsuario(usuario.getId(), novas, autenticacao);
 
+        verify(repositorioEstabelecimento, org.mockito.Mockito.times(2)).findByIdForUpdate(idEstabelecimento);
         verify(repositorioUsuario).save(usuario);
         verify(servicoEstadoToken).revokeAll(usuario.getId());
         assertThat(usuario.getFunctionalityOverrides()).hasSize(1);
+    }
+
+    @Test
+    void naoDevePermitirRemoverRevokeQueElevePermissaoAlemDoTetoDoAtor() {
+        FuncionalidadeEntity funcEditarProdutos = FuncionalidadeEntity.builder().code("PRODUTOS_EDITAR").build();
+        UserEntity usuario = usuario("Supervisor", Set.of(
+                UserFunctionalityOverrideEntity.builder()
+                        .functionality(funcEditarProdutos)
+                        .effect(PermissionEffect.REVOKE)
+                        .build()
+        ));
+        usuario.getProfile().setFunctionalities(Set.of(funcEditarProdutos));
+
+        JwtAuthenticationToken atorSemProdutosEditar = new JwtAuthenticationToken(
+                autenticacao.getToken(),
+                List.of(
+                        new org.springframework.security.core.authority.SimpleGrantedAuthority("USUARIOS_EDITAR"),
+                        new org.springframework.security.core.authority.SimpleGrantedAuthority("PRODUTOS_VISUALIZAR")
+                )
+        );
+        when(repositorioUsuario.findById(usuario.getId())).thenReturn(Optional.of(usuario));
+
+        assertThatThrownBy(() -> servicoPermissoes.substituirSobrescritasPermissaoUsuario(
+                usuario.getId(), Set.of(), atorSemProdutosEditar
+        )).isInstanceOf(AccessDeniedException.class);
+
+        verify(repositorioUsuario, never()).save(any());
+        verify(servicoEstadoToken, never()).revokeAll(any());
     }
 
     @Test
@@ -296,6 +325,7 @@ class ServicoPermissoesTest {
         when(repositorioUsuario.findAllByEstablishment_Id(idEstabelecimento)).thenReturn(List.of(admin1, admin2));
 
         assertDoesNotThrow(() -> servicoPermissoes.garantirUsuarioPodeSerDesativadoOuExcluido(admin1));
+        verify(repositorioEstabelecimento).findByIdForUpdate(idEstabelecimento);
     }
 
     @Test
@@ -306,6 +336,7 @@ class ServicoPermissoesTest {
         assertThatThrownBy(() -> servicoPermissoes.garantirUsuarioPodeSerDesativadoOuExcluido(adminUnico))
                 .isInstanceOf(AccessConfigurationConflictException.class)
                 .hasMessageContaining("último usuário ativo com USUARIOS_CRIAR");
+        verify(repositorioEstabelecimento).findByIdForUpdate(idEstabelecimento);
     }
 
     @Test

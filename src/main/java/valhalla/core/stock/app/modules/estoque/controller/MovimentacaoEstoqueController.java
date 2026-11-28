@@ -153,6 +153,8 @@ public class MovimentacaoEstoqueController {
             @ApiResponse(responseCode = "403", description = "Usuário sem permissão ou produto de outro estabelecimento.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
             @ApiResponse(responseCode = "404", description = "Produto ou estoque não encontrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "Saldo livre insuficiente devido a reservas em pedidos em andamento ou conflito de concorrência.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     public ResponseEntity<MovimentacaoResponseDto> registrarMovimentacao(
@@ -174,6 +176,8 @@ public class MovimentacaoEstoqueController {
             @ApiResponse(responseCode = "403", description = "Usuário sem permissão ou drink de outro estabelecimento.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
             @ApiResponse(responseCode = "404", description = "Drink, ingrediente ou estoque não encontrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "Saldo livre insuficiente devido a reservas em pedidos em andamento ou conflito de concorrência.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     public ResponseEntity<List<MovimentacaoResponseDto>> registrarSaidaDrink(

@@ -17,6 +17,8 @@ import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -210,6 +212,70 @@ class RelatorioIntegrationTest extends PostgresIntegrationTestSupport {
             assertThat(sheet.getRow(1).getCell(0).getStringCellValue()).isEqualTo("Cerveja Lata");
             assertThat(sheet.getRow(1).getCell(7).getStringCellValue()).isEqualTo("Recorrente");
         }
+    }
+
+    @Test
+    void curvaAbcNaoDuplicaProdutoQuandoCategoriaMudaEntreVendas() throws Exception {
+        vender("BALCAO", 0, cerveja, 1);
+        CategoriaEntity novaCategoria = categoria("Bebidas Especiais");
+        cerveja.setCategoria(novaCategoria);
+        produtoRepository.saveAndFlush(cerveja);
+        vender("BALCAO", 0, cerveja, 2);
+
+        String abc = relatorio("abc", 7);
+        List<Object> linhasCerveja = JsonPath.read(abc, "$.itens[?(@.nome == 'Cerveja Lata')]");
+        assertThat(linhasCerveja).hasSize(1);
+        assertThat((String) JsonPath.read(abc, "$.itens[0].categoria")).isEqualTo("Bebidas Especiais");
+        assertThat(linha(abc, "nome", "Cerveja Lata", "quantidade")).isEqualByComparingTo("3");
+        assertThat(linha(abc, "nome", "Cerveja Lata", "receita")).isEqualByComparingTo("60.00");
+        assertThat(linha(abc, "nome", "Cerveja Lata", "percentual")).isEqualByComparingTo("100.00");
+
+        String margem = relatorio("margem-categorias", 7);
+        assertThat(linha(margem, "categoria", "Bebidas", "receita")).isEqualByComparingTo("20.00");
+        assertThat(linha(margem, "categoria", "Bebidas Especiais", "receita")).isEqualByComparingTo("40.00");
+    }
+
+    @Test
+    void rupturaIncluiProdutoCriadoZeradoSemMovimentacoesEIgnoraReposicaoNoMesmoDia() throws Exception {
+        CategoriaEntity cat = categoria("SemMov");
+        ProdutoEntity criadoZerado = produtoPadrao("Produto Criado Zerado", cat, false, "0");
+        LocalDateTime tresDiasAtras = FusoHorarioOperacao.hoje().minusDays(3).atTime(10, 0);
+        jdbc.update("UPDATE produto SET criado_em = ? WHERE id = ?", Timestamp.valueOf(tresDiasAtras), criadoZerado.getId());
+
+        ProdutoEntity repostoMesmoDia = produtoPadrao("Reposto Mesmo Dia", cat, false, "5");
+        UUID usuario = userRepository.findByEmailIgnoreCase("gerente@meraki.com").orElseThrow().getId();
+        LocalDateTime hojeManha = FusoHorarioOperacao.hoje().atTime(10, 0);
+        jdbc.update("""
+                INSERT INTO movimentacao_estoque (estoque_id, usuario_id, tipo, quantidade, saldo_anterior,
+                                                  saldo_posterior, motivo, ocorrido_em)
+                SELECT e.id, ?, 'SAIDA', 5, 5, 0, 'Venda', ?
+                FROM estoque e WHERE e.produto_id = ?
+                """, usuario, Timestamp.valueOf(hojeManha), repostoMesmoDia.getId());
+        jdbc.update("""
+                INSERT INTO movimentacao_estoque (estoque_id, usuario_id, tipo, quantidade, saldo_anterior,
+                                                  saldo_posterior, motivo, ocorrido_em)
+                SELECT e.id, ?, 'ENTRADA', 5, 0, 5, 'Reposicao rapida', ?
+                FROM estoque e WHERE e.produto_id = ?
+                """, usuario, Timestamp.valueOf(hojeManha.plusMinutes(30)), repostoMesmoDia.getId());
+
+        String ruptura = relatorio("ruptura", 7);
+        assertThat(linha(ruptura, "nome", "Produto Criado Zerado", "dias")).isEqualByComparingTo("4");
+        assertThat(linha(ruptura, "nome", "Produto Criado Zerado", "ocorrencias")).isEqualByComparingTo("1");
+        assertThat(linha(ruptura, "nome", "Reposto Mesmo Dia", "dias")).isEqualByComparingTo("0");
+        assertThat(linha(ruptura, "nome", "Reposto Mesmo Dia", "ocorrencias")).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void perdasSuportaGranularidadeSemanalEMensal() throws Exception {
+        movimentar(cerveja, "PERDA", 1, "Quebrou", "QUEBRA").andExpect(status().isCreated());
+
+        String semanal = relatorio("perdas", 30);
+        assertThat((String) JsonPath.read(semanal, "$.granularidade")).isEqualTo("SEMANA");
+        assertThat((List<String>) JsonPath.read(semanal, "$.itens[*].motivo")).contains("Perda / quebra");
+
+        String mensal = relatorio("perdas", 90);
+        assertThat((String) JsonPath.read(mensal, "$.granularidade")).isEqualTo("MES");
+        assertThat((List<String>) JsonPath.read(mensal, "$.itens[*].motivo")).contains("Perda / quebra");
     }
 
     /** Venda no caixa pelo gerente; itens: pares (produto, quantidade). */

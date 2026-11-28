@@ -44,7 +44,7 @@ public interface MovimentacaoEstoqueRepository extends JpaRepository<Movimentaca
             join m.estoque e
             join e.produto p
             where p.estabelecimentoId = :idEstabelecimento
-            order by m.ocorridoEm desc
+            order by m.ocorridoEm desc, m.id desc
             """)
     List<MovimentacaoEstoqueEntity> listarRecentesParaDashboard(
             @Param("idEstabelecimento") UUID idEstabelecimento,

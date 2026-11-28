@@ -4,7 +4,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import valhalla.core.stock.app.modules.auth.entity.UserSessionEntity;
 import valhalla.core.stock.app.modules.auth.repository.UserSessionRepository;
+import valhalla.core.stock.app.modules.auth.security.CsrfTokenStore;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
+import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.shared.error.InvalidRefreshTokenException;
 
 import java.time.Instant;
@@ -18,6 +20,8 @@ import java.util.UUID;
 public class TokenStateService {
 
     private final UserSessionRepository userSessionRepository;
+    private final UserRepository userRepository;
+    private final CsrfTokenStore csrfTokenStore;
 
     public Optional<UUID> replace(
             UUID userId,
@@ -26,6 +30,7 @@ public class TokenStateService {
             Instant expiresAt,
             UserEntity user
     ) {
+        userRepository.findByIdForUpdate(userId);
         LocalDateTime expiration = LocalDateTime.ofInstant(expiresAt, ZoneOffset.UTC);
         Optional<UserSessionEntity> existing = userSessionRepository.findById(userId);
         Optional<UUID> previousRefreshJti = existing.map(UserSessionEntity::getRefreshJti);
@@ -86,6 +91,7 @@ public class TokenStateService {
         Optional<UUID> previousRefreshJti = userSessionRepository.findById(userId)
                 .map(UserSessionEntity::getRefreshJti);
         userSessionRepository.deleteById(userId);
+        previousRefreshJti.ifPresent(csrfTokenStore::remover);
         return previousRefreshJti;
     }
 }

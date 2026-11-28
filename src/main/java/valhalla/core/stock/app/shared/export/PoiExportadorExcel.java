@@ -23,23 +23,30 @@ import java.util.Map;
 public class PoiExportadorExcel implements ExportadorExcel {
 
     private static final int JANELA_STREAMING = 100;
+    private static final int LARGURA_MINIMA_COLUNA = 10 * 256;
+    private static final int MARGEM_CARACTERES_COLUNA = 4;
     private static final int LARGURA_MAXIMA_COLUNA = 12000;
+    private static final int COMPRIMENTO_MAXIMO_CARACTERES = LARGURA_MAXIMA_COLUNA / 256;
 
     @Override
     public <T> byte[] gerarPlanilha(String nomeAba, List<ColunaExcel<T>> colunas, List<T> registros) {
         SXSSFWorkbook workbook = new SXSSFWorkbook(JANELA_STREAMING);
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             SXSSFSheet sheet = workbook.createSheet(nomeAba);
-            sheet.trackAllColumnsForAutoSizing();
 
             CellStyle headerStyle = criarEstiloCabecalho(workbook);
             Map<FormatoCelulaExcel, CellStyle> estilos = criarEstilos(workbook);
+            int[] larguraMaximaCaracteres = new int[colunas.size()];
 
             Row header = sheet.createRow(0);
             for (int i = 0; i < colunas.size(); i++) {
+                String cabecalho = sanitizarFormula(colunas.get(i).cabecalho());
                 Cell cell = header.createCell(i);
-                cell.setCellValue(colunas.get(i).cabecalho());
+                cell.setCellValue(cabecalho);
                 cell.setCellStyle(headerStyle);
+                if (cabecalho != null) {
+                    larguraMaximaCaracteres[i] = Math.min(cabecalho.length(), COMPRIMENTO_MAXIMO_CARACTERES);
+                }
             }
 
             int rowIdx = 1;
@@ -48,13 +55,16 @@ public class PoiExportadorExcel implements ExportadorExcel {
                 for (int i = 0; i < colunas.size(); i++) {
                     ColunaExcel<T> coluna = colunas.get(i);
                     Object valor = coluna.extrator().apply(registro);
-                    escreverCelula(row.createCell(i), valor, coluna.formato(), estilos);
+                    int comprimento = escreverCelula(row.createCell(i), valor, coluna.formato(), estilos);
+                    if (comprimento > larguraMaximaCaracteres[i]) {
+                        larguraMaximaCaracteres[i] = Math.min(comprimento, COMPRIMENTO_MAXIMO_CARACTERES);
+                    }
                 }
             }
 
             for (int i = 0; i < colunas.size(); i++) {
-                sheet.autoSizeColumn(i);
-                int largura = Math.min(sheet.getColumnWidth(i) + 512, LARGURA_MAXIMA_COLUNA);
+                int larguraCalculada = (larguraMaximaCaracteres[i] + MARGEM_CARACTERES_COLUNA) * 256;
+                int largura = Math.max(LARGURA_MINIMA_COLUNA, Math.min(larguraCalculada, LARGURA_MAXIMA_COLUNA));
                 sheet.setColumnWidth(i, largura);
             }
 
@@ -72,38 +82,76 @@ public class PoiExportadorExcel implements ExportadorExcel {
         }
     }
 
-    private void escreverCelula(
+    private int escreverCelula(
             Cell cell,
             Object valor,
             FormatoCelulaExcel formato,
             Map<FormatoCelulaExcel, CellStyle> estilos
     ) {
         if (valor == null) {
-            return;
+            return 0;
         }
-        switch (formato) {
+        return switch (formato) {
             case INTEIRO -> {
                 if (valor instanceof Number numero) {
-                    cell.setCellValue(numero.longValue());
+                    long inteiro = numero.longValue();
+                    cell.setCellValue(inteiro);
                     cell.setCellStyle(estilos.get(FormatoCelulaExcel.INTEIRO));
+                    yield Long.toString(inteiro).length() + 3;
                 }
+                yield 0;
             }
             case DECIMAL, MOEDA -> {
                 if (valor instanceof Number numero) {
-                    cell.setCellValue(numero.doubleValue());
+                    double decimal = numero.doubleValue();
+                    cell.setCellValue(decimal);
                     cell.setCellStyle(estilos.get(formato));
+                    yield String.valueOf(decimal).length() + (formato == FormatoCelulaExcel.MOEDA ? 6 : 3);
                 }
+                yield 0;
             }
             case DATA_HORA -> {
                 if (valor instanceof LocalDateTime dataHora) {
                     cell.setCellValue(dataHora);
                     cell.setCellStyle(estilos.get(FormatoCelulaExcel.DATA_HORA));
-                } else {
-                    cell.setCellValue(valor.toString());
+                    yield 16;
                 }
+                String texto = sanitizarFormula(valor.toString());
+                cell.setCellValue(texto);
+                yield texto.length();
             }
-            case TEXTO -> cell.setCellValue(valor.toString());
+            case TEXTO -> {
+                String texto = sanitizarFormula(valor.toString());
+                cell.setCellValue(texto);
+                yield texto.length();
+            }
+        };
+    }
+
+    static String sanitizarFormula(String valor) {
+        if (valor == null || valor.isEmpty()) {
+            return valor;
         }
+        if (ehPrefixoFormula(valor.charAt(0))) {
+            return "'" + valor;
+        }
+        for (int i = 0; i < valor.length(); i++) {
+            char caractere = valor.charAt(i);
+            if (!Character.isWhitespace(caractere)) {
+                return ehPrefixoFormula(caractere) ? "'" + valor : valor;
+            }
+        }
+        return valor;
+    }
+
+    private static boolean ehPrefixoFormula(char caractere) {
+        return caractere == '='
+                || caractere == '+'
+                || caractere == '-'
+                || caractere == '@'
+                || caractere == '\t'
+                || caractere == '\r'
+                || caractere == '\n';
     }
 
     private Map<FormatoCelulaExcel, CellStyle> criarEstilos(Workbook workbook) {

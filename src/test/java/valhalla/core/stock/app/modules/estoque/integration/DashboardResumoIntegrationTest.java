@@ -28,35 +28,41 @@ class DashboardResumoIntegrationTest extends EstoqueIntegrationTestSupport {
     void retornaResumoDeEstoqueDoEstabelecimentoAutenticado() throws Exception {
         CategoriaEntity categoria = categoria("Bebidas");
         ProdutoEntity critico = produtoPadrao("Espumante", categoria, false, "3");
-        ProdutoEntity zerado = produtoPadrao("Gin", categoria, false, "0");
-        ProdutoEntity saudavel = produtoPadrao("Agua", categoria, false, "12");
+        ProdutoEntity zeradoFracionado = produtoPadrao("Gin", categoria, true, "0");
+        ProdutoEntity noLimiteSaudavel = produtoPadrao("Tonica", categoria, false, "6");
+        ProdutoEntity fracionadoComMovimentacao = produtoPadrao("Vodka", categoria, true, "1000");
         definirEstoqueMinimo(critico, "6");
-        definirEstoqueMinimo(zerado, "3");
-        definirEstoqueMinimo(saudavel, "6");
+        definirEstoqueMinimo(zeradoFracionado, "300");
+        definirEstoqueMinimo(noLimiteSaudavel, "6");
+        definirEstoqueMinimo(fracionadoComMovimentacao, "500");
 
         Cookie operador = autenticarComPermissoes(
                 "dashboard@meraki.com", "VISUALIZAR_ESTOQUE", "MOVIMENTAR_ESTOQUE"
         );
         registrarMovimentacao(critico, operador, "SAIDA", "1");
-        registrarMovimentacao(saudavel, operador, "ENTRADA", "1");
+        registrarMovimentacao(noLimiteSaudavel, operador, "ENTRADA", "1");
+        registrarMovimentacao(fracionadoComMovimentacao, operador, "SAIDA", "100");
 
         String mesAtual = YearMonth.now(ZoneId.of("America/Sao_Paulo")).toString();
         mockMvc.perform(get("/dashboard/resumo").cookie(operador))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.referencia.fusoHorario").value("America/Sao_Paulo"))
-                .andExpect(jsonPath("$.estoque.totalProdutos").value(3))
+                .andExpect(jsonPath("$.estoque.totalProdutos").value(4))
                 .andExpect(jsonPath("$.estoque.criticos").value(2))
                 .andExpect(jsonPath("$.estoque.zerados").value(1))
-                .andExpect(jsonPath("$.estoque.saudaveis").value(1))
-                .andExpect(jsonPath("$.estoque.saudePercentual").value(33))
+                .andExpect(jsonPath("$.estoque.saudaveis").value(2))
+                .andExpect(jsonPath("$.estoque.saudePercentual").value(50))
                 .andExpect(jsonPath("$.estoque.alertas.length()").value(2))
                 .andExpect(jsonPath("$.estoque.alertas[0].status").value("ZERADO"))
-                .andExpect(jsonPath("$.movimentacoes.ultimas.length()").value(2))
+                .andExpect(jsonPath("$.estoque.alertas[0].unidadeMedida").value("ML"))
+                .andExpect(jsonPath("$.estoque.alertas[1].status").value("CRITICO"))
+                .andExpect(jsonPath("$.movimentacoes.ultimas.length()").value(3))
+                .andExpect(jsonPath("$.movimentacoes.ultimas[0].unidadeMedida").value("ML"))
                 .andExpect(jsonPath("$.movimentacoes.serieMensal[5].mes").value(mesAtual))
                 .andExpect(jsonPath("$.movimentacoes.serieMensal[5].entradas").value(1))
-                .andExpect(jsonPath("$.movimentacoes.serieMensal[5].saidas").value(1))
+                .andExpect(jsonPath("$.movimentacoes.serieMensal[5].saidas").value(2))
                 .andExpect(jsonPath("$.financeiro.status").value("DISPONIVEL"))
-                .andExpect(jsonPath("$.caixa.status").value("INDISPONIVEL"));
+                .andExpect(jsonPath("$.caixa.status").value("DISPONIVEL"));
     }
 
     @Test
@@ -70,10 +76,10 @@ class DashboardResumoIntegrationTest extends EstoqueIntegrationTestSupport {
     }
 
     @Test
-    void trataEstoqueMinimoZeroComoNaoConfigurado() throws Exception {
+    void trataEstoqueMinimoZeroComoNaoConfiguradoEIncluiZeradosNosAlertas() throws Exception {
         CategoriaEntity categoria = categoria("Bebidas");
-        ProdutoEntity produto = produtoPadrao("Produto sem minimo", categoria, false, "0");
-        definirEstoqueMinimo(produto, "0");
+        ProdutoEntity comSaldoSemMinimo = produtoPadrao("Produto sem minimo", categoria, false, "5");
+        definirEstoqueMinimo(comSaldoSemMinimo, "0");
         Cookie operador = autenticarComPermissoes("minimo-zero@meraki.com", "VISUALIZAR_ESTOQUE");
 
         mockMvc.perform(get("/dashboard/resumo").cookie(operador))
@@ -83,7 +89,36 @@ class DashboardResumoIntegrationTest extends EstoqueIntegrationTestSupport {
                 .andExpect(jsonPath("$.estoque.produtosSemMinimoDefinido").value(1))
                 .andExpect(jsonPath("$.estoque.criticos").value(0))
                 .andExpect(jsonPath("$.estoque.zerados").value(0))
+                .andExpect(jsonPath("$.estoque.saudePercentual").value(100))
                 .andExpect(jsonPath("$.estoque.alertas.length()").value(0));
+
+        ProdutoEntity zeradoSemMinimo = produtoPadrao("Produto zerado sem minimo", categoria, false, "0");
+        definirEstoqueMinimo(zeradoSemMinimo, "0");
+
+        mockMvc.perform(get("/dashboard/resumo").cookie(operador))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estoque.totalProdutos").value(2))
+                .andExpect(jsonPath("$.estoque.produtosComMinimoDefinido").value(0))
+                .andExpect(jsonPath("$.estoque.produtosSemMinimoDefinido").value(2))
+                .andExpect(jsonPath("$.estoque.criticos").value(1))
+                .andExpect(jsonPath("$.estoque.zerados").value(1))
+                .andExpect(jsonPath("$.estoque.saudePercentual").value(50))
+                .andExpect(jsonPath("$.estoque.alertas.length()").value(1))
+                .andExpect(jsonPath("$.estoque.alertas[0].nome").value("Produto zerado sem minimo"))
+                .andExpect(jsonPath("$.estoque.alertas[0].status").value("ZERADO"));
+
+        ProdutoEntity saudavelComMinimo = produtoPadrao("Produto saudavel com minimo", categoria, false, "10");
+        definirEstoqueMinimo(saudavelComMinimo, "5");
+
+        mockMvc.perform(get("/dashboard/resumo").cookie(operador))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estoque.totalProdutos").value(3))
+                .andExpect(jsonPath("$.estoque.produtosComMinimoDefinido").value(1))
+                .andExpect(jsonPath("$.estoque.produtosSemMinimoDefinido").value(2))
+                .andExpect(jsonPath("$.estoque.criticos").value(1))
+                .andExpect(jsonPath("$.estoque.zerados").value(1))
+                .andExpect(jsonPath("$.estoque.saudaveis").value(1))
+                .andExpect(jsonPath("$.estoque.saudePercentual").value(50));
     }
 
     private void definirEstoqueMinimo(ProdutoEntity produto, String minimo) {

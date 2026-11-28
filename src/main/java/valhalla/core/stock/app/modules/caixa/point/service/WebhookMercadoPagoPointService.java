@@ -16,8 +16,10 @@ import valhalla.core.stock.app.modules.caixa.sessao.enums.OrigemAuditoriaCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity;
 import valhalla.core.stock.app.modules.caixa.point.enums.StatusProcessamentoWebhook;
 import valhalla.core.stock.app.modules.caixa.exception.IntegracaoMercadoPagoException;
+import valhalla.core.stock.app.modules.caixa.exception.WebhookAssinaturaInvalidaException;
 import valhalla.core.stock.app.modules.caixa.point.repository.EventoWebhookPagamentoRepository;
 import valhalla.core.stock.app.modules.caixa.pedido.repository.PagamentoPedidoRepository;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.time.LocalDateTime;
 import java.util.Locale;
@@ -29,6 +31,7 @@ public class WebhookMercadoPagoPointService {
 
     private static final Logger log = LoggerFactory.getLogger(WebhookMercadoPagoPointService.class);
     private static final String PROVEDOR_MERCADO_PAGO = "MERCADO_PAGO";
+    private static final long TIMEOUT_PROCESSAMENTO_SEGUNDOS = 60L;
 
     private final RateLimiterCaixaService rateLimiterCaixaService;
     private final ValidadorAssinaturaWebhookMercadoPago validadorAssinatura;
@@ -71,12 +74,26 @@ public class WebhookMercadoPagoPointService {
         JsonNode payloadNode = parsearPayloadSeguro(rawPayload);
         String tipoEvento = primeiroNaoVazio(extrairTexto(payloadNode, "type"), normalizar(typeQuery));
         String acao = extrairTexto(payloadNode, "action");
+        String dataIdQueryNorm = normalizar(dataIdQuery);
+        String idQueryNorm = normalizar(idQuery);
+        if (dataIdQueryNorm != null && idQueryNorm != null && !dataIdQueryNorm.equalsIgnoreCase(idQueryNorm)) {
+            throw new WebhookAssinaturaInvalidaException(
+                    "Divergência entre os parâmetros data.id e id na query do webhook"
+            );
+        }
+
+        String dataIdParamQuery = primeiroNaoVazio(dataIdQueryNorm, idQueryNorm);
         String dataIdJson = extrairTexto(payloadNode.path("data"), "id");
-        String dataIdAssinatura = primeiroNaoVazio(normalizar(dataIdQuery), normalizar(idQuery), dataIdJson);
+        if (dataIdParamQuery != null && dataIdJson != null && !dataIdParamQuery.equalsIgnoreCase(dataIdJson)) {
+            throw new WebhookAssinaturaInvalidaException(
+                    "Divergência entre data.id da query e do corpo JSON do webhook"
+            );
+        }
 
-        validadorAssinatura.validar(xSignature, xRequestId, dataIdAssinatura);
+        String dataIdValidado = primeiroNaoVazio(dataIdParamQuery, dataIdJson);
+        validadorAssinatura.validar(xSignature, xRequestId, dataIdValidado);
 
-        String recursoExternoId = primeiroNaoVazio(dataIdJson, normalizar(dataIdQuery), normalizar(idQuery));
+        String recursoExternoId = dataIdValidado;
         String requestIdNormalizado = normalizar(xRequestId);
         String eventoExternoId = primeiroNaoVazio(
                 extrairTexto(payloadNode, "id"),
@@ -230,8 +247,7 @@ public class WebhookMercadoPagoPointService {
         Optional<EventoWebhookPagamentoEntity> opt = eventoWebhookRepository
                 .buscarPorProvedorEEventoParaAtualizacao(PROVEDOR_MERCADO_PAGO, eventoExternoId);
         if (opt.isEmpty() && requestId != null) {
-            opt = eventoWebhookRepository.findByProvedorAndRequestId(PROVEDOR_MERCADO_PAGO, requestId)
-                    .flatMap(e -> eventoWebhookRepository.buscarPorIdParaAtualizacao(e.getId()));
+            opt = eventoWebhookRepository.buscarPorProvedorERequestIdParaAtualizacao(PROVEDOR_MERCADO_PAGO, requestId);
         }
         if (opt.isEmpty()) {
             return null;
@@ -242,9 +258,19 @@ public class WebhookMercadoPagoPointService {
                 || existente.getStatusProcessamento() == StatusProcessamentoWebhook.IGNORADO) {
             return new ClaimWebhookResult(existente.getId(), false, existente.getStatusProcessamento());
         }
+        if (existente.getStatusProcessamento() == StatusProcessamentoWebhook.PROCESSANDO) {
+            LocalDateTime referencia = existente.getAtualizadoEm() != null
+                    ? existente.getAtualizadoEm()
+                    : existente.getRecebidoEm();
+            if (referencia != null
+                    && referencia.isAfter(FusoHorarioOperacao.agora().minusSeconds(TIMEOUT_PROCESSAMENTO_SEGUNDOS))) {
+                return new ClaimWebhookResult(existente.getId(), false, StatusProcessamentoWebhook.PROCESSANDO);
+            }
+        }
 
         existente.setStatusProcessamento(StatusProcessamentoWebhook.PROCESSANDO);
         existente.setTentativas(existente.getTentativas() + 1);
+        existente.setAtualizadoEm(FusoHorarioOperacao.agora());
         existente.setErro(null);
         eventoWebhookRepository.saveAndFlush(existente);
         return new ClaimWebhookResult(existente.getId(), true, StatusProcessamentoWebhook.PROCESSANDO);
@@ -271,7 +297,7 @@ public class WebhookMercadoPagoPointService {
             }
             if (statusDestino == StatusProcessamentoWebhook.PROCESSADO
                     || statusDestino == StatusProcessamentoWebhook.IGNORADO) {
-                entity.setProcessadoEm(LocalDateTime.now());
+                entity.setProcessadoEm(FusoHorarioOperacao.agora());
             }
             entity.setErro(erro);
             eventoWebhookRepository.saveAndFlush(entity);

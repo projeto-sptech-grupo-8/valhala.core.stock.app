@@ -78,7 +78,7 @@ public class RelatorioService {
     /** Período = os últimos {@code dias} dias, incluindo hoje. */
     private <T> RelatorioResponseDto<T> montar(int dias, Consulta<T> consulta) {
         UUID estab = obterIdEstabelecimentoAutenticado();
-        LocalDateTime ate = LocalDateTime.now(FUSO_HORARIO_OPERACAO).toLocalDate().plusDays(1).atStartOfDay();
+        LocalDateTime ate = FusoHorarioOperacao.hoje().plusDays(1).atStartOfDay();
         LocalDateTime de = ate.minusDays(dias);
         return new RelatorioResponseDto<>(
                 new RelatorioResponseDto.Referencia(dias, de.toLocalDate(), ate.toLocalDate().minusDays(1),

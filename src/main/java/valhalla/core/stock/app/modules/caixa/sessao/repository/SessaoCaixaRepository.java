@@ -45,6 +45,21 @@ public interface SessaoCaixaRepository
             @Param("status") StatusSessaoCaixa status
     );
 
+    @Query("""
+            select s.id
+            from SessaoCaixaEntity s
+            where s.estabelecimentoId = :estabelecimentoId
+              and s.operadorUsuarioId = :operadorUsuarioId
+              and s.status = :status
+            order by s.abertaEm desc
+            """)
+    List<UUID> buscarIdsPorOperadorEStatus(
+            @Param("estabelecimentoId") UUID estabelecimentoId,
+            @Param("operadorUsuarioId") UUID operadorUsuarioId,
+            @Param("status") StatusSessaoCaixa status,
+            org.springframework.data.domain.Pageable pageable
+    );
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from SessaoCaixaEntity s where s.id = :id")
     Optional<SessaoCaixaEntity> buscarParaAtualizacao(@Param("id") UUID id);

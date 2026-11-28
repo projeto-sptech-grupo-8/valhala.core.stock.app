@@ -15,6 +15,8 @@ public interface MercadoPagoPointClient {
 
     OrderPointResultado cancelarOrder(String orderId, String chaveIdempotencia);
 
+    OrderPointResultado estornarOrder(String orderId, String chaveIdempotencia);
+
     List<TerminalMercadoPagoDto> listarTerminais();
 
     TerminalMercadoPagoDto atualizarModoOperacaoTerminal(

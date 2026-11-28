@@ -10,6 +10,7 @@ import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoLoteEntity;
 import valhalla.core.stock.app.modules.estoque.repository.LoteEstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoLoteRepository;
 import valhalla.core.stock.app.modules.estoque.strategy.PoliticaLote;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -46,7 +47,7 @@ public class ControleLotesEstoque {
             LoteEstoqueRepository loteEstoqueRepository,
             MovimentacaoLoteRepository movimentacaoLoteRepository
     ) {
-        this(loteEstoqueRepository, movimentacaoLoteRepository, Clock.systemDefaultZone());
+        this(loteEstoqueRepository, movimentacaoLoteRepository, FusoHorarioOperacao.relogio());
     }
 
     ControleLotesEstoque(
@@ -72,6 +73,17 @@ public class ControleLotesEstoque {
      * antes do lock ou em transações read-only.
      */
     public BigDecimal saldoNaoVencidoDisponivel(EstoqueEntity estoque) {
+        BigDecimal reservado = estoque.getQuantidadeReservada() == null
+                ? BigDecimal.ZERO
+                : estoque.getQuantidadeReservada();
+        return saldoNaoVencidoTotal(estoque).subtract(reservado).max(BigDecimal.ZERO);
+    }
+
+    /**
+     * Soma o saldo físico não vencido do estoque (incluindo eventual saldo ainda não vinculado a lotes,
+     * tratado como SEM-LOTE), sem descontar a quantidade reservada.
+     */
+    public BigDecimal saldoNaoVencidoTotal(EstoqueEntity estoque) {
         List<LoteEstoqueEntity> lotes = estoque.getId() == null
                 ? List.of()
                 : loteEstoqueRepository.findAllByEstoqueId(estoque.getId());
@@ -88,13 +100,9 @@ public class ControleLotesEstoque {
         BigDecimal saldoAtual = estoque.getQuantidadeAtual() == null ? BigDecimal.ZERO : estoque.getQuantidadeAtual();
         BigDecimal diferenca = saldoAtual.subtract(somaTodos);
         // Espelha reconciliar(): saldo ainda sem lote cadastrado corresponde a SEM-LOTE (sem validade).
-        BigDecimal saldoValido = diferenca.signum() > 0
+        return diferenca.signum() > 0
                 ? somaValidos.add(diferenca)
                 : somaValidos.min(saldoAtual);
-        BigDecimal reservado = estoque.getQuantidadeReservada() == null
-                ? BigDecimal.ZERO
-                : estoque.getQuantidadeReservada();
-        return saldoValido.subtract(reservado).max(BigDecimal.ZERO);
     }
 
     /**

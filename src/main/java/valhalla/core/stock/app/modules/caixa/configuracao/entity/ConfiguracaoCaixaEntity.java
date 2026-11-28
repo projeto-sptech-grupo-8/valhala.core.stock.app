@@ -19,6 +19,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 import valhalla.core.stock.app.modules.caixa.configuracao.enums.PoliticaJurosCaixa;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Entity
 @Table(
@@ -97,7 +98,7 @@ public class ConfiguracaoCaixaEntity {
 
     @PrePersist
     private void prePersist() {
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         if (criadoEm == null) {
             criadoEm = agora;
         }
@@ -108,6 +109,6 @@ public class ConfiguracaoCaixaEntity {
 
     @PreUpdate
     private void preUpdate() {
-        atualizadoEm = LocalDateTime.now();
+        atualizadoEm = FusoHorarioOperacao.agora();
     }
 }

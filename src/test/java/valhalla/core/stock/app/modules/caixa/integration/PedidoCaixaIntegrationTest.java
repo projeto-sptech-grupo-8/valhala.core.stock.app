@@ -11,6 +11,8 @@ import valhalla.core.stock.app.modules.caixa.configuracao.entity.CaixaEntity;
 import valhalla.core.stock.app.modules.caixa.configuracao.entity.ConfiguracaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.configuracao.enums.FormaPagamentoCaixa;
 import valhalla.core.stock.app.modules.caixa.configuracao.entity.TaxaPagamentoEntity;
+import valhalla.core.stock.app.modules.caixa.sessao.entity.MovimentacaoCaixaEntity;
+import valhalla.core.stock.app.modules.caixa.sessao.enums.TipoMovimentacaoCaixa;
 import valhalla.core.stock.app.modules.estoque.entity.CategoriaEntity;
 import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.LoteEstoqueEntity;
@@ -444,7 +446,7 @@ class PedidoCaixaIntegrationTest extends CaixaIntegrationTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2));
 
-        // Conciliação manual aprovando o pagamento em cartão -> Pedido passa para CONCLUIDO e baixa estoque!
+        // Conciliação manual aprovando exige CAIXA_RESOLVER_DIVERGENCIA (operador sem permissão -> 403)
         mockMvc.perform(post("/caixa/pedidos/{pedidoId}/pagamentos/{pagamentoId}/conciliacao", pedidoId, pagamentoManualId)
                         .cookie(operador.accessToken())
                         .with(csrf(operador))
@@ -455,6 +457,21 @@ class PedidoCaixaIntegrationTest extends CaixaIntegrationTestSupport {
                                   "motivo": "Comprovante POS conferido"
                                 }
                                 """))
+                .andExpect(status().isForbidden());
+
+        // Conciliação manual aprovada por gerente -> Pedido passa para CONCLUIDO e baixa estoque!
+        mockMvc.perform(post("/caixa/pedidos/{pedidoId}/pagamentos/{pagamentoId}/conciliacao", pedidoId, pagamentoManualId)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "aprovado": true,
+                                  "motivo": "Comprovante POS conferido",
+                                  "autorizadorEmail": "gerente.estorno@meraki.com",
+                                  "autorizadorSenha": "%s"
+                                }
+                                """.formatted(SENHA)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CONCLUIDO"))
                 .andExpect(jsonPath("$.totalPago").value(80.0))
@@ -679,6 +696,162 @@ class PedidoCaixaIntegrationTest extends CaixaIntegrationTestSupport {
                         org.assertj.core.groups.Tuple.tuple("LOTE-PROXIMO", new BigDecimal("2.000")),
                         org.assertj.core.groups.Tuple.tuple("LOTE-DISTANTE", new BigDecimal("5.000"))
                 );
+    }
+
+    @Test
+    void descontoEmPagamentoParcialConcluiPedidoEstornoIndividualDestravaEEstornoEmDinheiroProtegeGaveta()
+            throws Exception {
+        CaixaEntity caixa = caixa(estabelecimento, "Caixa Regressao Onda2");
+        ConfiguracaoCaixaEntity config = configuracao(estabelecimento);
+        config.setLimiteDescontoPercentual(new BigDecimal("10.00"));
+        config.setLimiteDescontoValor(new BigDecimal("10.00"));
+        configuracaoCaixaRepository.saveAndFlush(config);
+
+        UsuarioAutenticado gerente = autenticarGerente("gerente.onda2@meraki.com");
+        UsuarioAutenticado operador = autenticarComPermissoes("operador.onda2@meraki.com", PERMISSOES_ATENDENTE);
+
+        String sessao1Id = abrirSessao(operador, caixa.getId(), "20.00");
+
+        CategoriaEntity cat = categoria("Destilados Onda2");
+        ProdutoEntity gin = produtoPadrao("Gin 750ml", cat, false, "40.00", "50.00", null, "10.000");
+
+        // 1) Desconto acima do limite em PAGAMENTO_PARCIAL zera o saldo restante e conclui o pedido automaticamente
+        MvcResult p1Res = mockMvc.perform(post("/caixa/pedidos")
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "canal": "BALCAO",
+                                  "itens": [{"produtoId": "%s", "quantidade": 1}]
+                                }
+                                """.formatted(gin.getId())))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String pedido1Id = JsonPath.read(p1Res.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(post("/caixa/pedidos/{id}/pagamentos", pedido1Id)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"forma\":\"DINHEIRO\",\"valor\":30.00,\"valorRecebido\":30.00}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PAGAMENTO_PARCIAL"));
+
+        mockMvc.perform(put("/caixa/pedidos/{id}/desconto", pedido1Id)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tipoDesconto\":\"VALOR\",\"valorDescontoInformado\":20.00,\"motivo\":\"Acordo cliente\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.statusDesconto").value("PENDENTE_AUTORIZACAO"));
+
+        mockMvc.perform(post("/caixa/pedidos/{id}/desconto/decisao", pedido1Id)
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "aprovado": true,
+                                  "observacao": "Autorizado pelo gerente"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.statusDesconto").value("APROVADO"))
+                .andExpect(jsonPath("$.status").value("CONCLUIDO"))
+                .andExpect(jsonPath("$.saldoRestante").value(0.0));
+
+        assertThat(estoqueRepository.findByProdutoId(gin.getId()).orElseThrow().getQuantidadeAtual())
+                .isEqualByComparingTo("9.000");
+
+        // 2) Pedido em PAGAMENTO_PARCIAL destravado por estorno individual de pagamento + posterior cancelamento
+        MvcResult p2Res = mockMvc.perform(post("/caixa/pedidos")
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "canal": "BALCAO",
+                                  "itens": [{"produtoId": "%s", "quantidade": 1}]
+                                }
+                                """.formatted(gin.getId())))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String pedido2Id = JsonPath.read(p2Res.getResponse().getContentAsString(), "$.id");
+
+        MvcResult pag2Res = mockMvc.perform(post("/caixa/pedidos/{id}/pagamentos", pedido2Id)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"forma\":\"DINHEIRO\",\"valor\":25.00,\"valorRecebido\":25.00}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PAGAMENTO_PARCIAL"))
+                .andReturn();
+        String pag2Id = JsonPath.read(pag2Res.getResponse().getContentAsString(), "$.pagamentos[0].id");
+
+        mockMvc.perform(post("/caixa/pedidos/{pedidoId}/pagamentos/{pagamentoId}/estorno", pedido2Id, pag2Id)
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"motivo\":\"Cliente mudou forma de pagamento\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("EM_ATENDIMENTO"))
+                .andExpect(jsonPath("$.totalPago").value(0.0))
+                .andExpect(jsonPath("$.pagamentos[0].status").value("ESTORNADO"));
+
+        mockMvc.perform(post("/caixa/pedidos/{id}/cancelamento", pedido2Id)
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"motivo\":\"Pedido descartado após estorno parcial\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELADO"));
+
+        // 3) Estorno em dinheiro da sessão 1 após sangria deixando caixa abaixo do valor -> bloqueado (409)
+        // Sessão 1 tem fundo 20 + venda p1 (30) = 50. Sangria de 40 deixa apenas 10 -> estorno de 30 falha com 409!
+        mockMvc.perform(post("/caixa/sessoes/{id}/movimentacoes", sessao1Id)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tipo\":\"SANGRIA\",\"valor\":40.00,\"motivo\":\"Retirada parcial\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/caixa/pedidos/{id}/estorno", pedido1Id)
+                        .cookie(gerente.accessToken())
+                        .with(csrf(gerente))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"motivo\":\"Tentativa sem saldo na gaveta\"}"))
+                .andExpect(status().isConflict());
+
+        // 4) Fecha sessão 1 (com 10 contado), abre sessão 2 com fundo 100 e estorna pedido 1 -> grava SANGRIA na sessão 2!
+        mockMvc.perform(post("/caixa/sessoes/{id}/fechamento", sessao1Id)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"dinheiroContado\":10.00}"))
+                .andExpect(status().isOk());
+
+        String sessao2Id = abrirSessao(operador, caixa.getId(), "100.00");
+        mockMvc.perform(post("/caixa/pedidos/{id}/estorno", pedido1Id)
+                        .cookie(operador.accessToken())
+                        .with(csrf(operador))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "motivo": "Estorno em sessão seguinte",
+                                  "autorizadorEmail": "gerente.onda2@meraki.com",
+                                  "autorizadorSenha": "%s"
+                                }
+                                """.formatted(SENHA)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ESTORNADO"));
+
+        List<MovimentacaoCaixaEntity> movsSessao2 = movimentacaoCaixaRepository
+                .findBySessaoCaixaIdOrderByOcorridoEmAsc(UUID.fromString(sessao2Id));
+        assertThat(movsSessao2).anyMatch(m ->
+                m.getTipo() == TipoMovimentacaoCaixa.SANGRIA
+                        && m.getValor().compareTo(new BigDecimal("30.00")) == 0
+        );
     }
 
     private String abrirSessao(UsuarioAutenticado usuario, UUID caixaId, String fundoTroco) throws Exception {

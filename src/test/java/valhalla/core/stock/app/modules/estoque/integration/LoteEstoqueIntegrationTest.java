@@ -14,6 +14,7 @@ import valhalla.core.stock.app.modules.estoque.entity.ComposicaoDrinkEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.UnidadeConsumoDrink;
 import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkRepository;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -29,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 class LoteEstoqueIntegrationTest extends EstoqueIntegrationTestSupport {
 
-    private static final LocalDate HOJE = LocalDate.now();
+    private static final LocalDate HOJE = FusoHorarioOperacao.hoje();
 
     @Autowired
     private ComposicaoDrinkRepository composicaoDrinkRepository;
@@ -148,19 +149,22 @@ class LoteEstoqueIntegrationTest extends EstoqueIntegrationTestSupport {
     }
 
     @Test
-    void saldoAnteriorAosLotesApareceComoSemLoteEESaiDepoisDosLotesComValidade() throws Exception {
+    void consultaDeLotesNaoReconciliaEmLeituraEMovimentacaoReconciliaSaldoAnteriorParaSemLote() throws Exception {
         ProdutoEntity produto = produtoPadrao("Red Bull", categoria("Energéticos"), false, "10");
         Cookie operador = operador("lote-legado@meraki.com");
 
         mockMvc.perform(get("/lotes").param("produtoId", produto.getId().toString()).cookie(operador))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.itens[0].codigo").value("SEM-LOTE"))
-                .andExpect(jsonPath("$.itens[0].quantidadeAtual").value(10))
-                .andExpect(jsonPath("$.itens[0].situacao").value("SEM_VALIDADE"));
+                .andExpect(jsonPath("$.totalItens").value(0));
 
         entrada(operador, produto, "5", null, HOJE.plusDays(15))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.lotes[0].codigo").value("VAL-" + HOJE.plusDays(15)));
+
+        mockMvc.perform(get("/lotes").param("produtoId", produto.getId().toString()).cookie(operador))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItens").value(2));
+
         registrar(operador, saida(produto, "SAIDA", "7"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.lotes[0].codigo").value("VAL-" + HOJE.plusDays(15)))
@@ -216,29 +220,38 @@ class LoteEstoqueIntegrationTest extends EstoqueIntegrationTestSupport {
 
     @Test
     void filtroPorSituacaoEResumoDeValidade() throws Exception {
-        ProdutoEntity produto = produtoPadrao("Heineken 600ml", categoria("Cervejas"), false, "0");
+        CategoriaEntity cervejas = categoria("Cervejas");
+        ProdutoEntity produto = produtoPadrao("Heineken 600ml", cervejas, false, "0");
+        ProdutoEntity vodka = produtoPadrao("Vodka 1L", cervejas, true, "0");
+        ProdutoEntity inativo = produtoPadrao("Inativo", cervejas, false, "0");
         Cookie operador = operador("lote-resumo@meraki.com");
         entrada(operador, produto, "1", "VENCIDO", HOJE.minusDays(3)).andExpect(status().isCreated());
         entrada(operador, produto, "2", "SETE", HOJE.plusDays(7)).andExpect(status().isCreated());
         entrada(operador, produto, "3", "TRINTA", HOJE.plusDays(30)).andExpect(status().isCreated());
         entrada(operador, produto, "4", "LONGE", HOJE.plusDays(200)).andExpect(status().isCreated());
+        entrada(operador, produto, "2", null, null).andExpect(status().isCreated());
+        // fracionado: precoCusto = 10, volume = 1000ml -> 500ml = 5.00
+        entrada(operador, vodka, "500", "VODKA-VENC", HOJE.minusDays(1)).andExpect(status().isCreated());
+        entrada(operador, inativo, "10", "INATIVO-VENC", HOJE.minusDays(1)).andExpect(status().isCreated());
+        inativo.setAtivo(false);
+        produtoRepository.saveAndFlush(inativo);
 
         mockMvc.perform(get("/lotes").param("situacao", "VENCE_EM_7_DIAS").cookie(operador))
                 .andExpect(jsonPath("$.totalItens").value(1))
                 .andExpect(jsonPath("$.itens[0].codigo").value("SETE"));
         mockMvc.perform(get("/lotes").param("venceEmDias", "30").cookie(operador))
-                .andExpect(jsonPath("$.totalItens").value(3))
+                .andExpect(jsonPath("$.totalItens").value(5))
                 .andExpect(jsonPath("$.itens[0].codigo").value("VENCIDO"));
 
-        // custo 10 por unidade
         mockMvc.perform(get("/lotes/resumo").cookie(operador))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.lotesComSaldo").value(4))
-                .andExpect(jsonPath("$.vencidos").value(1))
+                .andExpect(jsonPath("$.lotesComSaldo").value(6))
+                .andExpect(jsonPath("$.vencidos").value(2))
                 .andExpect(jsonPath("$.vencemEm7Dias").value(1))
                 .andExpect(jsonPath("$.vencemEm30Dias").value(1))
-                .andExpect(jsonPath("$.valorVencido").value(10.0))
-                .andExpect(jsonPath("$.valorEmRisco").value(60.0));
+                .andExpect(jsonPath("$.semValidade").value(1))
+                .andExpect(jsonPath("$.valorVencido").value(15.0))
+                .andExpect(jsonPath("$.valorEmRisco").value(65.0));
     }
 
     private Cookie operador(String email) throws Exception {

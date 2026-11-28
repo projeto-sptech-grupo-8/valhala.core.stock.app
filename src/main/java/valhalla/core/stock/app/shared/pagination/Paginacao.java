@@ -2,6 +2,7 @@ package valhalla.core.stock.app.shared.pagination;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import java.util.Set;
 
@@ -24,6 +25,10 @@ public final class Paginacao {
         if (!camposPermitidos.contains(ordenarPor)) {
             throw new IllegalArgumentException("Campo de ordenação inválido: " + ordenarPor);
         }
-        return PageRequest.of(pagina, tamanho, direcao.paraSpringData(), ordenarPor);
+        Sort.Direction direcaoSpring = direcao.paraSpringData();
+        Sort ordenacao = "id".equals(ordenarPor)
+                ? Sort.by(direcaoSpring, "id")
+                : Sort.by(direcaoSpring, ordenarPor).and(Sort.by(direcaoSpring, "id"));
+        return PageRequest.of(pagina, tamanho, ordenacao);
     }
 }

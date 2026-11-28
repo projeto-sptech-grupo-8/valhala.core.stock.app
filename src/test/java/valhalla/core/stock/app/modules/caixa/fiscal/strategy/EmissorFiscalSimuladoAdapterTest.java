@@ -166,4 +166,98 @@ class EmissorFiscalSimuladoAdapterTest {
         assertThat(cancelamento.dadosFiscaisAtualizados().get("justificativaCancelamento").asText())
                 .isEqualTo("Cancelamento solicitado por erro no CPF do consumidor");
     }
+
+    @Test
+    void cobreMapeamentosPagamentoSerieNulaCnpjCurtoSemDestinatarioECancelamentoComDadosExistentes() {
+        assertThat(adapter.codigoProvedor()).isEqualTo("INTERNO");
+        assertThat(EmissorFiscalSimuladoAdapter.mapearCodigoPagamentoSefaz(FormaPagamentoCaixa.DINHEIRO)).isEqualTo("01");
+        assertThat(EmissorFiscalSimuladoAdapter.mapearCodigoPagamentoSefaz(FormaPagamentoCaixa.CREDITO)).isEqualTo("03");
+        assertThat(EmissorFiscalSimuladoAdapter.mapearCodigoPagamentoSefaz(FormaPagamentoCaixa.DEBITO)).isEqualTo("04");
+        assertThat(EmissorFiscalSimuladoAdapter.mapearCodigoPagamentoSefaz(FormaPagamentoCaixa.PIX)).isEqualTo("17");
+        assertThat(EmissorFiscalSimuladoAdapter.mapearCodigoPagamentoSefaz(null)).isEqualTo("99");
+
+        EstablishmentEntity estabelecimento = EstablishmentEntity.builder()
+                .id(UUID.randomUUID())
+                .corporateName("Adega <Teste> \"A\" 'B'")
+                .tradeName(null)
+                .cnpj("123")
+                .build();
+
+        PedidoEntity pedido = new PedidoEntity();
+        pedido.setId(UUID.randomUUID());
+        pedido.setEstabelecimentoId(estabelecimento.getId());
+        pedido.setNumero(9L);
+        pedido.setStatus(StatusPedidoCaixa.CONCLUIDO);
+        pedido.setSubtotal(new BigDecimal("25.00"));
+        pedido.setDesconto(BigDecimal.ZERO);
+        pedido.setTotal(new BigDecimal("25.00"));
+
+        ItemPedidoEntity item = new ItemPedidoEntity();
+        item.setId(1L);
+        item.setPedidoId(pedido.getId());
+        item.setProdutoId(UUID.randomUUID());
+        item.setDescricaoProduto("Água Mineral");
+        item.setQuantidade(BigDecimal.ONE);
+        item.setPrecoUnitario(new BigDecimal("25.00"));
+        item.setSubtotal(new BigDecimal("25.00"));
+
+        PagamentoPedidoEntity pagPix = new PagamentoPedidoEntity();
+        pagPix.setId(UUID.randomUUID());
+        pagPix.setPedidoId(pedido.getId());
+        pagPix.setForma(FormaPagamentoCaixa.PIX);
+        pagPix.setStatus(StatusPagamentoPedido.APROVADO);
+        pagPix.setValor(new BigDecimal("25.00"));
+        pagPix.setValorRecebido(null);
+        pagPix.setValorTroco(null);
+
+        // Sem dataEmissao, serie invalida, sem sku/unidade, sem desconto, sem contraparteDocumento -> fallback serie "1"
+        ResultadoEmissaoFiscal semDest = adapter.emitirNfce(new SolicitacaoEmissaoFiscal(
+                estabelecimento, pedido, 1L, "abc", null, null, null,
+                List.of(new ItemEmissaoFiscal(
+                        item, ProdutoTipo.PADRAO, " ", " ",
+                        new BigDecimal("25.00"), BigDecimal.ZERO, new BigDecimal("25.00")
+                )),
+                List.of(pagPix)
+        ));
+        assertThat(semDest.serie()).isEqualTo("1");
+        assertThat(semDest.xmlConteudo())
+                .doesNotContain("<dest>")
+                .doesNotContain("<vDesc>0.00</vDesc></prod>")
+                .doesNotContain("<vTroco>")
+                .contains("<tPag>17</tPag>")
+                .contains("<CNPJ>00000000000123</CNPJ>")
+                .contains("&lt;Teste&gt; &quot;A&quot; &apos;B&apos;");
+
+        // serie "0" -> "1"; serie "002" -> "2"; contraparte CNPJ com nome em branco
+        ResultadoEmissaoFiscal serieZero = adapter.emitirNfce(new SolicitacaoEmissaoFiscal(
+                estabelecimento, pedido, 2L, "0", "12345678000199", "   ", null,
+                List.of(new ItemEmissaoFiscal(
+                        item, ProdutoTipo.PADRAO, "SKU-X", "UN",
+                        new BigDecimal("25.00"), null, new BigDecimal("25.00")
+                )),
+                List.of(pagPix)
+        ));
+        assertThat(serieZero.serie()).isEqualTo("1");
+        assertThat(serieZero.xmlConteudo()).contains("<CNPJ>12345678000199</CNPJ>").doesNotContain("<xNome></xNome>");
+
+        ResultadoEmissaoFiscal serieDois = adapter.emitirNfce(new SolicitacaoEmissaoFiscal(
+                estabelecimento, pedido, 3L, "002", null, null, LocalDateTime.of(2026, 11, 19, 10, 0),
+                List.of(new ItemEmissaoFiscal(
+                        item, ProdutoTipo.PADRAO, null, null,
+                        new BigDecimal("25.00"), BigDecimal.ZERO, new BigDecimal("25.00")
+                )),
+                List.of(pagPix)
+        ));
+        assertThat(serieDois.serie()).isEqualTo("2");
+
+        // cancelarNfce com nota.id nulo e dadosFiscais existente preservando chaves prévias
+        NotaFiscalEntity notaExistente = new NotaFiscalEntity();
+        notaExistente.setId(null);
+        notaExistente.setDadosFiscais(
+                com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode().put("codigoStatusSefaz", "100")
+        );
+        ResultadoCancelamentoFiscal canc = adapter.cancelarNfce(notaExistente, "Cancelamento com metadado preservado");
+        assertThat(canc.dadosFiscaisAtualizados().get("codigoStatusSefaz").asText()).isEqualTo("100");
+        assertThat(canc.dadosFiscaisAtualizados().get("codigoStatusCancelamentoSefaz").asText()).isEqualTo("135");
+    }
 }

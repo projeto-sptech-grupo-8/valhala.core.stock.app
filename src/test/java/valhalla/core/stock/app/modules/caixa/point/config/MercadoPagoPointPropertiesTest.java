@@ -10,7 +10,7 @@ class MercadoPagoPointPropertiesTest {
     @Test
     void aplicaValoresPadraoEmModoMock() {
         MercadoPagoPointProperties props = new MercadoPagoPointProperties(
-                null,
+                ModoMercadoPagoPoint.MOCK,
                 null,
                 null,
                 null,
@@ -28,6 +28,48 @@ class MercadoPagoPointPropertiesTest {
         );
 
         assertThat(props.modo()).isEqualTo(ModoMercadoPagoPoint.MOCK);
+        assertThat(props.apiBaseUrl()).isEqualTo("https://api.mercadopago.com");
+    }
+
+    @Test
+    void assumeModoProducaoPorPadraoQuandoModoNaoInformado() {
+        assertThatThrownBy(() -> new MercadoPagoPointProperties(
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        )).isInstanceOf(IllegalStateException.class);
+
+        MercadoPagoPointProperties props = new MercadoPagoPointProperties(
+                null,
+                "APP_USR-123",
+                "segredo-webhook",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        );
+
+        assertThat(props.modo()).isEqualTo(ModoMercadoPagoPoint.PRODUCAO);
         assertThat(props.webhookValidarAssinatura()).isTrue();
         assertThat(props.webhookToleranciaSegundos()).isEqualTo(300L);
         assertThat(props.apiBaseUrl()).isEqualTo("https://api.mercadopago.com");

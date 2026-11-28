@@ -2,6 +2,7 @@ package valhalla.core.stock.app.modules.caixa.point.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
@@ -43,12 +44,12 @@ import valhalla.core.stock.app.modules.users.repository.UserRepository;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDateTime;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -57,6 +58,7 @@ import valhalla.core.stock.app.modules.caixa.pedido.strategy.ProcessadorPagament
 import valhalla.core.stock.app.modules.caixa.security.ContextoCaixa;
 import valhalla.core.stock.app.modules.caixa.sessao.service.AuditoriaCaixaService;
 import valhalla.core.stock.app.modules.caixa.sessao.service.EventoAuditoriaCaixa;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Service
 public class OrquestradorPagamentoPointService {
@@ -139,11 +141,28 @@ public class OrquestradorPagamentoPointService {
         UUID usuarioId = contextoCaixa.usuarioId();
 
         rateLimiterCaixaService.verificarLimiteCriacaoPoint(usuarioId);
+        String chaveIdempotenciaSolicitada = normalizarTexto(dto.chaveIdempotencia());
 
         // FASE 1: Transação curta — validações, lock do terminal, reserva de estoque e pagamento PENDENTE.
-        Fase1CriacaoPoint fase1 = transactionTemplate.execute(
-                status -> prepararCobrancaPoint(pedidoId, dto, estabelecimentoId, usuarioId)
-        );
+        Fase1CriacaoPoint fase1;
+        try {
+            fase1 = transactionTemplate.execute(
+                    status -> prepararCobrancaPoint(pedidoId, dto, estabelecimentoId, usuarioId)
+            );
+        } catch (DataIntegrityViolationException excecao) {
+            if (chaveIdempotenciaSolicitada != null) {
+                Optional<PagamentoPedidoEntity> existente = transactionTemplate.execute(status ->
+                        pagamentoPedidoRepository.findByPedidoIdAndChaveIdempotencia(
+                                pedidoId,
+                                chaveIdempotenciaSolicitada
+                        )
+                );
+                if (existente != null && existente.isPresent()) {
+                    return carregarDetalhePedido(pedidoId, estabelecimentoId);
+                }
+            }
+            throw excecao;
+        }
         if (fase1 == null) {
             throw new IllegalStateException("Falha inesperada na preparação da cobrança Point");
         }
@@ -162,7 +181,25 @@ public class OrquestradorPagamentoPointService {
                             pedidoId,
                             estabelecimentoId,
                             usuarioId,
-                            excecao
+                            excecao.isErroTransitorio(),
+                            excecao.isErroTransitorio() ? "TIMEOUT_COMUNICACAO_MP" : "FALHA_ENVIO_MP",
+                            excecao.getMessage()
+                    )
+            );
+            throw excecao;
+        } catch (RuntimeException excecao) {
+            String mensagem = excecao.getMessage() != null && !excecao.getMessage().isBlank()
+                    ? excecao.getMessage()
+                    : excecao.getClass().getSimpleName();
+            transactionTemplate.executeWithoutResult(status ->
+                    tratarFalhaCriacaoOrder(
+                            fase1.pagamentoId(),
+                            pedidoId,
+                            estabelecimentoId,
+                            usuarioId,
+                            true,
+                            "ERRO_INESPERADO_ENVIO_MP",
+                            mensagem
                     )
             );
             throw excecao;
@@ -228,9 +265,11 @@ public class OrquestradorPagamentoPointService {
             if (pagamento.getStatus() == StatusPagamentoPedido.CANCELADO) {
                 return null;
             }
-            if (pagamento.getStatus() != StatusPagamentoPedido.PENDENTE_NA_POINT
+            if (pagamento.getStatus() != StatusPagamentoPedido.PENDENTE
+                    && pagamento.getStatus() != StatusPagamentoPedido.PENDENTE_NA_POINT
                     && pagamento.getStatus() != StatusPagamentoPedido.EM_TERMINAL
                     && pagamento.getStatus() != StatusPagamentoPedido.CANCELAMENTO_SOLICITADO
+                    && pagamento.getStatus() != StatusPagamentoPedido.ACAO_NECESSARIA
                     && pagamento.getStatus() != StatusPagamentoPedido.PENDENTE_CONCILIACAO) {
                 throw new PedidoEstadoInvalidoException(
                         "Não é possível cancelar cobrança Point com status " + pagamento.getStatus()
@@ -239,7 +278,7 @@ public class OrquestradorPagamentoPointService {
 
             if (pagamento.getOrderExternaId() == null || pagamento.getOrderExternaId().isBlank()) {
                 pagamento.setStatus(StatusPagamentoPedido.CANCELADO);
-                pagamento.setCanceladoEm(LocalDateTime.now());
+                pagamento.setCanceladoEm(FusoHorarioOperacao.agora());
                 pagamento.setCanceladoPorUsuarioId(usuarioId);
                 pagamento.setMotivoCancelamento("Cancelado localmente antes de confirmação externa");
                 pagamentoPedidoRepository.saveAndFlush(pagamento);
@@ -364,6 +403,21 @@ public class OrquestradorPagamentoPointService {
         });
     }
 
+    public OrderPointResultado estornarOrderExterna(String orderExternaId, UUID pagamentoId) {
+        try {
+            return mercadoPagoPointClient.estornarOrder(orderExternaId, pagamentoId + "-refund");
+        } catch (IntegracaoMercadoPagoException excecao) {
+            if (!excecao.isErroTransitorio()) {
+                OrderPointResultado atual = mercadoPagoPointClient.consultarOrder(orderExternaId);
+                if ("refunded".equalsIgnoreCase(atual.status())
+                        || "refunded".equalsIgnoreCase(atual.paymentStatus())) {
+                    return atual;
+                }
+            }
+            throw excecao;
+        }
+    }
+
     private Fase1CriacaoPoint prepararCobrancaPoint(
             UUID pedidoId,
             RegistrarPagamentoPedidoRequestDto dto,
@@ -476,22 +530,24 @@ public class OrquestradorPagamentoPointService {
             UUID pedidoId,
             UUID estabelecimentoId,
             UUID usuarioId,
-            IntegracaoMercadoPagoException excecao
+            boolean erroTransitorio,
+            String statusDetalhe,
+            String mensagemErro
     ) {
         PedidoEntity pedido = buscarParaAtualizacao(pedidoId, estabelecimentoId);
         PagamentoPedidoEntity pagamento = pagamentoPedidoRepository
                 .buscarParaAtualizacao(pagamentoId, pedido.getId())
                 .orElseThrow(() -> new EntityNotFoundException("Pagamento não encontrado"));
 
-        if (excecao.isErroTransitorio()) {
+        if (erroTransitorio) {
             pagamento.setStatus(StatusPagamentoPedido.PENDENTE_CONCILIACAO);
-            pagamento.setStatusDetalhe("TIMEOUT_COMUNICACAO_MP");
-            pagamento.setMotivoCancelamento(excecao.getMessage());
+            pagamento.setStatusDetalhe(statusDetalhe);
+            pagamento.setMotivoCancelamento(mensagemErro);
             pagamentoPedidoRepository.saveAndFlush(pagamento);
         } else {
             pagamento.setStatus(StatusPagamentoPedido.RECUSADO);
-            pagamento.setStatusDetalhe("FALHA_ENVIO_MP");
-            pagamento.setMotivoCancelamento(excecao.getMessage());
+            pagamento.setStatusDetalhe(statusDetalhe);
+            pagamento.setMotivoCancelamento(mensagemErro);
             pagamentoPedidoRepository.saveAndFlush(pagamento);
 
             reservaEstoqueService.liberarReservasAtivasDoPedido(
@@ -509,9 +565,9 @@ public class OrquestradorPagamentoPointService {
                 EventoAuditoriaCaixa.PAGAMENTO_POINT_FALHOU,
                 EventoAuditoriaCaixa.ENTIDADE_PAGAMENTO_PEDIDO,
                 pagamento.getId().toString(),
-                "Falha ao enviar cobrança para a Point: " + excecao.getMessage(),
+                "Falha ao enviar cobrança para a Point: " + mensagemErro,
                 pagamento.getValor(),
-                excecao.getMessage(),
+                mensagemErro,
                 pedido.getId(),
                 pedido.getIdentificadorAtendimento(),
                 pagamento.getId(),
@@ -534,6 +590,7 @@ public class OrquestradorPagamentoPointService {
                         || p.getStatus() == StatusPagamentoPedido.PENDENTE_NA_POINT
                         || p.getStatus() == StatusPagamentoPedido.EM_TERMINAL
                         || p.getStatus() == StatusPagamentoPedido.CANCELAMENTO_SOLICITADO
+                        || p.getStatus() == StatusPagamentoPedido.ACAO_NECESSARIA
         );
         if (possuiPendentePoint) {
             pedido.setStatus(StatusPedidoCaixa.AGUARDANDO_MAQUINA);
@@ -615,9 +672,12 @@ public class OrquestradorPagamentoPointService {
     }
 
     private PedidoEntity buscarParaAtualizacao(UUID id, UUID estabelecimentoId) {
-        buscarDoEstabelecimento(id, estabelecimentoId);
-        return pedidoRepository.buscarParaAtualizacao(id, estabelecimentoId)
+        PedidoEntity pedido = pedidoRepository.buscarPorIdParaAtualizacao(id)
                 .orElseThrow(() -> new EntityNotFoundException("Pedido não encontrado"));
+        if (!pedido.getEstabelecimentoId().equals(estabelecimentoId)) {
+            throw new AccessDeniedException("Acesso negado");
+        }
+        return pedido;
     }
 
     private void validarPedidoAptoParaPagamento(PedidoEntity pedido) {

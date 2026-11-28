@@ -24,7 +24,8 @@ public class RelatorioRepository {
      */
     private static final String VENDAS = """
             WITH v AS (
-                SELECT i.produto_id, pr.nome, COALESCE(i.categoria_nome, c.nome) AS categoria, i.quantidade,
+                SELECT i.produto_id, pr.nome, COALESCE(i.categoria_nome, c.nome) AS categoria,
+                       c.nome AS categoria_atual, i.quantidade,
                        i.subtotal * pe.total / NULLIF(pe.subtotal, 0) AS receita,
                        i.quantidade * COALESCE(i.custo_unitario, cp.custo_unitario, 0) AS cmv
                 FROM item_pedido i
@@ -59,13 +60,15 @@ public class RelatorioRepository {
                        CASE WHEN t.acumulado - t.percentual < 80 THEN 'A'
                             WHEN t.acumulado - t.percentual < 95 THEN 'B' ELSE 'C' END AS classe
                 FROM (
-                    SELECT g.*,
+                    SELECT g.produto_id, g.nome, g.categoria, g.quantidade,
+                           ROUND(g.receita, 2) AS receita,
                            ROW_NUMBER() OVER (ORDER BY g.receita DESC, g.produto_id) AS posicao,
-                           g.receita * 100 / NULLIF(SUM(g.receita) OVER (), 0) AS percentual,
-                           SUM(g.receita) OVER (ORDER BY g.receita DESC, g.produto_id) * 100
-                               / NULLIF(SUM(g.receita) OVER (), 0) AS acumulado
-                    FROM (SELECT produto_id, nome, categoria, SUM(quantidade) AS quantidade, SUM(receita) AS receita
-                          FROM v GROUP BY produto_id, nome, categoria) g
+                           ROUND(g.receita * 100 / NULLIF(SUM(g.receita) OVER (), 0), 2) AS percentual,
+                           ROUND(SUM(g.receita) OVER (ORDER BY g.receita DESC, g.produto_id) * 100
+                               / NULLIF(SUM(g.receita) OVER (), 0), 2) AS acumulado
+                    FROM (SELECT produto_id, nome, categoria_atual AS categoria,
+                                 SUM(quantidade) AS quantidade, SUM(receita) AS receita
+                          FROM v GROUP BY produto_id, nome, categoria_atual) g
                 ) t
                 ORDER BY t.posicao
                 """, params(estab, de, ate),
@@ -77,9 +80,12 @@ public class RelatorioRepository {
 
     public List<RelatorioLinhas.MargemCategoria> margemCategorias(UUID estab, LocalDateTime de, LocalDateTime ate) {
         return jdbc.query(VENDAS + """
-                SELECT g.*, g.receita - g.cmv AS lucro,
-                       (g.receita - g.cmv) * 100 / NULLIF(g.receita, 0) AS margem,
-                       g.receita * 100 / NULLIF(SUM(g.receita) OVER (), 0) AS participacao
+                SELECT g.categoria, g.quantidade,
+                       ROUND(g.receita, 2) AS receita,
+                       ROUND(g.cmv, 2) AS cmv,
+                       ROUND(g.receita - g.cmv, 2) AS lucro,
+                       ROUND((g.receita - g.cmv) * 100 / NULLIF(g.receita, 0), 2) AS margem,
+                       ROUND(g.receita * 100 / NULLIF(SUM(g.receita) OVER (), 0), 2) AS participacao
                 FROM (SELECT categoria, SUM(quantidade) AS quantidade, SUM(receita) AS receita, SUM(cmv) AS cmv
                       FROM v GROUP BY categoria) g
                 ORDER BY margem DESC NULLS LAST
@@ -92,7 +98,8 @@ public class RelatorioRepository {
 
     /**
      * Dias com saldo zerado, reconstruídos pelas movimentações (do saldo zero até a movimentação seguinte).
-     * Parte do saldo vigente no início do período (última movimentação anterior), sem varrer todo o histórico.
+     * Parte do saldo vigente no início do período (última movimentação anterior), sem varrer todo o histórico,
+     * e inclui produtos ativos criados sem saldo que nunca receberam movimentação.
      * Venda perdida = dias zerados × média diária vendida nos dias em que havia estoque.
      */
     public List<RelatorioLinhas.Ruptura> rupturas(UUID estab, LocalDateTime de, LocalDateTime ate, int dias) {
@@ -115,11 +122,29 @@ public class RelatorioRepository {
                            LEAD(x.ocorrido_em) OVER (PARTITION BY x.estoque_id ORDER BY x.ocorrido_em, x.id) AS fim
                     FROM (SELECT * FROM anterior UNION ALL SELECT * FROM no_periodo) x
                     JOIN estoque e ON e.id = x.estoque_id
+                ), sem_movimentacao AS (
+                    SELECT p.id AS produto_id, p.criado_em AS ini, e.quantidade_atual AS saldo_posterior,
+                           CAST(NULL AS timestamp) AS fim
+                    FROM produto p
+                    JOIN estoque e ON e.produto_id = p.id
+                    WHERE p.estabelecimento_id = :estab AND p.tipo = 'PADRAO' AND p.ativo
+                      AND e.quantidade_atual <= 0 AND p.criado_em < :ate
+                      AND NOT EXISTS (
+                          SELECT 1 FROM movimentacao_estoque m
+                          WHERE m.estoque_id = e.id AND m.ocorrido_em < :ate
+                      )
                 ), zerado AS (
                     SELECT DISTINCT z.produto_id, CAST(d AS date) AS dia
-                    FROM mov z
+                    FROM (
+                        SELECT produto_id, ini, saldo_posterior, fim FROM mov
+                        UNION ALL
+                        SELECT produto_id, ini, saldo_posterior, fim FROM sem_movimentacao
+                    ) z
                     CROSS JOIN LATERAL generate_series(
-                        CAST(GREATEST(z.ini, :de) AS date), CAST(COALESCE(z.fim, :ate) AS date), interval '1 day') d
+                        CAST(GREATEST(z.ini, :de) AS date),
+                        CAST(LEAST(COALESCE(z.fim, :ate), :ate) AS date) - 1,
+                        interval '1 day'
+                    ) d
                     WHERE z.saldo_posterior <= 0
                       AND CAST(d AS date) < CAST(:ate AS date)
                 ), ilha AS (
@@ -146,8 +171,9 @@ public class RelatorioRepository {
                                 ELSE 0 END AS perdidas
                     FROM r
                 )
-                SELECT id, nome, categoria, dias, ocorrencias, perdidas, perdidas * preco_venda AS venda_perdida,
-                       dias * 100.0 / :diasPeriodo AS percentual_dias
+                SELECT id, nome, categoria, dias, ocorrencias, perdidas,
+                       ROUND(perdidas * preco_venda, 2) AS venda_perdida,
+                       ROUND(dias * 100.0 / :diasPeriodo, 2) AS percentual_dias
                 FROM estimado
                 ORDER BY venda_perdida DESC, dias DESC, nome
                 """, params(estab, de, ate).addValue("diasPeriodo", dias),
@@ -174,9 +200,9 @@ public class RelatorioRepository {
 
     public List<RelatorioLinhas.Canal> canais(UUID estab, LocalDateTime de, LocalDateTime ate) {
         return jdbc.query("""
-                SELECT g.*, g.faturamento / g.vendas AS ticket_medio,
-                       g.faturamento * 100 / NULLIF(SUM(g.faturamento) OVER (), 0) AS participacao,
-                       g.itens / g.vendas AS itens_por_venda
+                SELECT g.*, ROUND(g.faturamento / g.vendas, 2) AS ticket_medio,
+                       ROUND(g.faturamento * 100 / NULLIF(SUM(g.faturamento) OVER (), 0), 2) AS participacao,
+                       ROUND(g.itens / g.vendas, 2) AS itens_por_venda
                 FROM (
                     SELECT CASE pe.canal WHEN 'BALCAO' THEN 'Balcão' WHEN 'MESA' THEN 'Mesa'
                                 WHEN 'RETIRADA' THEN 'Retirada' WHEN 'DELIVERY' THEN 'Delivery'

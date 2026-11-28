@@ -15,6 +15,10 @@ public interface PedidoRepository
         extends JpaRepository<PedidoEntity, UUID>, JpaSpecificationExecutor<PedidoEntity> {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from PedidoEntity p where p.id = :id")
+    Optional<PedidoEntity> buscarPorIdParaAtualizacao(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select p from PedidoEntity p
             where p.id = :id

@@ -41,6 +41,8 @@ public class JwtService {
                 .toList();
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(properties.issuer())
+                .audience(List.of(properties.audience()))
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
                 .subject(authentication.getName())
@@ -66,6 +68,8 @@ public class JwtService {
         Instant issuedAt = Instant.now();
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(properties.issuer())
+                .audience(List.of(properties.audience()))
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
                 .subject(authentication.getName())

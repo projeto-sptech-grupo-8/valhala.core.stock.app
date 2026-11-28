@@ -7,6 +7,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -15,6 +17,7 @@ import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.repository.FuncionalidadeRepository;
 import valhalla.core.stock.app.modules.accesscontrol.repository.ProfileRepository;
 import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
+import valhalla.core.stock.app.modules.establishments.repository.EstablishmentRepository;
 import valhalla.core.stock.app.modules.estoque.entity.CategoriaEntity;
 import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
@@ -25,11 +28,15 @@ import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.entity.UserStatus;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
+import valhalla.core.stock.app.support.EmbeddedPostgresTestDatabase;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -39,6 +46,7 @@ abstract class EstoqueIntegrationTestSupport {
 
     @Autowired protected MockMvc mockMvc;
     @Autowired protected EntityManager entityManager;
+    @Autowired protected EstablishmentRepository establishmentRepository;
     @Autowired protected ProfileRepository profileRepository;
     @Autowired protected FuncionalidadeRepository funcionalidadeRepository;
     @Autowired protected UserRepository userRepository;
@@ -50,32 +58,49 @@ abstract class EstoqueIntegrationTestSupport {
     protected EstablishmentEntity estabelecimento;
     private final HashMap<String, String> tokensCsrf = new HashMap<>();
 
+    @DynamicPropertySource
+    static void configurarBanco(DynamicPropertyRegistry registry) {
+        EmbeddedPostgresTestDatabase.registrarPropriedades(registry);
+    }
+
     @BeforeEach
     void prepararEstabelecimento() {
-        estabelecimento = entityManager.merge(EstablishmentEntity.builder()
+        estabelecimento = establishmentRepository.saveAndFlush(EstablishmentEntity.builder()
                 .corporateName("Meraki LTDA")
                 .tradeName("Meraki")
                 .cnpj("12345678000199")
+                .active(true)
                 .build());
     }
 
     protected Cookie autenticarGerente(String email) throws Exception {
-        return autenticar("Gerente", email, Set.of());
+        ProfileEntity perfil = profileRepository
+                .findByEstablishment_IdAndNameIgnoreCase(estabelecimento.getId(), "Gerente")
+                .orElseGet(() -> profileRepository.saveAndFlush(ProfileEntity.builder()
+                        .name("Gerente").establishment(estabelecimento).functionalities(Set.of()).build()));
+        return autenticarUsuario(perfil, "Gerente Meraki", email);
     }
 
     protected Cookie autenticarComPermissoes(String email, String... codigos) throws Exception {
-        Set<FuncionalidadeEntity> funcionalidades = java.util.Arrays.stream(codigos)
-                .map(codigo -> funcionalidadeRepository.save(FuncionalidadeEntity.builder()
-                        .code(codigo).name(codigo).description("Permissão de teste").build()))
-                .collect(java.util.stream.Collectors.toSet());
-        return autenticar("Operador", email, funcionalidades);
+        Map<String, FuncionalidadeEntity> existentes = codigos.length == 0
+                ? Map.of()
+                : funcionalidadeRepository.findByCodeIn(Arrays.asList(codigos)).stream()
+                        .collect(Collectors.toMap(FuncionalidadeEntity::getCode, f -> f));
+        Set<FuncionalidadeEntity> funcionalidades = Arrays.stream(codigos)
+                .map(codigo -> existentes.computeIfAbsent(codigo, c -> funcionalidadeRepository.saveAndFlush(
+                        FuncionalidadeEntity.builder().code(c).name(c).description("Permissão de teste").build())))
+                .collect(Collectors.toSet());
+        ProfileEntity perfil = profileRepository.saveAndFlush(ProfileEntity.builder()
+                .name("Operador " + UUID.randomUUID().toString().substring(0, 6))
+                .establishment(estabelecimento)
+                .functionalities(funcionalidades)
+                .build());
+        return autenticarUsuario(perfil, "Operador Meraki", email);
     }
 
-    private Cookie autenticar(String nomePerfil, String email, Set<FuncionalidadeEntity> funcionalidades) throws Exception {
-        ProfileEntity perfil = profileRepository.save(ProfileEntity.builder()
-                .name(nomePerfil).establishment(estabelecimento).functionalities(funcionalidades).build());
-        userRepository.save(UserEntity.builder()
-                .name(nomePerfil + " Meraki").email(email)
+    private Cookie autenticarUsuario(ProfileEntity perfil, String nomeUsuario, String email) throws Exception {
+        userRepository.saveAndFlush(UserEntity.builder()
+                .name(nomeUsuario).email(email)
                 .passwordHash(passwordEncoder.encode("senha-segura"))
                 .profile(perfil).establishment(estabelecimento).status(UserStatus.ATIVO).build());
 

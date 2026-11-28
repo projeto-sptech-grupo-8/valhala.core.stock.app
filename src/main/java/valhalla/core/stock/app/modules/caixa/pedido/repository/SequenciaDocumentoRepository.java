@@ -12,7 +12,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface SequenciaDocumentoRepository
-        extends JpaRepository<SequenciaDocumentoEntity, SequenciaDocumentoId> {
+        extends JpaRepository<SequenciaDocumentoEntity, SequenciaDocumentoId>,
+                SequenciaDocumentoRepositoryCustom {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""

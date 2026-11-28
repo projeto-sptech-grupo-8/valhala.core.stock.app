@@ -30,10 +30,12 @@ import static org.mockito.Mockito.when;
 class TokenStateServiceTest {
 
     @Mock private UserSessionRepository repositorioSessaoUsuario;
+    @Mock private valhalla.core.stock.app.modules.users.repository.UserRepository userRepository;
+    @Mock private valhalla.core.stock.app.modules.auth.security.CsrfTokenStore csrfTokenStore;
 
     @Test
     void deveAtualizarSessaoExistenteAoSubstituirTokens() {
-        TokenStateService servicoEstadoToken = new TokenStateService(repositorioSessaoUsuario);
+        TokenStateService servicoEstadoToken = new TokenStateService(repositorioSessaoUsuario, userRepository, csrfTokenStore);
         UUID idUsuario = UUID.randomUUID();
         UUID jtiRefreshAnterior = UUID.randomUUID();
         UserSessionEntity sessao = UserSessionEntity.builder()
@@ -49,12 +51,13 @@ class TokenStateServiceTest {
         assertEquals(Optional.of(jtiRefreshAnterior), anterior);
         assertEquals(novoJtiAcesso, sessao.getAccessJti());
         assertEquals(novoJtiRefresh, sessao.getRefreshJti());
+        verify(userRepository).findByIdForUpdate(idUsuario);
         verify(repositorioSessaoUsuario, never()).save(any());
     }
 
     @Test
     void deveCriarSessaoQuandoUsuarioAindaNaoPossuiUma() {
-        TokenStateService servicoEstadoToken = new TokenStateService(repositorioSessaoUsuario);
+        TokenStateService servicoEstadoToken = new TokenStateService(repositorioSessaoUsuario, userRepository, csrfTokenStore);
         UUID idUsuario = UUID.randomUUID();
         UserEntity usuario = UserEntity.builder().id(idUsuario).build();
         when(repositorioSessaoUsuario.findById(idUsuario)).thenReturn(Optional.empty());
@@ -63,6 +66,7 @@ class TokenStateServiceTest {
                 Instant.parse("2030-01-01T00:00:00Z"), usuario);
 
         assertTrue(anterior.isEmpty());
+        verify(userRepository).findByIdForUpdate(idUsuario);
         ArgumentCaptor<UserSessionEntity> captor = ArgumentCaptor.forClass(UserSessionEntity.class);
         verify(repositorioSessaoUsuario).save(captor.capture());
         assertEquals(usuario, captor.getValue().getUser());
@@ -70,7 +74,7 @@ class TokenStateServiceTest {
 
     @Test
     void deveRejeitarRotacaoQuandoRefreshJaFoiUsado() {
-        TokenStateService servicoEstadoToken = new TokenStateService(repositorioSessaoUsuario);
+        TokenStateService servicoEstadoToken = new TokenStateService(repositorioSessaoUsuario, userRepository, csrfTokenStore);
         when(repositorioSessaoUsuario.rotate(any(), any(), any(), any(), any())).thenReturn(0);
 
         assertThrows(InvalidRefreshTokenException.class,
@@ -80,7 +84,7 @@ class TokenStateServiceTest {
 
     @Test
     void deveVerificarRefreshAtivoERetornarExpiracao() {
-        TokenStateService servicoEstadoToken = new TokenStateService(repositorioSessaoUsuario);
+        TokenStateService servicoEstadoToken = new TokenStateService(repositorioSessaoUsuario, userRepository, csrfTokenStore);
         UUID idUsuario = UUID.randomUUID();
         UUID refreshJti = UUID.randomUUID();
         LocalDateTime futuro = LocalDateTime.now(ZoneOffset.UTC).plusHours(2);
@@ -101,12 +105,13 @@ class TokenStateServiceTest {
 
         Optional<UUID> revogado = servicoEstadoToken.revokeAll(idUsuario);
         assertEquals(Optional.of(refreshJti), revogado);
+        verify(csrfTokenStore).remover(refreshJti);
         verify(repositorioSessaoUsuario).deleteById(idUsuario);
     }
 
     @Test
     void deveRetornarFalsoParaRefreshInativoOuExpirado() {
-        TokenStateService servicoEstadoToken = new TokenStateService(repositorioSessaoUsuario);
+        TokenStateService servicoEstadoToken = new TokenStateService(repositorioSessaoUsuario, userRepository, csrfTokenStore);
         UUID idUsuario = UUID.randomUUID();
         UUID refreshJti = UUID.randomUUID();
         UserSessionEntity expirada = UserSessionEntity.builder()

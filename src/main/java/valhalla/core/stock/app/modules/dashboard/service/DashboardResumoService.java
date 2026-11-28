@@ -21,6 +21,7 @@ import valhalla.core.stock.app.modules.dashboard.dto.StatusEstoqueDashboard;
 import valhalla.core.stock.app.modules.dashboard.dto.UltimaMovimentacaoDashboardResponseDto;
 import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
 import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoEstoqueEntity;
+import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.TipoMovimentacaoEstoque;
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRepository;
@@ -89,7 +90,7 @@ public class DashboardResumoService {
     @PreAuthorize("@permissionAuthorizationService.hasPermission('VISUALIZAR_ESTOQUE', authentication)")
     public DashboardResumoResponseDto obterResumo(int meses) {
         UUID idEstabelecimento = obterIdEstabelecimentoAutenticado();
-        LocalDateTime geradoEm = LocalDateTime.now(FUSO_HORARIO_OPERACAO);
+        LocalDateTime geradoEm = FusoHorarioOperacao.agora();
         LocalDate dataFim = geradoEm.toLocalDate();
         LocalDate dataInicio = dataFim.withDayOfMonth(1).minusMonths(meses - 1L);
 
@@ -103,7 +104,7 @@ public class DashboardResumoService {
                 obterEstoque(idEstabelecimento),
                 obterMovimentacoes(idEstabelecimento, dataInicio, dataFim, meses),
                 new ModuloDashboardResponseDto(DisponibilidadeModuloDashboard.DISPONIVEL),
-                moduloIndisponivel(),
+                new ModuloDashboardResponseDto(DisponibilidadeModuloDashboard.DISPONIVEL),
                 podeVerVendas() ? obterVendas(idEstabelecimento, dataFim) : null
         );
     }
@@ -135,11 +136,19 @@ public class DashboardResumoService {
 
     private EstoqueDashboardResponseDto obterEstoque(UUID idEstabelecimento) {
         ResumoEstoqueDashboardProjection resumo = estoqueRepository.resumirParaDashboard(idEstabelecimento);
-        long criticos = resumo.getCriticos() + resumo.getZerados();
+        long totalProdutos = resumo.getTotalProdutos();
+        long zerados = resumo.getZerados();
+        long criticos = resumo.getCriticos() + zerados;
         long produtosComMinimo = resumo.getProdutosComMinimo();
-        int saudePercentual = produtosComMinimo == 0
-                ? 100
-                : Math.toIntExact(Math.round((resumo.getSaudaveis() * 100.0) / produtosComMinimo));
+        int saudePercentual;
+        if (produtosComMinimo > 0) {
+            long denominadorSaude = produtosComMinimo + resumo.getZeradosSemMinimo();
+            saudePercentual = Math.toIntExact(Math.round((resumo.getSaudaveis() * 100.0) / denominadorSaude));
+        } else if (totalProdutos > 0 && zerados > 0) {
+            saudePercentual = Math.toIntExact(Math.round(((totalProdutos - zerados) * 100.0) / totalProdutos));
+        } else {
+            saudePercentual = 100;
+        }
 
         List<AlertaEstoqueDashboardResponseDto> alertas = estoqueRepository.listarCriticosParaDashboard(
                         idEstabelecimento,
@@ -149,11 +158,11 @@ public class DashboardResumoService {
                 .toList();
 
         return new EstoqueDashboardResponseDto(
-                resumo.getTotalProdutos(),
+                totalProdutos,
                 produtosComMinimo,
                 resumo.getProdutosSemMinimo(),
                 criticos,
-                resumo.getZerados(),
+                zerados,
                 resumo.getSaudaveis(),
                 saudePercentual,
                 alertas
@@ -213,11 +222,12 @@ public class DashboardResumoService {
 
     private AlertaEstoqueDashboardResponseDto paraAlerta(EstoqueEntity estoque) {
         BigDecimal quantidadeAtual = estoque.getQuantidadeAtual();
+        ProdutoEntity produto = estoque.getProduto();
         return new AlertaEstoqueDashboardResponseDto(
-                estoque.getProduto().getId(),
-                estoque.getProduto().getNome(),
-                estoque.getProduto().getCategoria().getNome(),
-                estoque.getProduto().getUnidadeMedida(),
+                produto.getId(),
+                produto.getNome(),
+                produto.getCategoria().getNome(),
+                unidadeExibicao(produto),
                 quantidadeAtual,
                 estoque.getEstoqueMinimo(),
                 quantidadeAtual.signum() <= 0 ? StatusEstoqueDashboard.ZERADO : StatusEstoqueDashboard.CRITICO
@@ -228,25 +238,31 @@ public class DashboardResumoService {
             MovimentacaoEstoqueEntity movimentacao,
             Map<UUID, String> nomesUsuarios
     ) {
+        ProdutoEntity produto = movimentacao.getEstoque().getProduto();
         return new UltimaMovimentacaoDashboardResponseDto(
                 movimentacao.getId(),
                 movimentacao.getOcorridoEm(),
-                movimentacao.getEstoque().getProduto().getId(),
-                movimentacao.getEstoque().getProduto().getNome(),
-                movimentacao.getEstoque().getProduto().getUnidadeMedida(),
+                produto.getId(),
+                produto.getNome(),
+                unidadeExibicao(produto),
                 movimentacao.getTipo(),
                 TIPOS_ENTRADA.contains(movimentacao.getTipo())
                         ? DirecaoMovimentacaoDashboard.ENTRADA
                         : DirecaoMovimentacaoDashboard.SAIDA,
                 movimentacao.getQuantidade(),
-                nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado"),
+                resolverNomeUsuario(movimentacao, nomesUsuarios),
                 movimentacao.getMotivo()
         );
+    }
+
+    private String unidadeExibicao(ProdutoEntity produto) {
+        return produto.isFracionado() ? "ML" : produto.getUnidadeMedida();
     }
 
     private Map<UUID, String> nomesUsuarios(List<MovimentacaoEstoqueEntity> movimentacoes) {
         Set<UUID> idsUsuarios = movimentacoes.stream()
                 .map(MovimentacaoEstoqueEntity::getUsuarioId)
+                .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toSet());
         if (idsUsuarios.isEmpty()) {
             return Map.of();
@@ -255,8 +271,12 @@ public class DashboardResumoService {
                 .collect(Collectors.toMap(UserEntity::getId, UserEntity::getName));
     }
 
-    private ModuloDashboardResponseDto moduloIndisponivel() {
-        return new ModuloDashboardResponseDto(DisponibilidadeModuloDashboard.INDISPONIVEL);
+    private String resolverNomeUsuario(MovimentacaoEstoqueEntity movimentacao, Map<UUID, String> nomesUsuarios) {
+        UUID usuarioId = movimentacao.getUsuarioId();
+        if (usuarioId == null) {
+            return "WEBHOOK".equalsIgnoreCase(movimentacao.getOrigem()) ? "Webhook / Point" : "Sistema";
+        }
+        return nomesUsuarios.getOrDefault(usuarioId, "Usuário não encontrado");
     }
 
     private UUID obterIdEstabelecimentoAutenticado() {

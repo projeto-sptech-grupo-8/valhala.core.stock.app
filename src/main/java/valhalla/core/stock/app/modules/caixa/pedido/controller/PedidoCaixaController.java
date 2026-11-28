@@ -320,15 +320,17 @@ public class PedidoCaixaController {
     @SecurityRequirement(name = "csrfTokenHeader")
     @Operation(
             summary = "Conciliar manualmente um pagamento pendente de conciliação",
-            description = "Aprova (status APROVADO) ou rejeita/cancela (status CANCELADO) um pagamento registrado em contingência manual."
+            description = "Aprova (exige CAIXA_RESOLVER_DIVERGENCIA ou credenciais de autorizador) ou rejeita/cancela um pagamento pendente de conciliação."
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Conciliação registrada."),
             @ApiResponse(responseCode = "400", description = "Motivo obrigatório ao rejeitar.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Credenciais inválidas ou sem permissão CAIXA_RESOLVER_DIVERGENCIA ao aprovar.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
             @ApiResponse(responseCode = "404", description = "Pedido ou pagamento não encontrado.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
-            @ApiResponse(responseCode = "409", description = "Pagamento não está pendente de conciliação ou estoque insuficiente.",
+            @ApiResponse(responseCode = "409", description = "Pagamento não pode ser conciliado ou estoque insuficiente.",
                     content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     public ResponseEntity<PedidoCaixaDetalheResponseDto> conciliarPagamento(
@@ -337,6 +339,33 @@ public class PedidoCaixaController {
             @Valid @RequestBody ConciliarPagamentoPedidoRequestDto requestDto
     ) {
         return ResponseEntity.ok(pedidoCaixaService.conciliarPagamento(pedidoId, pagamentoId, requestDto));
+    }
+
+    @PostMapping("/{pedidoId}/pagamentos/{pagamentoId}/estorno")
+    @SecurityRequirement(name = "csrfTokenHeader")
+    @Operation(
+            summary = "Estornar um pagamento aprovado específico de um pedido em aberto",
+            description = "Exige CAIXA_ESTORNAR (ou credenciais de autorizador). Para pagamentos Point solicita estorno na API do Mercado Pago; em DINHEIRO valida ou registra a saída na gaveta e recalcula o saldo do pedido."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Pagamento estornado."),
+            @ApiResponse(responseCode = "400", description = "Motivo obrigatório.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Sem permissão CAIXA_ESTORNAR.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Pedido ou pagamento não encontrado.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "Pedido fechado, pagamento não aprovado ou saldo insuficiente em caixa.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+            @ApiResponse(responseCode = "502", description = "Falha ao estornar pagamento na API Point do Mercado Pago.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+    })
+    public ResponseEntity<PedidoCaixaDetalheResponseDto> estornarPagamento(
+            @PathVariable("pedidoId") UUID pedidoId,
+            @PathVariable("pagamentoId") UUID pagamentoId,
+            @Valid @RequestBody EstornarPedidoCaixaRequestDto requestDto
+    ) {
+        return ResponseEntity.ok(pedidoCaixaService.estornarPagamento(pedidoId, pagamentoId, requestDto));
     }
 
     @PostMapping("/{pedidoId}/pagamentos/{pagamentoId}/cancelamento-point")

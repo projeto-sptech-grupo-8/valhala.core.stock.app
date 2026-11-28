@@ -1,6 +1,7 @@
 package valhalla.core.stock.app.modules.auth.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 import javax.crypto.SecretKey;
@@ -18,12 +19,18 @@ import java.util.Base64;
 public record JwtProperties(
         String secret,
         @DefaultValue("PT1H") Duration expiration,
-        @DefaultValue("P7D") Duration refreshExpiration
+        @DefaultValue("P7D") Duration refreshExpiration,
+        @DefaultValue("valhalla-core-stock") String issuer,
+        @DefaultValue("valhalla-core-stock-api") String audience
 ) {
+
+    public static final String DEFAULT_ISSUER = "valhalla-core-stock";
+    public static final String DEFAULT_AUDIENCE = "valhalla-core-stock-api";
 
     /** Tamanho mínimo exigido pela assinatura HS256. */
     private static final int TAMANHO_MINIMO_SECRET_EM_BYTES = 32;
 
+    @ConstructorBinding
     public JwtProperties {
         secret = validarSecret(secret);
         expiration = validarDuracao(expiration, "security.jwt.expiration (JWT_EXPIRATION)");
@@ -37,6 +44,12 @@ public record JwtProperties(
                             + "security.jwt.expiration (JWT_EXPIRATION)"
             );
         }
+        issuer = validarIdentificador(issuer, DEFAULT_ISSUER, "security.jwt.issuer (JWT_ISSUER)");
+        audience = validarIdentificador(audience, DEFAULT_AUDIENCE, "security.jwt.audience (JWT_AUDIENCE)");
+    }
+
+    public JwtProperties(String secret, Duration expiration, Duration refreshExpiration) {
+        this(secret, expiration, refreshExpiration, DEFAULT_ISSUER, DEFAULT_AUDIENCE);
     }
 
     /** Chave HMAC derivada do secret já validado, pronta para uso pelos beans de JWT. */
@@ -83,5 +96,16 @@ public record JwtProperties(
             );
         }
         return duracao;
+    }
+
+    private static String validarIdentificador(String valor, String padrao, String propriedade) {
+        if (valor == null) {
+            return padrao;
+        }
+        String trimmed = valor.trim();
+        if (trimmed.isEmpty()) {
+            throw new IllegalArgumentException(propriedade + " não pode ficar em branco");
+        }
+        return trimmed;
     }
 }

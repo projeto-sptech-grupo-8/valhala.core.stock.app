@@ -23,7 +23,7 @@ public record MercadoPagoPointProperties(
 
     public MercadoPagoPointProperties {
         if (modo == null) {
-            modo = ModoMercadoPagoPoint.MOCK;
+            modo = ModoMercadoPagoPoint.PRODUCAO;
         }
         if (webhookValidarAssinatura == null) {
             webhookValidarAssinatura = true;

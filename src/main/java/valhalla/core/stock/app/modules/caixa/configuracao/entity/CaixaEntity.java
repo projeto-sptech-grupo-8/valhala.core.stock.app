@@ -11,6 +11,7 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -43,7 +44,7 @@ public class CaixaEntity {
 
     @PrePersist
     private void prePersist() {
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         if (criadoEm == null) {
             criadoEm = agora;
         }
@@ -54,6 +55,6 @@ public class CaixaEntity {
 
     @PreUpdate
     private void preUpdate() {
-        atualizadoEm = LocalDateTime.now();
+        atualizadoEm = FusoHorarioOperacao.agora();
     }
 }

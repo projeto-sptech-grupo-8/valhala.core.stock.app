@@ -31,9 +31,10 @@ public interface EstoqueRepository extends JpaRepository<EstoqueEntity, Integer>
             select count(e) as totalProdutos,
                    coalesce(sum(case when e.estoqueMinimo > 0 then 1 else 0 end), 0) as produtosComMinimo,
                    coalesce(sum(case when e.estoqueMinimo is null or e.estoqueMinimo <= 0 then 1 else 0 end), 0) as produtosSemMinimo,
-                   coalesce(sum(case when e.estoqueMinimo > 0 and e.quantidadeAtual <= 0 then 1 else 0 end), 0) as zerados,
+                   coalesce(sum(case when e.quantidadeAtual <= 0 then 1 else 0 end), 0) as zerados,
+                   coalesce(sum(case when (e.estoqueMinimo is null or e.estoqueMinimo <= 0) and e.quantidadeAtual <= 0 then 1 else 0 end), 0) as zeradosSemMinimo,
                    coalesce(sum(case when e.estoqueMinimo > 0 and e.quantidadeAtual > 0 and e.quantidadeAtual < e.estoqueMinimo then 1 else 0 end), 0) as criticos,
-                   coalesce(sum(case when e.estoqueMinimo > 0 and e.quantidadeAtual >= e.estoqueMinimo * 1.5 then 1 else 0 end), 0) as saudaveis
+                   coalesce(sum(case when e.estoqueMinimo > 0 and e.quantidadeAtual >= e.estoqueMinimo then 1 else 0 end), 0) as saudaveis
             from EstoqueEntity e
             join e.produto p
             where p.estabelecimentoId = :idEstabelecimento
@@ -47,10 +48,14 @@ public interface EstoqueRepository extends JpaRepository<EstoqueEntity, Integer>
             join fetch p.categoria c
             where p.estabelecimentoId = :idEstabelecimento
               and p.ativo = true
-              and e.estoqueMinimo > 0
-              and e.quantidadeAtual < e.estoqueMinimo
+              and (
+                  e.quantidadeAtual <= 0
+                  or (e.estoqueMinimo > 0 and e.quantidadeAtual < e.estoqueMinimo)
+              )
             order by case when e.quantidadeAtual <= 0 then 0 else 1 end asc,
-                     (e.quantidadeAtual / e.estoqueMinimo) asc,
+                     case when e.estoqueMinimo is not null and e.estoqueMinimo > 0
+                          then (e.quantidadeAtual / e.estoqueMinimo)
+                          else 0 end asc,
                      p.nome asc
             """)
     List<EstoqueEntity> listarCriticosParaDashboard(

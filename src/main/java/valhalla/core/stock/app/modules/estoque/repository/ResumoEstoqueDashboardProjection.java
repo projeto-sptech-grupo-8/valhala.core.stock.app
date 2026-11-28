@@ -10,6 +10,8 @@ public interface ResumoEstoqueDashboardProjection {
 
     long getZerados();
 
+    long getZeradosSemMinimo();
+
     long getCriticos();
 
     long getSaudaveis();

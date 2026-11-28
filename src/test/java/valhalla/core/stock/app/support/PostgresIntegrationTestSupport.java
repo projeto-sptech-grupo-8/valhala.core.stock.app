@@ -1,14 +1,12 @@
 package valhalla.core.stock.app.support;
 
 import com.jayway.jsonpath.JsonPath;
-import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -38,13 +36,7 @@ import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.entity.UserStatus;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-import java.sql.Connection;
-import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -68,8 +60,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 public abstract class PostgresIntegrationTestSupport {
 
-    private static final EmbeddedPostgres POSTGRES = iniciarPostgres();
-
     @Autowired protected MockMvc mockMvc;
     @Autowired protected EntityManager entityManager;
     @Autowired protected ProfileRepository profileRepository;
@@ -88,37 +78,7 @@ public abstract class PostgresIntegrationTestSupport {
 
     @DynamicPropertySource
     static void configurarBanco(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", () -> POSTGRES.getJdbcUrl("postgres", "postgres"));
-        registry.add("spring.datasource.username", () -> "postgres");
-        registry.add("spring.datasource.password", () -> "postgres");
-        registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
-        registry.add("spring.flyway.enabled", () -> "true");
-        registry.add("spring.flyway.locations", () -> "classpath:db/migration");
-        registry.add("spring.flyway.baseline-on-migrate", () -> "true");
-        registry.add("spring.flyway.baseline-version", () -> "0");
-    }
-
-    private static EmbeddedPostgres iniciarPostgres() {
-        try {
-            EmbeddedPostgres postgres = EmbeddedPostgres.builder().start();
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                try {
-                    postgres.close();
-                } catch (IOException ignorada) {
-                    // encerramento da JVM
-                }
-            }));
-            try (Connection conexao = postgres.getPostgresDatabase().getConnection();
-                 Statement comando = conexao.createStatement()) {
-                comando.execute(new ClassPathResource("db/script.sql").getContentAsString(StandardCharsets.UTF_8));
-            }
-            return postgres;
-        } catch (IOException excecao) {
-            throw new UncheckedIOException(excecao);
-        } catch (SQLException excecao) {
-            throw new IllegalStateException("Falha ao criar o schema de teste a partir de db/script.sql", excecao);
-        }
+        EmbeddedPostgresTestDatabase.registrarPropriedades(registry);
     }
 
     @BeforeEach

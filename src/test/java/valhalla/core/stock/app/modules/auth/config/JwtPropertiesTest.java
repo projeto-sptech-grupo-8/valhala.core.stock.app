@@ -78,4 +78,22 @@ class JwtPropertiesTest {
         assertThrows(IllegalArgumentException.class, () -> new JwtProperties(
                 SECRET_VALIDO, null, Duration.ofDays(7)));
     }
+
+    @Test
+    void deveAplicarIssuerEAudiencePadraoERejeitarEmBranco() {
+        JwtProperties padrao = new JwtProperties(SECRET_VALIDO, Duration.ofHours(1), Duration.ofDays(7));
+        org.junit.jupiter.api.Assertions.assertEquals("valhalla-core-stock", padrao.issuer());
+        org.junit.jupiter.api.Assertions.assertEquals("valhalla-core-stock-api", padrao.audience());
+
+        JwtProperties custom = new JwtProperties(
+                SECRET_VALIDO, Duration.ofHours(1), Duration.ofDays(7), "  meu-emissor  ", "  minha-api  "
+        );
+        org.junit.jupiter.api.Assertions.assertEquals("meu-emissor", custom.issuer());
+        org.junit.jupiter.api.Assertions.assertEquals("minha-api", custom.audience());
+
+        assertThrows(IllegalArgumentException.class, () -> new JwtProperties(
+                SECRET_VALIDO, Duration.ofHours(1), Duration.ofDays(7), "   ", "valhalla-core-stock-api"));
+        assertThrows(IllegalArgumentException.class, () -> new JwtProperties(
+                SECRET_VALIDO, Duration.ofHours(1), Duration.ofDays(7), "valhalla-core-stock", ""));
+    }
 }

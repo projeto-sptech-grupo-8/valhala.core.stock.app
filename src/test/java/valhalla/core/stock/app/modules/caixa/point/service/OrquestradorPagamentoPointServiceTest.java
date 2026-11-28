@@ -59,6 +59,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -160,7 +161,7 @@ class OrquestradorPagamentoPointServiceTest {
 
         PedidoEntity pedido = pedido(pedidoId, estabId, userId, new BigDecimal("100.00"));
         when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-        when(pedidoRepository.buscarParaAtualizacao(pedidoId, estabId)).thenReturn(Optional.of(pedido));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
 
         // Pedido sem itens -> erro
         when(itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedidoId)).thenReturn(List.of());
@@ -270,6 +271,21 @@ class OrquestradorPagamentoPointServiceTest {
         )).isInstanceOf(IntegracaoMercadoPagoException.class);
         assertThat(pag2.getStatus()).isEqualTo(StatusPagamentoPedido.RECUSADO);
         verify(reservaEstoqueService).liberarReservasAtivasDoPedido(eq(pedidoId), eq(StatusReservaEstoque.LIBERADA), any());
+
+        // Falha inesperada (RuntimeException genérica) na Fase 2 também compensa para PENDENTE_CONCILIACAO
+        UUID pagId3 = UUID.randomUUID();
+        PagamentoPedidoEntity pag3 = pagamento(pagId3, pedidoId, StatusPagamentoPedido.PENDENTE);
+        when(processadorPagamentoPoint.prepararPagamentoPendente(any(), any(), any(), any(), any(), any()))
+                .thenReturn(pag3);
+        when(pagamentoPedidoRepository.buscarParaAtualizacao(pagId3, pedidoId)).thenReturn(Optional.of(pag3));
+        doThrow(new IllegalStateException("Falha inesperada de serialização"))
+                .when(mercadoPagoPointClient).criarOrderPoint(any());
+
+        assertThatThrownBy(() -> service.iniciarPagamentoPoint(
+                pedidoId, req(new BigDecimal("100.00"), null, terminalCaixaId)
+        )).isInstanceOf(IllegalStateException.class);
+        assertThat(pag3.getStatus()).isEqualTo(StatusPagamentoPedido.PENDENTE_CONCILIACAO);
+        assertThat(pag3.getStatusDetalhe()).isEqualTo("ERRO_INESPERADO_ENVIO_MP");
     }
 
     @Test
@@ -283,7 +299,7 @@ class OrquestradorPagamentoPointServiceTest {
 
         PedidoEntity pedido = pedido(pedidoId, estabId, userId, new BigDecimal("50.00"));
         when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
-        when(pedidoRepository.buscarParaAtualizacao(pedidoId, estabId)).thenReturn(Optional.of(pedido));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
         lenient().when(pedidoRepository.saveAndFlush(any(PedidoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(pagamentoPedidoRepository.saveAndFlush(any(PagamentoPedidoEntity.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
@@ -350,6 +366,233 @@ class OrquestradorPagamentoPointServiceTest {
         comOrder.setOrderExternaId("ORD-123");
         service.sincronizarCobrancaPoint(pedidoId, pagamentoId);
         verify(mercadoPagoPointClient, org.mockito.Mockito.times(2)).consultarOrder("ORD-123");
+
+        // Cancelamento de PENDENTE local e ACAO_NECESSARIA remoto
+        PagamentoPedidoEntity pendenteLocal = pagamento(pagamentoId, pedidoId, StatusPagamentoPedido.PENDENTE);
+        pendenteLocal.setOrderExternaId(null);
+        when(pagamentoPedidoRepository.buscarParaAtualizacao(pagamentoId, pedidoId)).thenReturn(Optional.of(pendenteLocal));
+        service.cancelarCobrancaPoint(pedidoId, pagamentoId);
+        assertThat(pendenteLocal.getStatus()).isEqualTo(StatusPagamentoPedido.CANCELADO);
+
+        PagamentoPedidoEntity acaoNecessaria = pagamento(pagamentoId, pedidoId, StatusPagamentoPedido.ACAO_NECESSARIA);
+        acaoNecessaria.setOrderExternaId("ORD-ACAO");
+        when(pagamentoPedidoRepository.buscarParaAtualizacao(pagamentoId, pedidoId)).thenReturn(Optional.of(acaoNecessaria));
+        OrderPointResultado resCanceladoAcao = new OrderPointResultado(
+                "ORD-ACAO", "canceled", "canceled", null, "canceled", "REF-A", new BigDecimal("50.00"), "{}"
+        );
+        when(mercadoPagoPointClient.cancelarOrder("ORD-ACAO", pagamentoId + "-cancel"))
+                .thenReturn(resCanceladoAcao);
+        service.cancelarCobrancaPoint(pedidoId, pagamentoId);
+        verify(transicaoPagamentoPointService).aplicarResultadoOrder(
+                pagamentoId, resCanceladoAcao, OrigemAuditoriaCaixa.API, userId
+        );
+    }
+
+    @Test
+    void estornarOrderExternaTrataSucessoRecuperacaoDeJaEstornadoEFalhas() {
+        UUID pagId = UUID.randomUUID();
+        OrderPointResultado refunded = new OrderPointResultado(
+                "ORD-REF", "refunded", "refunded", "PAY-1", "refunded", "REF-1", new BigDecimal("50.00"), "{}"
+        );
+        when(mercadoPagoPointClient.estornarOrder("ORD-REF", pagId + "-refund"))
+                .thenReturn(refunded)
+                .thenThrow(new IntegracaoMercadoPagoException("Já estornado", HttpStatus.CONFLICT, false))
+                .thenThrow(new IntegracaoMercadoPagoException("Bad request", HttpStatus.BAD_REQUEST, false))
+                .thenThrow(new IntegracaoMercadoPagoException("Timeout", HttpStatus.GATEWAY_TIMEOUT, true));
+
+        assertThat(service.estornarOrderExterna("ORD-REF", pagId)).isEqualTo(refunded);
+
+        // Erro não transitório + reconsulta confirma refunded -> retorna sucesso idempotente
+        when(mercadoPagoPointClient.consultarOrder("ORD-REF"))
+                .thenReturn(refunded)
+                .thenReturn(new OrderPointResultado(
+                        "ORD-REF", "processed", "accredited", "PAY-1", "accredited", "REF-1", new BigDecimal("50.00"), "{}"
+                ));
+        assertThat(service.estornarOrderExterna("ORD-REF", pagId)).isEqualTo(refunded);
+
+        // Erro não transitório quando não foi estornado -> propaga exceção
+        assertThatThrownBy(() -> service.estornarOrderExterna("ORD-REF", pagId))
+                .isInstanceOf(IntegracaoMercadoPagoException.class);
+
+        // Erro transitório -> propaga direto
+        assertThatThrownBy(() -> service.estornarOrderExterna("ORD-REF", pagId))
+                .isInstanceOf(IntegracaoMercadoPagoException.class);
+    }
+
+    @Test
+    void iniciarPagamentoPointValidaTenantEstadoSessaoEIdempotenciaEmConflitoDeIntegridade() {
+        UUID estId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID outroOperadorId = UUID.randomUUID();
+        UUID pedidoId = UUID.randomUUID();
+        UUID terminalId = UUID.randomUUID();
+        UUID sessaoPedidoId = UUID.randomUUID();
+
+        when(contextoCaixa.estabelecimentoId()).thenReturn(estId);
+        when(contextoCaixa.usuarioId()).thenReturn(userId);
+        when(contextoCaixa.isGerente()).thenReturn(false);
+
+        // Tenant diferente -> AccessDeniedException
+        PedidoEntity pedidoOutroTenant = pedido(pedidoId, UUID.randomUUID(), userId, new BigDecimal("50.00"));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedidoOutroTenant));
+        assertThatThrownBy(() -> service.iniciarPagamentoPoint(
+                pedidoId, req(new BigDecimal("50.00"), "IDEM-1", terminalId)
+        )).isInstanceOf(AccessDeniedException.class);
+
+        // Pedido CONCLUIDO e desconto PENDENTE_AUTORIZACAO -> PedidoEstadoInvalidoException
+        PedidoEntity pedido = pedido(pedidoId, estId, userId, new BigDecimal("50.00"));
+        pedido.setSessaoCaixaId(sessaoPedidoId);
+        pedido.setStatus(StatusPedidoCaixa.CONCLUIDO);
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
+        assertThatThrownBy(() -> service.iniciarPagamentoPoint(
+                pedidoId, req(new BigDecimal("50.00"), "IDEM-1", terminalId)
+        )).isInstanceOf(PedidoEstadoInvalidoException.class);
+
+        pedido.setStatus(StatusPedidoCaixa.EM_ATENDIMENTO);
+        pedido.setStatusDesconto(StatusDescontoPedido.PENDENTE_AUTORIZACAO);
+        assertThatThrownBy(() -> service.iniciarPagamentoPoint(
+                pedidoId, req(new BigDecimal("50.00"), "IDEM-1", terminalId)
+        )).isInstanceOf(PedidoEstadoInvalidoException.class);
+
+        pedido.setStatusDesconto(StatusDescontoPedido.NENHUM);
+        ItemPedidoEntity item = new ItemPedidoEntity();
+        item.setId(1L);
+        item.setPedidoId(pedidoId);
+        item.setProdutoId(UUID.randomUUID());
+        item.setDescricaoProduto("Item Teste");
+        item.setQuantidade(BigDecimal.ONE);
+        item.setPrecoUnitario(new BigDecimal("50.00"));
+        item.setSubtotal(new BigDecimal("50.00"));
+        when(itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedidoId)).thenReturn(List.of(item));
+
+        TerminalCaixaEntity terminalAtivo = terminal(terminalId, estId, true, true);
+        when(terminalCaixaRepository.buscarParaAtualizacao(terminalId)).thenReturn(Optional.of(terminalAtivo));
+        when(pagamentoPedidoRepository.existePagamentoAtivoNoTerminal(any(), any())).thenReturn(false);
+        when(sessaoCaixaRepository.findFirstByEstabelecimentoIdAndOperadorUsuarioIdAndStatusOrderByAbertaEmDesc(
+                estId, userId, StatusSessaoCaixa.ABERTA
+        )).thenReturn(Optional.empty());
+
+        // Fallback sessaoCaixaId do pedido: ausente -> EntityNotFoundException
+        when(sessaoCaixaRepository.findByIdAndEstabelecimentoId(sessaoPedidoId, estId)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.iniciarPagamentoPoint(
+                pedidoId, req(new BigDecimal("50.00"), "IDEM-1", terminalId)
+        )).isInstanceOf(EntityNotFoundException.class);
+
+        // Sessao do pedido fechada -> SessaoCaixaEstadoInvalidoException
+        SessaoCaixaEntity sessaoPedido = new SessaoCaixaEntity();
+        sessaoPedido.setId(sessaoPedidoId);
+        sessaoPedido.setEstabelecimentoId(estId);
+        sessaoPedido.setOperadorUsuarioId(outroOperadorId);
+        sessaoPedido.setStatus(StatusSessaoCaixa.FECHADA);
+        when(sessaoCaixaRepository.findByIdAndEstabelecimentoId(sessaoPedidoId, estId))
+                .thenReturn(Optional.of(sessaoPedido));
+        assertThatThrownBy(() -> service.iniciarPagamentoPoint(
+                pedidoId, req(new BigDecimal("50.00"), "IDEM-1", terminalId)
+        )).isInstanceOf(SessaoCaixaEstadoInvalidoException.class);
+
+        // Gerente usa sessao aberta do pedido + DataIntegrityViolationException na Fase 1
+        when(contextoCaixa.isGerente()).thenReturn(true);
+        sessaoPedido.setStatus(StatusSessaoCaixa.ABERTA);
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoId)).thenReturn(List.of());
+
+        PagamentoPedidoEntity pagPreparado = pagamento(UUID.randomUUID(), pedidoId, StatusPagamentoPedido.PENDENTE);
+        when(processadorPagamentoPoint.prepararPagamentoPendente(any(), any(), any(), any(), any(), any()))
+                .thenReturn(pagPreparado);
+        when(pagamentoPedidoRepository.saveAndFlush(pagPreparado))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException("duplicate"));
+
+        // Chave informada mas ainda ausente na consulta de recuperação -> repropaga DataIntegrityViolationException
+        when(pagamentoPedidoRepository.findByPedidoIdAndChaveIdempotencia(pedidoId, "IDEM-CONCORRENTE"))
+                .thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.iniciarPagamentoPoint(
+                pedidoId, req(new BigDecimal("50.00"), "IDEM-CONCORRENTE", terminalId)
+        )).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+
+        // Sem chave de idempotencia -> repropaga DataIntegrityViolationException
+        assertThatThrownBy(() -> service.iniciarPagamentoPoint(
+                pedidoId, req(new BigDecimal("50.00"), null, terminalId)
+        )).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+
+        // Recuperacao concorrente pela chave de idempotencia após DataIntegrityViolationException
+        PagamentoPedidoEntity pagRecuperado = pagamento(UUID.randomUUID(), pedidoId, StatusPagamentoPedido.EM_TERMINAL);
+        when(pagamentoPedidoRepository.findByPedidoIdAndChaveIdempotencia(pedidoId, "IDEM-REC"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(pagRecuperado));
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoId))
+                .thenReturn(List.of(), List.of(pagRecuperado));
+
+        PedidoCaixaDetalheResponseDto recResp = service.iniciarPagamentoPoint(
+                pedidoId, req(new BigDecimal("50.00"), "IDEM-REC", terminalId)
+        );
+        assertThat(recResp.id()).isEqualTo(pedidoId);
+        assertThat(recResp.pagamentos()).hasSize(1);
+    }
+
+    @Test
+    void cancelarCobrancaPointDeveCobrirCancelamentoLocalEstadoInvalidoEFluxoRemotoFeliz() {
+        UUID estId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID pedidoId = UUID.randomUUID();
+        UUID pagLocalId = UUID.randomUUID();
+        UUID pagAprovadoId = UUID.randomUUID();
+        UUID pagFelizId = UUID.randomUUID();
+
+        when(contextoCaixa.estabelecimentoId()).thenReturn(estId);
+        when(contextoCaixa.usuarioId()).thenReturn(userId);
+
+        PedidoEntity pedido = pedido(pedidoId, estId, userId, new BigDecimal("80.00"));
+        pedido.setStatus(StatusPedidoCaixa.AGUARDANDO_MAQUINA);
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
+        when(itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedidoId)).thenReturn(List.of());
+        when(pagamentoPedidoRepository.saveAndFlush(any(PagamentoPedidoEntity.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+        when(pedidoRepository.saveAndFlush(any(PedidoEntity.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        // PENDENTE_CONCILIACAO sem orderExternaId -> cancela localmente, libera reservas e recalcula pedido
+        PagamentoPedidoEntity pagLocal = pagamento(pagLocalId, pedidoId, StatusPagamentoPedido.PENDENTE_CONCILIACAO);
+        pagLocal.setOrderExternaId(null);
+        when(pagamentoPedidoRepository.buscarParaAtualizacao(pagLocalId, pedidoId)).thenReturn(Optional.of(pagLocal));
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoId)).thenReturn(List.of(pagLocal));
+
+        PedidoCaixaDetalheResponseDto respLocal = service.cancelarCobrancaPoint(pedidoId, pagLocalId);
+        assertThat(pagLocal.getStatus()).isEqualTo(StatusPagamentoPedido.CANCELADO);
+        assertThat(respLocal.status()).isEqualTo(StatusPedidoCaixa.EM_ATENDIMENTO);
+        verify(reservaEstoqueService).liberarReservasAtivasDoPedido(
+                eq(pedidoId), eq(StatusReservaEstoque.LIBERADA), any()
+        );
+
+        // Status APROVADO -> PedidoEstadoInvalidoException
+        PagamentoPedidoEntity pagAprov = pagamento(pagAprovadoId, pedidoId, StatusPagamentoPedido.APROVADO);
+        when(pagamentoPedidoRepository.buscarParaAtualizacao(pagAprovadoId, pedidoId)).thenReturn(Optional.of(pagAprov));
+        assertThatThrownBy(() -> service.cancelarCobrancaPoint(pedidoId, pagAprovadoId))
+                .isInstanceOf(PedidoEstadoInvalidoException.class);
+
+        // Fluxo remoto feliz EM_TERMINAL -> CANCELAMENTO_SOLICITADO -> aplicarResultadoOrder -> CANCELADO
+        pedido.setStatus(StatusPedidoCaixa.AGUARDANDO_MAQUINA);
+        PagamentoPedidoEntity pagFeliz = pagamento(pagFelizId, pedidoId, StatusPagamentoPedido.EM_TERMINAL);
+        pagFeliz.setOrderExternaId("ORD-CANCEL");
+        when(pagamentoPedidoRepository.buscarParaAtualizacao(pagFelizId, pedidoId)).thenReturn(Optional.of(pagFeliz));
+        when(mercadoPagoPointClient.cancelarOrder("ORD-CANCEL", pagFelizId + "-cancel")).thenReturn(
+                new OrderPointResultado(
+                        "ORD-CANCEL", "canceled", "cancelled", null, "cancelled", "REF",
+                        new BigDecimal("80.00"), "{\"status\":\"canceled\"}"
+                )
+        );
+        when(transicaoPagamentoPointService.aplicarResultadoOrder(
+                eq(pagFelizId), any(), eq(OrigemAuditoriaCaixa.API), eq(userId)
+        )).thenAnswer(inv -> {
+            pagFeliz.setStatus(StatusPagamentoPedido.CANCELADO);
+            pedido.setStatus(StatusPedidoCaixa.EM_ATENDIMENTO);
+            return pagFeliz;
+        });
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoId)).thenReturn(List.of(pagFeliz));
+
+        PedidoCaixaDetalheResponseDto respFeliz = service.cancelarCobrancaPoint(pedidoId, pagFelizId);
+        assertThat(respFeliz.id()).isEqualTo(pedidoId);
+        assertThat(respFeliz.status()).isEqualTo(StatusPedidoCaixa.EM_ATENDIMENTO);
     }
 
     private RegistrarPagamentoPedidoRequestDto req(BigDecimal valor, String idem, UUID terminalId) {

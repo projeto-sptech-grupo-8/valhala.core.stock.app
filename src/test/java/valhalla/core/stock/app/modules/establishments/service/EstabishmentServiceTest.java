@@ -54,7 +54,7 @@ class EstabishmentServiceTest {
 
     @Test
     void deveObterDadosDoEstabelecimentoAutenticadoELancarErrosDeSessaoOuNaoEncontrado() {
-        EstablishmentEntity entidade = estabelecimento(establishmentId, "Meraki LTDA", "Adega Meraki", "12345678000199");
+        EstablishmentEntity entidade = estabelecimento(establishmentId, "Meraki LTDA", "Adega Meraki", "12345678000195");
         entidade.setContactEmail("contato@meraki.com.br");
         entidade.setPhone("1140000000");
         entidade.setAddress("R. das Bebidas, 420");
@@ -64,7 +64,7 @@ class EstabishmentServiceTest {
 
         assertThat(resposta.id()).isEqualTo(establishmentId);
         assertThat(resposta.nome()).isEqualTo("Adega Meraki");
-        assertThat(resposta.cnpj()).isEqualTo("12345678000199");
+        assertThat(resposta.cnpj()).isEqualTo("12345678000195");
         assertThat(resposta.emailContato()).isEqualTo("contato@meraki.com.br");
         assertThat(resposta.telefone()).isEqualTo("1140000000");
         assertThat(resposta.endereco()).isEqualTo("R. das Bebidas, 420");
@@ -95,13 +95,13 @@ class EstabishmentServiceTest {
     void deveAtualizarTodosOsCamposENormalizarDados() {
         EstablishmentEntity entidade = estabelecimento(establishmentId, "  ", "Nome Antigo", "00000000000191");
         when(establishmentRepository.findById(establishmentId)).thenReturn(Optional.of(entidade));
-        when(establishmentRepository.existsByCnpjAndIdNot("12345678000199", establishmentId)).thenReturn(false);
+        when(establishmentRepository.existsByCnpjAndIdNot("12345678000195", establishmentId)).thenReturn(false);
         when(establishmentRepository.saveAndFlush(any(EstablishmentEntity.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
 
         EstabelecimentoAtualizacaoRequestDto dto = new EstabelecimentoAtualizacaoRequestDto(
                 "  Adega Meraki Premium  ",
-                "12.345.678/0001-99",
+                "12.345.678/0001-95",
                 "  Contato@Meraki.com.br ",
                 " (11) 4000-0000 ",
                 " R. das Bebidas, 420 · São Paulo "
@@ -111,7 +111,7 @@ class EstabishmentServiceTest {
 
         assertThat(resposta.nome()).isEqualTo("Adega Meraki Premium");
         assertThat(entidade.getCorporateName()).isEqualTo("Adega Meraki Premium");
-        assertThat(resposta.cnpj()).isEqualTo("12345678000199");
+        assertThat(resposta.cnpj()).isEqualTo("12345678000195");
         assertThat(resposta.emailContato()).isEqualTo("contato@meraki.com.br");
         assertThat(resposta.telefone()).isEqualTo("(11) 4000-0000");
         assertThat(resposta.endereco()).isEqualTo("R. das Bebidas, 420 · São Paulo");
@@ -119,7 +119,7 @@ class EstabishmentServiceTest {
 
     @Test
     void deveLimparCamposOpcionaisEManterMesmoCnpj() {
-        EstablishmentEntity entidade = estabelecimento(establishmentId, "Meraki LTDA", "Adega Meraki", "12345678000199");
+        EstablishmentEntity entidade = estabelecimento(establishmentId, "Meraki LTDA", "Adega Meraki", "12345678000195");
         entidade.setContactEmail("contato@meraki.com.br");
         entidade.setPhone("1140000000");
         entidade.setAddress("R. das Bebidas, 420");
@@ -129,7 +129,7 @@ class EstabishmentServiceTest {
 
         EstabelecimentoAtualizacaoRequestDto dto = new EstabelecimentoAtualizacaoRequestDto(
                 null,
-                "12.345.678/0001-99",
+                "12.345.678/0001-95",
                 "   ",
                 "",
                 "   "
@@ -138,7 +138,7 @@ class EstabishmentServiceTest {
         EstabelecimentoResponseDto resposta = service.atualizarEstabelecimento(dto);
 
         assertThat(resposta.nome()).isEqualTo("Adega Meraki");
-        assertThat(resposta.cnpj()).isEqualTo("12345678000199");
+        assertThat(resposta.cnpj()).isEqualTo("12345678000195");
         assertThat(resposta.emailContato()).isNull();
         assertThat(resposta.telefone()).isNull();
         assertThat(resposta.endereco()).isNull();
@@ -169,17 +169,26 @@ class EstabishmentServiceTest {
         )).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("O CNPJ deve conter 14 dígitos numéricos");
 
-        when(establishmentRepository.existsByCnpjAndIdNot("98765432000110", establishmentId)).thenReturn(true);
         assertThatThrownBy(() -> service.atualizarEstabelecimento(
-                new EstabelecimentoAtualizacaoRequestDto(null, "98.765.432/0001-10", null, null, null)
+                new EstabelecimentoAtualizacaoRequestDto(null, "12.345.678/0001-99", null, null, null)
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("CNPJ");
+        assertThatThrownBy(() -> service.atualizarEstabelecimento(
+                new EstabelecimentoAtualizacaoRequestDto(null, "00.000.000/0000-00", null, null, null)
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("CNPJ");
+
+        when(establishmentRepository.existsByCnpjAndIdNot("98765432000198", establishmentId)).thenReturn(true);
+        assertThatThrownBy(() -> service.atualizarEstabelecimento(
+                new EstabelecimentoAtualizacaoRequestDto(null, "98.765.432/0001-98", null, null, null)
         )).isInstanceOf(CnpjAlreadyExistsException.class)
                 .hasMessage("Já existe um estabelecimento cadastrado com este CNPJ");
 
-        when(establishmentRepository.existsByCnpjAndIdNot("98765432000110", establishmentId)).thenReturn(false);
+        when(establishmentRepository.existsByCnpjAndIdNot("98765432000198", establishmentId)).thenReturn(false);
         when(establishmentRepository.saveAndFlush(any(EstablishmentEntity.class)))
                 .thenThrow(new DataIntegrityViolationException("uq_estabelecimento_cnpj"));
         assertThatThrownBy(() -> service.atualizarEstabelecimento(
-                new EstabelecimentoAtualizacaoRequestDto("Meraki", "98.765.432/0001-10", null, null, null)
+                new EstabelecimentoAtualizacaoRequestDto("Meraki", "98.765.432/0001-98", null, null, null)
         )).isInstanceOf(CnpjAlreadyExistsException.class)
                 .hasMessage("Já existe um estabelecimento cadastrado com este CNPJ");
     }

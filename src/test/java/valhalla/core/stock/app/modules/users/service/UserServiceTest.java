@@ -258,6 +258,46 @@ class UserServiceTest {
     }
 
     @Test
+    void naoGerenteNaoDeveEditarOuExcluirOutroNaoGerenteComPermissoesSuperiores() {
+        UUID idAlvo = UUID.randomUUID();
+        UserEntity alvo = usuarioEntidade(idAlvo, "Supervisor", "sup@meraki.com");
+        FuncionalidadeEntity funcExtra = FuncionalidadeEntity.builder().code("FINANCEIRO_GERENCIAR").build();
+        alvo.setProfile(ProfileEntity.builder()
+                .id(3)
+                .name("Financeiro")
+                .establishment(alvo.getEstablishment())
+                .functionalities(java.util.Set.of(funcExtra))
+                .build());
+        when(userRepository.findById(idAlvo)).thenReturn(Optional.of(alvo));
+
+        assertThatThrownBy(() -> userService.atualizarUsuario(idAlvo,
+                new RequisicaoAtualizacaoUsuarioDto("Outro Nome", null, null, null, null, null)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        assertThatThrownBy(() -> userService.deletarUsuario(idAlvo))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verify(userRepository, never()).saveAndFlush(any());
+        verify(userRepository, never()).delete(any());
+    }
+
+    @Test
+    void deveRevogarTokensQuandoEmailDoUsuarioForAlterado() {
+        UUID id = UUID.randomUUID();
+        UserEntity u = usuarioEntidade(id, "Operador", "op@meraki.com");
+        when(userRepository.findById(id)).thenReturn(Optional.of(u));
+        when(userAuthorizationService.hasPermission(any(), eq("USUARIOS_EDITAR"))).thenReturn(true);
+        when(userRepository.existsByEmailIgnoreCase("novo-email@meraki.com")).thenReturn(false);
+        when(userRepository.saveAndFlush(u)).thenReturn(u);
+
+        userService.atualizarUsuario(id,
+                new RequisicaoAtualizacaoUsuarioDto(null, "novo-email@meraki.com", null, null, null, null));
+
+        assertThat(u.getEmail()).isEqualTo("novo-email@meraki.com");
+        verify(tokenStateService).revokeAll(id);
+    }
+
+    @Test
     void deveExcluirUsuarioExistente() {
         UserEntity user = usuarioEntidade(UUID.randomUUID(), "Usuário", "usuario@exemplo.com");
         when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));

@@ -21,6 +21,7 @@ import valhalla.core.stock.app.modules.caixa.pedido.enums.CanalPedidoCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusDescontoPedido;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPedidoCaixa;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.TipoDescontoPedido;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Entity
 @Table(name = "pedido")
@@ -135,7 +136,7 @@ public class PedidoEntity {
 
     @PrePersist
     private void prePersist() {
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         if (criadoEm == null) {
             criadoEm = agora;
         }
@@ -167,6 +168,6 @@ public class PedidoEntity {
 
     @PreUpdate
     private void preUpdate() {
-        atualizadoEm = LocalDateTime.now();
+        atualizadoEm = FusoHorarioOperacao.agora();
     }
 }

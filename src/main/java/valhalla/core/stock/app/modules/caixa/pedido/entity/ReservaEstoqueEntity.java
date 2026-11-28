@@ -18,6 +18,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusReservaEstoque;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Entity
 @Table(name = "reserva_estoque")
@@ -78,7 +79,7 @@ public class ReservaEstoqueEntity {
 
     @PrePersist
     private void prePersist() {
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         if (criadoEm == null) {
             criadoEm = agora;
         }
@@ -92,6 +93,6 @@ public class ReservaEstoqueEntity {
 
     @PreUpdate
     private void preUpdate() {
-        atualizadoEm = LocalDateTime.now();
+        atualizadoEm = FusoHorarioOperacao.agora();
     }
 }

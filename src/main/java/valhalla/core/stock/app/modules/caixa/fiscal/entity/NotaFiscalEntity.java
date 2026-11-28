@@ -19,6 +19,7 @@ import org.hibernate.type.SqlTypes;
 import valhalla.core.stock.app.modules.caixa.fiscal.enums.AmbienteFiscal;
 import valhalla.core.stock.app.modules.caixa.fiscal.enums.StatusNotaFiscal;
 import valhalla.core.stock.app.modules.caixa.fiscal.enums.TipoNotaFiscal;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -120,7 +121,7 @@ public class NotaFiscalEntity {
 
     @PrePersist
     private void prePersist() {
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         if (criadaEm == null) {
             criadaEm = agora;
         }
@@ -158,6 +159,6 @@ public class NotaFiscalEntity {
 
     @PreUpdate
     private void preUpdate() {
-        atualizadaEm = LocalDateTime.now();
+        atualizadaEm = FusoHorarioOperacao.agora();
     }
 }

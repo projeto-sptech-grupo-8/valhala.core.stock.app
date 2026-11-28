@@ -51,10 +51,10 @@ import valhalla.core.stock.app.modules.auth.security.CsrfTokenValidationFilter;
 import valhalla.core.stock.app.shared.config.CorsProperties;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 import valhalla.core.stock.app.shared.logging.RequestFailureContext;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
@@ -178,7 +178,7 @@ public class SecurityConfig {
         objectMapper.writeValue(
                 response.getOutputStream(),
                 new ApiErrorResponse(
-                        LocalDateTime.now(),
+                        FusoHorarioOperacao.agora(),
                         status.value(),
                         message,
                         Map.of()
@@ -284,16 +284,34 @@ public class SecurityConfig {
 
         OAuth2TokenValidator<Jwt> validator = stateValidator == null
                 ? new DelegatingOAuth2TokenValidator<>(
-                        JwtValidators.createDefault(),
+                        JwtValidators.createDefaultWithIssuer(properties.issuer()),
+                        audienceValidator(properties.audience()),
                         purposeValidator(purpose)
                 )
                 : new DelegatingOAuth2TokenValidator<>(
-                        JwtValidators.createDefault(),
+                        JwtValidators.createDefaultWithIssuer(properties.issuer()),
+                        audienceValidator(properties.audience()),
                         purposeValidator(purpose),
                         stateValidator
                 );
         decoder.setJwtValidator(validator);
         return decoder;
+    }
+
+    private OAuth2TokenValidator<Jwt> audienceValidator(String expectedAudience) {
+        return token -> {
+            java.util.List<String> audience = token.getAudience();
+            if (audience != null && audience.contains(expectedAudience)) {
+                return OAuth2TokenValidatorResult.success();
+            }
+
+            OAuth2Error error = new OAuth2Error(
+                    "invalid_token",
+                    "Token com audiência inválida",
+                    null
+            );
+            return OAuth2TokenValidatorResult.failure(error);
+        };
     }
 
     private OAuth2TokenValidator<Jwt> purposeValidator(String expectedPurpose) {

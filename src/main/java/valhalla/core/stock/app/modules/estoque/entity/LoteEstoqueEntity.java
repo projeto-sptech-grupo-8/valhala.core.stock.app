@@ -10,6 +10,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import jakarta.persistence.Version;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -49,6 +50,10 @@ public class LoteEstoqueEntity {
 
     @Column(name = "quantidade_atual", nullable = false, precision = 12, scale = 3)
     private BigDecimal quantidadeAtual;
+
+    @Version
+    @Column(name = "versao", nullable = false)
+    private Long versao;
 
     @CreationTimestamp
     @Column(name = "criado_em", nullable = false, updatable = false)

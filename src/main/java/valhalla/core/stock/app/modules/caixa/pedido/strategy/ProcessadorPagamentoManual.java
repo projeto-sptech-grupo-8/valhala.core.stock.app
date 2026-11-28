@@ -15,6 +15,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import valhalla.core.stock.app.modules.caixa.pedido.service.CalculoPagamentoEletronicoHelper;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Component
 public class ProcessadorPagamentoManual implements ProcessadorPagamento {
@@ -89,7 +90,7 @@ public class ProcessadorPagamentoManual implements ProcessadorPagamento {
         pagamento.setValorJuros(taxas.valorJuros());
         pagamento.setChaveIdempotencia(normalizar(dto.chaveIdempotencia()));
         pagamento.setComprovanteReferencia(normalizar(dto.comprovanteReferencia()));
-        pagamento.setSolicitadoEm(LocalDateTime.now());
+        pagamento.setSolicitadoEm(FusoHorarioOperacao.agora());
 
         return pagamento;
     }
