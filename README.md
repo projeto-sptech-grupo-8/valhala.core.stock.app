@@ -1,7 +1,8 @@
 # Adega Meraki — Core Stock API
 
 API REST multiestabelecimento para autenticação, administração de usuários e
-permissões, controle de estoque e dashboard da Adega Meraki.
+permissões, controle de estoque, caixa/PDV com Mercado Pago Point, financeiro,
+relatórios e dashboard da Adega Meraki.
 
 ![Java 21](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)
 ![Spring Boot 4.1.1](https://img.shields.io/badge/Spring_Boot-4.1.1-6DB33F?logo=springboot&logoColor=white)
@@ -35,13 +36,21 @@ O **Core Stock API** centraliza o acesso e as operações do estabelecimento:
   histórico auditável.
 - **Drinks** com receita rastreável e baixa automática dos ingredientes em uma
   única transação.
+- **Lotes e validade** com consulta e resumo de vencimentos.
+- **Caixa/PDV**: caixas e terminais, sessões (abertura, movimentações,
+  fechamento e resolução de divergência), pedidos com desconto e autorização,
+  pagamentos (dinheiro e cartão/Pix na maquininha **Mercado Pago Point Smart 2**),
+  conciliação, estorno, taxas, configuração e auditoria.
+- **NFC-e** emitida no pós-venda, com consulta, XML e cancelamento.
+- **Financeiro** com contas a pagar e receber, resumo e resultado do período.
+- **Relatórios** gerenciais: curva ABC, margem por categoria, ruptura,
+  horários, canais e perdas, com exportação.
+- **Recuperação de senha** por e-mail (token com validade e intervalo mínimo
+  entre solicitações) e histórico de acessos do usuário.
 - **Dashboard** com indicadores de estoque, alertas, série mensal e últimas
   movimentações.
 - **Isolamento por estabelecimento**: o vínculo vem do token, nunca do corpo da
   requisição. Acesso a dados de outro estabelecimento é bloqueado.
-
-Fora do escopo atual: financeiro, caixa, pedidos e NF-e. A dashboard sinaliza
-esses módulos como `INDISPONIVEL`.
 
 ## Stack
 
@@ -50,7 +59,8 @@ esses módulos como `INDISPONIVEL`.
 | Runtime | Java 21 |
 | Framework | Spring Boot 4.1.1 — Web MVC, Data JPA, Security, OAuth2 Resource Server e Validation |
 | Banco de dados | PostgreSQL; H2 em memória nos testes |
-| Migrações | Flyway |
+| Migrações | Flyway (`V1` a `V30`) |
+| Integrações | Mercado Pago Point (modos `MOCK`, `HOMOLOGACAO`, `PRODUCAO`), SMTP (Jakarta Mail) e Apache POI (exportações) |
 | Autenticação | JWT HS256 em cookies `HttpOnly` + token CSRF |
 | Documentação | springdoc-openapi 3.0.2 e contrato OpenAPI 3.1 versionado |
 | Build | Maven Wrapper (`mvnw` / `mvnw.cmd`) |
@@ -69,7 +79,10 @@ src/main/java/valhalla/core/stock/app/
 │   ├── users/             # cadastro e administração de usuários
 │   ├── accesscontrol/     # perfis, funcionalidades e sobrescritas
 │   ├── establishments/    # estabelecimentos
-│   ├── estoque/           # categorias, produtos, movimentações e receitas
+│   ├── estoque/           # categorias, produtos, lotes, movimentações e receitas
+│   ├── caixa/             # configuracao, sessao, pedido, point (Mercado Pago), fiscal (NFC-e)
+│   ├── financeiro/        # contas a pagar/receber, resumo e resultado
+│   ├── relatorios/        # relatórios gerenciais e exportações
 │   └── dashboard/         # indicadores consolidados
 └── shared/                # configuração, erros, paginação, logging e seed de dev
 
@@ -187,9 +200,12 @@ openssl rand -base64 32
 | Recurso | URL |
 | --- | --- |
 | API | `http://localhost:8080` |
-| Swagger UI | `http://localhost:8080/swagger-ui.html` |
-| OpenAPI JSON | `http://localhost:8080/v3/api-docs` |
+| Swagger UI (somente perfil `dev`) | `http://localhost:8080/swagger-ui.html` |
+| OpenAPI JSON (somente perfil `dev`) | `http://localhost:8080/v3/api-docs` |
 | Contrato versionado | [docs/openapi.yaml](docs/openapi.yaml) |
+
+> Swagger UI e `/v3/api-docs` vêm **desabilitados por padrão** e só são
+> habilitados com o perfil `dev`.
 
 Para gerar o artefato de produção:
 
@@ -209,7 +225,10 @@ spring.profiles.active=dev
 O perfil `dev` aplica `db/demo/dados_demonstracao.sql` por meio do
 `DemoDataSeeder`, depois que o Flyway termina. Todos os usuários de demonstração
 usam a senha `Senha@123`, incluindo `dev@meraki.com` (perfil Gerente). O perfil
-também força `COOKIE_SECURE=false` para permitir login em HTTP local.
+também força `COOKIE_SECURE=false` para permitir login em HTTP local, habilita
+o Swagger, usa o Point em modo `MOCK` (com o simulador
+`POST /dev/mercado-pago/point/orders/{orderId}/simular`) e aponta o SMTP para
+`localhost:1025` (ex.: Mailpit).
 
 > **Nunca use o perfil `dev` em produção.** Ele cria usuários com senha
 > conhecida. O seed depende da extensão `pgcrypto` criada por `script.sql`.
@@ -226,6 +245,18 @@ também força `COOKIE_SECURE=false` para permitir login em HTTP local.
 | `JWT_REFRESH_EXPIRATION` | não | `P7D` | Validade do refresh token; deve ser maior que `JWT_EXPIRATION`. |
 | `FRONTEND_URL` | não | `http://localhost:5173` | Origem(ns) permitida(s) no CORS, separadas por vírgula, sem barra final. |
 | `COOKIE_SECURE` | não | `true` | Exige HTTPS nos cookies. Use `false` apenas em desenvolvimento local. |
+| `MP_POINT_MODO` | não | `PRODUCAO` (`MOCK` em `dev`) | `MOCK`, `HOMOLOGACAO` ou `PRODUCAO`. |
+| `MP_ACCESS_TOKEN` | em `HOMOLOGACAO`/`PRODUCAO` | — | Token Bearer do Mercado Pago Developers. |
+| `MP_WEBHOOK_SECRET` | em `HOMOLOGACAO`/`PRODUCAO` | — | Segredo para validar o HMAC-SHA256 de `x-signature`. |
+| `MP_WEBHOOK_VALIDAR_ASSINATURA` | não | `true` | Deve permanecer `true` fora do `MOCK`. |
+| `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD` | não | `localhost`, `587` (`1025` em `dev`) | SMTP usado na recuperação de senha. |
+| `MAIL_FROM`, `MAIL_FROM_NAME` | não | `nao-responda@adegameraki.com.br`, `Adega Meraki` | Remetente dos e-mails. |
+| `PASSWORD_RESET_URL` | não | `${FRONTEND_URL}/redefinir-senha` | URL do frontend; o token é anexado como `?token=`. |
+| `PASSWORD_RESET_EXPIRATION` | não | `PT30M` | Validade do token de redefinição. |
+| `PASSWORD_RESET_MIN_INTERVAL` | não | `PT1M` | Intervalo mínimo entre solicitações. |
+
+Outras variáveis do Point (timeouts, expiração de ordem/reserva, reconciliação
+ativa e rate limits `MP_*`) estão em `.env.example` e `application.properties`.
 
 As variáveis `LOG_PATH`, `LOG_LEVEL_APP`, `LOG_HISTORY_DAYS`,
 `LOG_TOTAL_SIZE_CAP` e `LOG_FILE_MAX_SIZE` são lidas diretamente pelo Logback e
@@ -289,6 +320,8 @@ protegidos.
 | `POST` | `/auth/refresh` | Cookie `refreshToken` | sim | `200 OK` e rotação dos cookies |
 | `GET` | `/auth/csrf` | Cookie `accessToken` | não | `200 OK` com `{ "token": "..." }` |
 | `POST` | `/auth/logout` | Cookies opcionais | sim* | `204 No Content` e remoção dos cookies |
+| `POST` | `/auth/recuperar-senha` | Público | não | Envia e-mail com link de redefinição |
+| `POST` | `/auth/redefinir-senha` | Público (token do e-mail) | não | Define a nova senha e revoga sessões |
 
 \* O logout é idempotente: sem sessão válida, retorna `204` sem exigir CSRF.
 
@@ -424,6 +457,8 @@ Swagger UI e em [docs/openapi.yaml](docs/openapi.yaml).
 | `POST` | `/usuario` | `USUARIOS_CRIAR` | `201 Created` + `Location` |
 | `GET` | `/usuario` | `USUARIOS_VISUALIZAR` | `200 OK` |
 | `GET` | `/usuario/me` | Usuário autenticado | `200 OK` |
+| `GET` | `/usuario/me/acessos` | Usuário autenticado | `200 OK` (histórico de acessos) |
+| `GET` | `/usuario/{id}/acessos` | Próprio usuário ou `USUARIOS_VISUALIZAR` | `200 OK` |
 | `GET` | `/usuario/{id}` | Próprio usuário ou `USUARIOS_VISUALIZAR` | `200 OK` |
 | `PATCH` | `/usuario/me` | Usuário autenticado | `200 OK` |
 | `DELETE` | `/usuario/me` | Usuário autenticado | `204 No Content` |
@@ -471,11 +506,16 @@ usuários (`409`). Perfis com usuários vinculados não podem ser excluídos.
 | `PATCH` | `/categorias/{id}` | `GERENCIAR_ESTOQUE` | `200 OK` |
 | `DELETE` | `/categorias/{id}` | `GERENCIAR_ESTOQUE` | `204 No Content` |
 | `GET` | `/produtos` | `VISUALIZAR_ESTOQUE` | `200 OK` paginado |
+| `GET` | `/produtos/exportar` | `VISUALIZAR_ESTOQUE` | `200 OK` (arquivo) |
 | `POST` | `/produtos` | `GERENCIAR_ESTOQUE` | `201 Created` |
 | `GET` | `/produtos/{id}` | `VISUALIZAR_ESTOQUE` | `200 OK` |
 | `PATCH` | `/produtos/{id}` | `GERENCIAR_ESTOQUE` | `200 OK` |
 | `DELETE` | `/produtos/{id}` | `GERENCIAR_ESTOQUE` | `204 No Content` |
 | `GET` | `/movimentacoes-estoque` | `VISUALIZAR_ESTOQUE` | `200 OK` paginado |
+| `GET` | `/movimentacoes-estoque/exportar` | `VISUALIZAR_ESTOQUE` | `200 OK` (arquivo) |
+| `GET` | `/movimentacoes-estoque/resumo` | `VISUALIZAR_ESTOQUE` | `200 OK` |
+| `GET` | `/lotes` | `VISUALIZAR_ESTOQUE` | `200 OK` paginado |
+| `GET` | `/lotes/resumo` | `VISUALIZAR_ESTOQUE` | `200 OK` (resumo de validade) |
 | `POST` | `/movimentacoes-estoque` | `MOVIMENTAR_ESTOQUE` | `201 Created` |
 | `POST` | `/movimentacoes-estoque/saida-drink` | `MOVIMENTAR_ESTOQUE` | `201 Created` |
 | `GET` | `/drinks/{idDrink}/receita` | `VISUALIZAR_ESTOQUE` | `200 OK` |
@@ -518,7 +558,67 @@ A margem do produto é calculada pela API:
 `meses` aceita de `1` a `24` e define o tamanho da série mensal, incluindo o mês
 atual. A resposta contém `referencia`, `estoque` (totais e alertas),
 `movimentacoes` (série mensal e últimas movimentações), `financeiro` e `caixa`
-— os dois últimos como `INDISPONIVEL`.
+(com indicação de disponibilidade do módulo).
+
+### Estabelecimento
+
+| Método | Endpoint | Quem pode usar |
+| --- | --- | --- |
+| `GET` | `/estabelecimento` | Usuário autenticado |
+| `PATCH` / `PUT` | `/estabelecimento` | Perfil `Gerente` (`ROLE_GERENTE`) |
+
+### Caixa / PDV
+
+Escritas exigem CSRF. Detalhes de corpos e respostas no Swagger/OpenAPI.
+
+| Grupo | Endpoints | Permissão |
+| --- | --- | --- |
+| Caixas e terminais | `GET/POST /caixa/caixas`, `GET/PATCH/DELETE /caixa/caixas/{id}`, `POST /caixa/caixas/{caixaId}/terminais`, `PATCH /caixa/caixas/{caixaId}/terminais/{terminalId}` | `CAIXA_VISUALIZAR` (leitura) / `CAIXA_CONFIGURAR` (escrita) |
+| Configuração | `GET/PUT /caixa/configuracao` | `CAIXA_VISUALIZAR` / `CAIXA_CONFIGURAR` |
+| Taxas | `GET/POST /caixa/taxas`, `PUT /caixa/taxas/{id}` | `CAIXA_VISUALIZAR` / `CAIXA_CONFIGURAR` |
+| Terminais Point | `GET /caixa/terminais/mercado-pago`, `PATCH /caixa/terminais/{id}/modo-operacao` | `CAIXA_CONFIGURAR` |
+| Sessões | `POST /caixa/sessoes`, `GET /caixa/sessoes`, `GET /caixa/sessoes/atual`, `GET /caixa/sessoes/{id}`, `POST /caixa/sessoes/{id}/movimentacoes` | `CAIXA_OPERAR` / `CAIXA_VISUALIZAR` |
+| Fechamento | `POST /caixa/sessoes/{id}/fechamento` · `POST /caixa/sessoes/{id}/resolucao-divergencia` | `CAIXA_FECHAR` · `CAIXA_RESOLVER_DIVERGENCIA` |
+| Pedidos | `POST/GET /caixa/pedidos`, `GET/PUT /caixa/pedidos/{id}`, `POST /caixa/pedidos/{id}/cancelamento` | `CAIXA_OPERAR` / `CAIXA_VISUALIZAR`; cancelar pedido com itens exige `CAIXA_CANCELAR` |
+| Descontos | `PUT/DELETE /caixa/pedidos/{id}/desconto`, `POST /caixa/pedidos/{id}/desconto/decisao` | `CAIXA_OPERAR`; acima do limite exige `CAIXA_AUTORIZAR_DESCONTO` |
+| Pagamentos | `POST/GET /caixa/pedidos/{id}/pagamentos`, `.../{pagamentoId}/sincronizar`, `.../{pagamentoId}/cancelamento-point` | `CAIXA_OPERAR` / `CAIXA_VISUALIZAR` |
+| Conciliação e estorno | `POST .../pagamentos/{pagamentoId}/conciliacao`, `POST .../pagamentos/{pagamentoId}/estorno`, `POST /caixa/pedidos/{id}/estorno` | `CAIXA_RESOLVER_DIVERGENCIA` (conciliação manual) · `CAIXA_ESTORNAR` |
+| NFC-e | `POST /caixa/notas-fiscais/emitir`, `GET /caixa/notas-fiscais`, `GET .../pedidos-elegiveis`, `GET .../{id}`, `GET .../{id}/xml`, `POST .../{id}/cancelamento` | `CAIXA_OPERAR` (emitir; cancelar aceita também `CAIXA_CANCELAR`) / `CAIXA_VISUALIZAR` (consultas) |
+| Auditoria | `GET /caixa/auditoria` | Consulta da trilha de auditoria do caixa |
+| Webhook Mercado Pago | `POST /webhooks/mercado-pago/point` | Público, protegido por assinatura HMAC e rate limit |
+| Simulador (somente `dev`) | `POST /dev/mercado-pago/point/orders/{orderId}/simular` | Perfil `dev` |
+
+A matriz exata de permissões por operação está nas anotações `@PreAuthorize`
+dos serviços do módulo `caixa` e no contrato OpenAPI. As regras de negócio do
+caixa estão em [../docs/regras-de-negocio-caixa.md](../docs/regras-de-negocio-caixa.md).
+
+### Financeiro
+
+| Método | Endpoint | Permissão |
+| --- | --- | --- |
+| `GET` | `/financeiro/resumo` | `VISUALIZAR_FINANCEIRO` |
+| `GET` | `/financeiro/resultado?inicio=&fim=` | `VISUALIZAR_FINANCEIRO` |
+| `GET` | `/financeiro/contas` (filtros: `tipo`, `status`, `centroCusto`, `vencimentoDe`, `vencimentoAte`, paginação) | `VISUALIZAR_FINANCEIRO` |
+| `GET` | `/financeiro/contas/{idConta}` | `VISUALIZAR_FINANCEIRO` |
+| `POST` | `/financeiro/contas` | `GERENCIAR_FINANCEIRO` |
+| `PUT` | `/financeiro/contas/{idConta}` | `GERENCIAR_FINANCEIRO` |
+| `POST` | `/financeiro/contas/{idConta}/baixa` | `GERENCIAR_FINANCEIRO` |
+| `PATCH` | `/financeiro/contas/{idConta}/inativacao` | `GERENCIAR_FINANCEIRO` |
+
+Contas não são canceladas: são **inativadas** (migração `V28`).
+
+### Relatórios
+
+Todos exigem `VISUALIZAR_RELATORIOS` e aceitam o parâmetro `dias`.
+
+| Endpoint | Conteúdo |
+| --- | --- |
+| `GET /relatorios/abc` · `/abc/exportar` | Curva ABC |
+| `GET /relatorios/margem-categorias` | Margem por categoria |
+| `GET /relatorios/ruptura` · `/ruptura/exportar` | Rupturas de estoque |
+| `GET /relatorios/horarios` | Vendas por horário |
+| `GET /relatorios/canais` | Vendas por canal |
+| `GET /relatorios/perdas` | Perdas classificadas |
 
 ## Permissões
 
@@ -537,7 +637,21 @@ existentes.
 | `PERMISSOES_GERENCIAR` | Configurar permissões de perfil e de usuário. |
 | `GERENCIAR_ESTOQUE` | Administrar categorias e produtos. |
 | `MOVIMENTAR_ESTOQUE` | Registrar entradas, saídas, ajustes, perdas e baixas de drink. |
-| `VISUALIZAR_ESTOQUE` | Consultar categorias, produtos, saldos e movimentações. |
+| `VISUALIZAR_ESTOQUE` | Consultar categorias, produtos, saldos, lotes, movimentações e dashboard. |
+| `CAIXA_OPERAR` | Criar/editar pedidos, registrar dinheiro e iniciar cobranças na Point. |
+| `CAIXA_FECHAR` | Fechar a própria sessão de caixa. |
+| `CAIXA_VISUALIZAR` | Consultar sessões, vendas, pagamentos e configuração. |
+| `CAIXA_CONFIGURAR` | Configurar caixas, terminais, taxas e políticas. |
+| `CAIXA_CANCELAR` | Cancelar pedidos e cobranças ainda não aprovadas. |
+| `CAIXA_ESTORNAR` | Estornar pagamentos/pedidos aprovados. |
+| `CAIXA_AUTORIZAR_DESCONTO` | Autorizar desconto acima do limite. |
+| `CAIXA_RESOLVER_DIVERGENCIA` | Resolver divergência de caixa e conciliação manual. |
+| `VISUALIZAR_FINANCEIRO` | Consultar resumo, resultado e contas. |
+| `GERENCIAR_FINANCEIRO` | Cadastrar, editar, baixar e inativar contas. |
+| `VISUALIZAR_RELATORIOS` | Consultar relatórios gerenciais. |
+
+Operações exclusivas do estabelecimento (`/estabelecimento`) usam o papel
+`GERENTE`, não uma funcionalidade.
 
 O estabelecimento precisa manter ao menos um usuário ativo capaz de criar
 usuários. A API rejeita operações que removeriam essa última capacidade com
@@ -563,7 +677,7 @@ A resposta segue o formato `itens`, `pagina`, `tamanho`, `totalItens`,
 | Recurso | Filtros | Ordenação padrão |
 | --- | --- | --- |
 | `GET /categorias` | `busca`, `ativo` | `nome` ASC |
-| `GET /produtos` | `busca`, `categoriaId`, `tipo`, `ativo` | `nome` ASC |
+| `GET /produtos` | `busca`, `categoriaId` (múltiplos), `tipo`, `ativo` | `nome` ASC |
 | `GET /movimentacoes-estoque` | `produtoId`, `tipo`, `usuarioId`, `dataInicial`, `dataFinal` | `ocorridoEm` DESC |
 
 Em movimentações, `dataInicial` e `dataFinal` usam `yyyy-MM-dd` e a data final é
@@ -601,8 +715,11 @@ inclusiva. Filtros omitidos não restringem a consulta.
 ```
 
 Os testes usam H2 em memória, com Flyway desabilitado, e não alteram o
-PostgreSQL local. A suíte cobre autenticação, permissões, usuários, categorias,
-produtos, movimentações, receitas, dashboard e o contrato OpenAPI.
+PostgreSQL local. Testes de integração com PostgreSQL (incluindo a migração
+`V30`) usam `embedded-postgres`, sem instalação adicional. A suíte (~70 classes)
+cobre autenticação, permissões, usuários, estoque, caixa/Point, NFC-e,
+financeiro, relatórios, dashboard e o contrato OpenAPI. O relatório de cobertura
+é gerado pelo JaCoCo.
 
 ## Solução de problemas
 
@@ -627,6 +744,8 @@ A lista completa de erros de configuração está em
 | [docs/REGRAS_NEGOCIO_ESTOQUE.md](docs/REGRAS_NEGOCIO_ESTOQUE.md) | Regras de produtos, movimentações, drinks e dashboard. |
 | [docs/OPENAPI.md](docs/OPENAPI.md) | Geração e atualização do contrato OpenAPI. |
 | [docs/openapi.yaml](docs/openapi.yaml) | Contrato OpenAPI versionado. |
+| [../docs/regras-de-negocio-caixa.md](../docs/regras-de-negocio-caixa.md) | Regras de negócio do caixa. |
+| [../docs/planejamento-fase2-mercado-pago-point.md](../docs/planejamento-fase2-mercado-pago-point.md) | Planejamento da integração Mercado Pago Point. |
 
 ## Contribuição
 
