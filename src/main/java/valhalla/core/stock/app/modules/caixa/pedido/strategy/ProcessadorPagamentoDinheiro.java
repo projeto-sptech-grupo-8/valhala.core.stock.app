@@ -8,6 +8,7 @@ import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PedidoEntity;
 import valhalla.core.stock.app.modules.caixa.sessao.entity.SessaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPagamentoPedido;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -46,7 +47,7 @@ public class ProcessadorPagamentoDinheiro implements ProcessadorPagamento {
         }
 
         BigDecimal troco = valorRecebido.subtract(valor).setScale(2, RoundingMode.HALF_UP);
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
 
         PagamentoPedidoEntity pagamento = new PagamentoPedidoEntity();
         pagamento.setPedidoId(pedido.getId());

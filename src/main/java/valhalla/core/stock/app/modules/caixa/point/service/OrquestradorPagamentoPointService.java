@@ -44,7 +44,6 @@ import valhalla.core.stock.app.modules.users.repository.UserRepository;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDateTime;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,6 +58,7 @@ import valhalla.core.stock.app.modules.caixa.pedido.strategy.ProcessadorPagament
 import valhalla.core.stock.app.modules.caixa.security.ContextoCaixa;
 import valhalla.core.stock.app.modules.caixa.sessao.service.AuditoriaCaixaService;
 import valhalla.core.stock.app.modules.caixa.sessao.service.EventoAuditoriaCaixa;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Service
 public class OrquestradorPagamentoPointService {
@@ -278,7 +278,7 @@ public class OrquestradorPagamentoPointService {
 
             if (pagamento.getOrderExternaId() == null || pagamento.getOrderExternaId().isBlank()) {
                 pagamento.setStatus(StatusPagamentoPedido.CANCELADO);
-                pagamento.setCanceladoEm(LocalDateTime.now());
+                pagamento.setCanceladoEm(FusoHorarioOperacao.agora());
                 pagamento.setCanceladoPorUsuarioId(usuarioId);
                 pagamento.setMotivoCancelamento("Cancelado localmente antes de confirmação externa");
                 pagamentoPedidoRepository.saveAndFlush(pagamento);

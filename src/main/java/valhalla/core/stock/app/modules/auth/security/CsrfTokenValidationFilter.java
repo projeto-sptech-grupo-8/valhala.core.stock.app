@@ -22,10 +22,10 @@ import tools.jackson.databind.ObjectMapper;
 import valhalla.core.stock.app.modules.auth.service.TokenStateService;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 import valhalla.core.stock.app.shared.logging.RequestFailureContext;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -145,7 +145,7 @@ public class CsrfTokenValidationFilter extends OncePerRequestFilter {
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         objectMapper.writeValue(response.getOutputStream(), new ApiErrorResponse(
-                LocalDateTime.now(),
+                FusoHorarioOperacao.agora(),
                 HttpStatus.FORBIDDEN.value(),
                 "Token CSRF ausente ou inválido",
                 Map.of()

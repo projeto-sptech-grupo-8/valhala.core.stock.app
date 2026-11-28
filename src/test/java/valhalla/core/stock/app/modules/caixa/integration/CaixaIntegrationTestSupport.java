@@ -3,10 +3,14 @@ package valhalla.core.stock.app.modules.caixa.integration;
 import com.jayway.jsonpath.JsonPath;
 import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -14,6 +18,10 @@ import valhalla.core.stock.app.modules.accesscontrol.entity.FuncionalidadeEntity
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.repository.FuncionalidadeRepository;
 import valhalla.core.stock.app.modules.accesscontrol.repository.ProfileRepository;
+import valhalla.core.stock.app.modules.caixa.pedido.entity.PedidoEntity;
+import valhalla.core.stock.app.modules.caixa.pedido.enums.CanalPedidoCaixa;
+import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusDescontoPedido;
+import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPedidoCaixa;
 import valhalla.core.stock.app.modules.caixa.sessao.entity.AuditoriaCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.configuracao.entity.CaixaEntity;
 import valhalla.core.stock.app.modules.caixa.configuracao.entity.ConfiguracaoCaixaEntity;
@@ -34,6 +42,7 @@ import valhalla.core.stock.app.modules.caixa.sessao.repository.SessaoCaixaReposi
 import valhalla.core.stock.app.modules.caixa.configuracao.repository.TaxaPagamentoRepository;
 import valhalla.core.stock.app.modules.caixa.configuracao.repository.TerminalCaixaRepository;
 import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
+import valhalla.core.stock.app.modules.establishments.repository.EstablishmentRepository;
 import valhalla.core.stock.app.modules.estoque.entity.CategoriaEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ComposicaoDrinkEntity;
 import valhalla.core.stock.app.modules.estoque.entity.EstoqueEntity;
@@ -51,6 +60,8 @@ import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.entity.UserStatus;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
+import valhalla.core.stock.app.support.EmbeddedPostgresTestDatabase;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -60,6 +71,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -69,9 +81,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 abstract class CaixaIntegrationTestSupport {
 
     protected static final String SENHA = "senha-segura";
+    private static final AtomicLong SEQUENCIA_PEDIDO_TESTE = new AtomicLong(900_000L);
 
     @Autowired protected MockMvc mockMvc;
     @Autowired protected EntityManager entityManager;
+    @Autowired protected JdbcTemplate jdbcTemplate;
+    @Autowired protected EstablishmentRepository establishmentRepository;
     @Autowired protected ProfileRepository profileRepository;
     @Autowired protected FuncionalidadeRepository funcionalidadeRepository;
     @Autowired protected UserRepository userRepository;
@@ -98,12 +113,31 @@ abstract class CaixaIntegrationTestSupport {
     protected EstablishmentEntity estabelecimento;
     private final Map<String, String> tokensCsrf = new HashMap<>();
 
+    @DynamicPropertySource
+    static void configurarBanco(DynamicPropertyRegistry registry) {
+        EmbeddedPostgresTestDatabase.registrarPropriedades(registry);
+    }
+
     protected record UsuarioAutenticado(Cookie accessToken, UUID usuarioId) {
+    }
+
+    protected boolean limpaBancoPorTruncate() {
+        return false;
     }
 
     @BeforeEach
     void prepararEstabelecimento() {
+        if (limpaBancoPorTruncate()) {
+            EmbeddedPostgresTestDatabase.limparTabelasOperacionais(jdbcTemplate);
+        }
         estabelecimento = criarEstabelecimento("Meraki LTDA", "Meraki", "12345678000199");
+    }
+
+    @AfterEach
+    void limparBancoAposTeste() {
+        if (limpaBancoPorTruncate()) {
+            EmbeddedPostgresTestDatabase.limparTabelasOperacionais(jdbcTemplate);
+        }
     }
 
     protected EstablishmentEntity criarEstabelecimento(
@@ -111,10 +145,11 @@ abstract class CaixaIntegrationTestSupport {
             String nomeFantasia,
             String cnpj
     ) {
-        return entityManager.merge(EstablishmentEntity.builder()
+        return establishmentRepository.saveAndFlush(EstablishmentEntity.builder()
                 .corporateName(razaoSocial)
                 .tradeName(nomeFantasia)
                 .cnpj(cnpj)
+                .active(true)
                 .build());
     }
 
@@ -162,11 +197,18 @@ abstract class CaixaIntegrationTestSupport {
             String nomePerfil,
             Set<FuncionalidadeEntity> funcionalidades
     ) throws Exception {
-        ProfileEntity perfil = profileRepository.save(ProfileEntity.builder()
-                .name(nomePerfil)
-                .establishment(establishment)
-                .functionalities(funcionalidades)
-                .build());
+        ProfileEntity perfil = "Gerente".equalsIgnoreCase(nomePerfil)
+                ? profileRepository.findByEstablishment_IdAndNameIgnoreCase(establishment.getId(), "Gerente")
+                        .orElseGet(() -> profileRepository.saveAndFlush(ProfileEntity.builder()
+                                .name("Gerente")
+                                .establishment(establishment)
+                                .functionalities(funcionalidades)
+                                .build()))
+                : profileRepository.saveAndFlush(ProfileEntity.builder()
+                        .name(nomePerfil + " " + UUID.randomUUID().toString().substring(0, 6))
+                        .establishment(establishment)
+                        .functionalities(funcionalidades)
+                        .build());
 
         UserEntity usuario = userRepository.saveAndFlush(UserEntity.builder()
                 .name(nomePerfil + " " + email.substring(0, email.indexOf('@')))
@@ -259,13 +301,48 @@ abstract class CaixaIntegrationTestSupport {
             String status,
             String valor
     ) {
+        SessaoCaixaEntity sessao = sessaoCaixaRepository.findById(sessaoCaixaId).orElseThrow();
+        BigDecimal valorDecimal = new BigDecimal(valor);
+
+        PedidoEntity pedido = new PedidoEntity();
+        pedido.setEstabelecimentoId(sessao.getEstabelecimentoId());
+        pedido.setOperadorUsuarioId(sessao.getOperadorUsuarioId());
+        pedido.setNumero(SEQUENCIA_PEDIDO_TESTE.getAndIncrement());
+        pedido.setTipo("VENDA_PDV");
+        pedido.setStatus(StatusPedidoCaixa.AGUARDANDO_PAGAMENTO);
+        pedido.setCanal(CanalPedidoCaixa.BALCAO);
+        pedido.setSessaoCaixaId(sessaoCaixaId);
+        pedido.setSubtotal(valorDecimal);
+        pedido.setDesconto(BigDecimal.ZERO);
+        pedido.setTotal(valorDecimal);
+        pedido.setStatusDesconto(StatusDescontoPedido.NENHUM);
+        PedidoEntity pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
+
+        FormaPagamentoCaixa formaEnum = FormaPagamentoCaixa.valueOf(forma);
+        StatusPagamentoPedido statusEnum = StatusPagamentoPedido.valueOf(status);
+
         PagamentoPedidoEntity pagamento = new PagamentoPedidoEntity();
         pagamento.setId(UUID.randomUUID());
-        pagamento.setPedidoId(UUID.randomUUID());
+        pagamento.setPedidoId(pedidoSalvo.getId());
         pagamento.setSessaoCaixaId(sessaoCaixaId);
-        pagamento.setForma(FormaPagamentoCaixa.valueOf(forma));
-        pagamento.setStatus(StatusPagamentoPedido.valueOf(status));
-        pagamento.setValor(new BigDecimal(valor));
+        pagamento.setForma(formaEnum);
+        pagamento.setStatus(statusEnum);
+        pagamento.setProvedor(formaEnum == FormaPagamentoCaixa.DINHEIRO ? "INTERNO" : "MERCADO_PAGO");
+        pagamento.setValor(valorDecimal);
+        pagamento.setValorTroco(BigDecimal.ZERO);
+        pagamento.setValorEstornado(BigDecimal.ZERO);
+        pagamento.setParcelas(1);
+        if (statusEnum == StatusPagamentoPedido.APROVADO) {
+            pagamento.setPagoEm(FusoHorarioOperacao.agora());
+            if (formaEnum == FormaPagamentoCaixa.DINHEIRO) {
+                pagamento.setValorRecebido(valorDecimal);
+            }
+        } else if (statusEnum == StatusPagamentoPedido.CANCELADO) {
+            pagamento.setCanceladoEm(FusoHorarioOperacao.agora());
+        } else if (statusEnum == StatusPagamentoPedido.ESTORNADO) {
+            pagamento.setEstornadoEm(FusoHorarioOperacao.agora());
+            pagamento.setValorEstornado(valorDecimal);
+        }
         return pagamentoPedidoRepository.saveAndFlush(pagamento);
     }
 

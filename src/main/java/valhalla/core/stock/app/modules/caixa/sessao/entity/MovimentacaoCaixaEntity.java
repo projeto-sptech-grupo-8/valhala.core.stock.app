@@ -17,6 +17,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 import valhalla.core.stock.app.modules.caixa.sessao.enums.TipoMovimentacaoCaixa;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Entity
 @Table(name = "movimentacao_caixa")
@@ -51,7 +52,7 @@ public class MovimentacaoCaixaEntity {
     @PrePersist
     private void prePersist() {
         if (ocorridoEm == null) {
-            ocorridoEm = LocalDateTime.now();
+            ocorridoEm = FusoHorarioOperacao.agora();
         }
     }
 }

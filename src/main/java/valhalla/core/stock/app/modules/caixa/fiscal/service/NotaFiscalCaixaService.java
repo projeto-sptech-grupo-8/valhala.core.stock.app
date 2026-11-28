@@ -56,6 +56,7 @@ import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.Paginacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -212,7 +213,7 @@ public class NotaFiscalCaixaService {
         );
 
         Long numeroSequencial = gerarProximoNumeroNfce(estabelecimentoId);
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
 
         SolicitacaoEmissaoFiscal solicitacao = new SolicitacaoEmissaoFiscal(
                 estabelecimento,

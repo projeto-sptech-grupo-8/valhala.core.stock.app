@@ -14,6 +14,7 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.UUID;
 import valhalla.core.stock.app.modules.caixa.pedido.service.CalculoPagamentoEletronicoHelper;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Component
 public class ProcessadorPagamentoPoint {
@@ -56,7 +57,7 @@ public class ProcessadorPagamentoPoint {
 
         UUID pagamentoId = UUID.randomUUID();
         String referenciaExterna = gerarReferenciaExterna(pedido.getNumero(), pagamentoId);
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
 
         PagamentoPedidoEntity pagamento = new PagamentoPedidoEntity();
         pagamento.setId(pagamentoId);

@@ -374,6 +374,100 @@ class NotaFiscalCaixaServiceTest {
         assertThat(mapa.get(pedidoId)).isEqualTo(notaAutorizada);
     }
 
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void emitirListarECarregarNotaCobremCnpjsSemDescontoFiltrosEmBrancoESemPedido() {
+        UUID estabId = UUID.randomUUID();
+        UUID outroEstabId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID canceladorId = UUID.randomUUID();
+        UUID pedidoId = UUID.randomUUID();
+        when(contextoCaixa.estabelecimentoId()).thenReturn(estabId);
+        when(contextoCaixa.usuarioId()).thenReturn(userId);
+
+        // Tenant diferente ao emitir
+        PedidoEntity pedidoOutro = pedidoConcluido(outroEstabId, pedidoId);
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedidoOutro));
+        assertThatThrownBy(() -> service.emitirNfce(new EmitirNfceRequestDto(pedidoId, null, null)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        // Pedido sem itens e total zerado -> PedidoEstadoInvalidoException
+        PedidoEntity pedido = pedidoConcluido(estabId, pedidoId);
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
+        when(notaFiscalRepository.existsByPedidoIdAndStatus(pedidoId, StatusNotaFiscal.AUTORIZADA)).thenReturn(false);
+        when(itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedidoId)).thenReturn(List.of());
+        assertThatThrownBy(() -> service.emitirNfce(new EmitirNfceRequestDto(pedidoId, null, null)))
+                .isInstanceOf(PedidoEstadoInvalidoException.class);
+
+        ItemPedidoEntity item = new ItemPedidoEntity();
+        item.setId(9L);
+        item.setProdutoId(UUID.randomUUID());
+        item.setDescricaoProduto("Item Único");
+        item.setQuantidade(BigDecimal.ONE);
+        item.setPrecoUnitario(new BigDecimal("50.00"));
+        item.setSubtotal(new BigDecimal("50.00"));
+        pedido.setTotal(BigDecimal.ZERO);
+        when(itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedidoId)).thenReturn(List.of(item));
+        assertThatThrownBy(() -> service.emitirNfce(new EmitirNfceRequestDto(pedidoId, null, null)))
+                .isInstanceOf(PedidoEstadoInvalidoException.class);
+
+        // CNPJ 14 dígitos, desconto = ZERO, produto ausente (fallback "UN") e itensTributados vazio (fallback "5405")
+        pedido.setTotal(new BigDecimal("50.00"));
+        pedido.setDesconto(BigDecimal.ZERO);
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoId)).thenReturn(List.of());
+        when(establishmentRepository.findById(estabId)).thenReturn(Optional.of(
+                EstablishmentEntity.builder().id(estabId).corporateName("Adega").tradeName("Adega").cnpj("12345678000199").build()
+        ));
+        when(produtoRepository.findAllById(any())).thenReturn(List.of());
+        when(sequenciaDocumentoRepository.proximoNumero(estabId, "NFCE")).thenReturn(11L);
+        when(provedorEmissaoFiscal.emitirNfce(any(SolicitacaoEmissaoFiscal.class))).thenReturn(
+                new ResultadoEmissaoFiscal(
+                        "INTERNO", AmbienteFiscal.HOMOLOGACAO, StatusNotaFiscal.AUTORIZADA,
+                        "11", "1", "5".repeat(44), "PROT-11", "https://nfce.test/11",
+                        JsonNodeFactory.instance.objectNode(), "<xml/>", List.of()
+                )
+        );
+        when(notaFiscalRepository.saveAndFlush(any(NotaFiscalEntity.class))).thenAnswer(inv -> {
+            NotaFiscalEntity n = inv.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(itemNotaFiscalRepository.save(any(ItemNotaFiscalEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        NotaFiscalDetalheResponseDto detalheCnpj = service.emitirNfce(
+                new EmitirNfceRequestDto(pedidoId, "12.345.678/0001-99", "   ")
+        );
+        assertThat(detalheCnpj.contraparteDocumento()).isEqualTo("12345678000199");
+        assertThat(detalheCnpj.itens().getFirst().cfop()).isEqualTo("5405");
+        assertThat(detalheCnpj.itens().getFirst().unidadeMedida()).isEqualTo("UN");
+
+        // listarNotasFiscais com filtros em branco / sem dígitos e página vazia
+        when(notaFiscalRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+        assertThat(service.listarNotasFiscais(null, null, "   ", "   ", null, null, 0, 20, "emitidaEm", DirecaoOrdenacao.DESC).itens())
+                .isEmpty();
+        assertThat(service.listarNotasFiscais(null, null, "---", null, null, null, 0, 20, "emitidaEm", DirecaoOrdenacao.DESC).itens())
+                .isEmpty();
+
+        // carregarUltimaNotaPorPedido(null) e mantendo AUTORIZADA antes de CANCELADA
+        assertThat(service.carregarUltimaNotaPorPedido(null)).isEmpty();
+        NotaFiscalEntity notaAutorizada = nota(estabId, pedidoId, StatusNotaFiscal.AUTORIZADA);
+        NotaFiscalEntity notaCancelada = nota(estabId, pedidoId, StatusNotaFiscal.CANCELADA);
+        when(notaFiscalRepository.findByPedidoIdInOrderByCriadaEmDesc(List.of(pedidoId)))
+                .thenReturn(List.of(notaAutorizada, notaCancelada));
+        assertThat(service.carregarUltimaNotaPorPedido(List.of(pedidoId)).get(pedidoId)).isEqualTo(notaAutorizada);
+
+        // buscarNotaFiscal com pedidoId nulo e ambos usuários preenchidos
+        NotaFiscalEntity semPedido = nota(estabId, null, StatusNotaFiscal.CANCELADA);
+        semPedido.setEmitidaPorUsuarioId(userId);
+        semPedido.setCanceladaPorUsuarioId(canceladorId);
+        when(notaFiscalRepository.findById(semPedido.getId())).thenReturn(Optional.of(semPedido));
+        when(itemNotaFiscalRepository.findByNotaFiscalIdOrderByIdAsc(semPedido.getId())).thenReturn(List.of());
+        when(userRepository.findAllById(any())).thenReturn(List.of());
+        NotaFiscalDetalheResponseDto detalheSemPedido = service.buscarNotaFiscal(semPedido.getId());
+        assertThat(detalheSemPedido.pedidoId()).isNull();
+    }
+
     private NotaFiscalEntity nota(UUID estabelecimentoId, UUID pedidoId, StatusNotaFiscal status) {
         NotaFiscalEntity n = new NotaFiscalEntity();
         n.setId(UUID.randomUUID());

@@ -6,6 +6,7 @@ import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.entity.FuncionalidadeEntity;
 import valhalla.core.stock.app.modules.accesscontrol.entity.UserFunctionalityOverrideEntity;
 import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -72,7 +73,7 @@ public class UserEntity {
 
     @PrePersist
     private void prePersist() {
-        createdAt = LocalDateTime.now();
+        createdAt = FusoHorarioOperacao.agora();
 
         updatedAt = createdAt;
         if (status == null) status = UserStatus.ATIVO;
@@ -80,7 +81,7 @@ public class UserEntity {
     }
 
     @PreUpdate
-    private void preUpdate() { updatedAt = LocalDateTime.now(); }
+    private void preUpdate() { updatedAt = FusoHorarioOperacao.agora(); }
 
     public boolean isActive() { return status == UserStatus.ATIVO; }
 

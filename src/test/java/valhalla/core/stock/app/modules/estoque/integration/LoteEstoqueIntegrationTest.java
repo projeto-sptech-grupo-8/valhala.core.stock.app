@@ -14,6 +14,7 @@ import valhalla.core.stock.app.modules.estoque.entity.ComposicaoDrinkEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.UnidadeConsumoDrink;
 import valhalla.core.stock.app.modules.estoque.repository.ComposicaoDrinkRepository;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -29,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 class LoteEstoqueIntegrationTest extends EstoqueIntegrationTestSupport {
 
-    private static final LocalDate HOJE = LocalDate.now();
+    private static final LocalDate HOJE = FusoHorarioOperacao.hoje();
 
     @Autowired
     private ComposicaoDrinkRepository composicaoDrinkRepository;

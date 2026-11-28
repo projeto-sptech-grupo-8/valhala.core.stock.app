@@ -64,6 +64,7 @@ import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.Paginacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -195,7 +196,7 @@ public class PedidoCaixaService {
         validarEstoqueDosItens(estabelecimentoId, itensRequisitados);
 
         Long numero = gerarProximoNumeroPedido(estabelecimentoId);
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
 
         PedidoEntity pedido = new PedidoEntity();
         pedido.setEstabelecimentoId(estabelecimentoId);
@@ -408,7 +409,7 @@ public class PedidoCaixaService {
             recalcularTotaisComItens(pedido, itensFinais);
         }
 
-        pedido.setAtualizadoEm(LocalDateTime.now());
+        pedido.setAtualizadoEm(FusoHorarioOperacao.agora());
         PedidoEntity pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
 
         return montarDetalhe(pedidoSalvo, itensFinais, pagamentos);
@@ -481,7 +482,7 @@ public class PedidoCaixaService {
             pedido.setDescontoSolicitado(null);
             pedido.setMotivoDesconto(motivo);
             pedido.setDescontoDecididoPorUsuarioId(usuarioId);
-            pedido.setDescontoDecididoEm(LocalDateTime.now());
+            pedido.setDescontoDecididoEm(FusoHorarioOperacao.agora());
             pedido.setObservacaoDecisaoDesconto(null);
 
             PedidoEntity pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
@@ -523,7 +524,7 @@ public class PedidoCaixaService {
             pedido.setDescontoSolicitado(null);
             pedido.setMotivoDesconto(motivo);
             pedido.setDescontoDecididoPorUsuarioId(autorizador.usuarioId());
-            pedido.setDescontoDecididoEm(LocalDateTime.now());
+            pedido.setDescontoDecididoEm(FusoHorarioOperacao.agora());
             pedido.setObservacaoDecisaoDesconto("Autorizado diretamente na aplicação do desconto");
 
             PedidoEntity pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
@@ -657,7 +658,7 @@ public class PedidoCaixaService {
             pedido.setStatusDesconto(StatusDescontoPedido.APROVADO);
             pedido.setDescontoSolicitado(null);
             pedido.setDescontoDecididoPorUsuarioId(autorizador.usuarioId());
-            pedido.setDescontoDecididoEm(LocalDateTime.now());
+            pedido.setDescontoDecididoEm(FusoHorarioOperacao.agora());
             pedido.setObservacaoDecisaoDesconto(observacao);
 
             PedidoEntity pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
@@ -687,7 +688,7 @@ public class PedidoCaixaService {
         pedido.setTotal(pedido.getSubtotal());
         pedido.setStatusDesconto(StatusDescontoPedido.NEGADO);
         pedido.setDescontoDecididoPorUsuarioId(autorizador.usuarioId());
-        pedido.setDescontoDecididoEm(LocalDateTime.now());
+        pedido.setDescontoDecididoEm(FusoHorarioOperacao.agora());
         pedido.setObservacaoDecisaoDesconto(observacao);
 
         PedidoEntity pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
@@ -824,7 +825,7 @@ public class PedidoCaixaService {
         pedido.setStatus(StatusPedidoCaixa.CANCELADO);
         pedido.setMotivoCancelamento(motivo);
         pedido.setCanceladoPorUsuarioId(autorizadorId);
-        pedido.setCanceladoEm(LocalDateTime.now());
+        pedido.setCanceladoEm(FusoHorarioOperacao.agora());
 
         PedidoEntity pedidoSalvo = pedidoRepository.saveAndFlush(pedido);
 
@@ -1047,7 +1048,7 @@ public class PedidoCaixaService {
         }
 
         Map<String, Object> estadoAnterior = snapshotPagamento(pagamento);
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         UUID autorizadorId = null;
         String autorizadorNome = null;
 
@@ -1180,7 +1181,7 @@ public class PedidoCaixaService {
                             || p.getStatus() == StatusPagamentoPedido.ESTORNO_EM_ANDAMENTO)
                     .toList();
 
-            LocalDateTime agora = LocalDateTime.now();
+            LocalDateTime agora = FusoHorarioOperacao.agora();
             validarEAplicarGavetaParaEstornoDinheiro(
                     pedido,
                     pagamentosEstornar,
@@ -1312,7 +1313,7 @@ public class PedidoCaixaService {
                 );
             }
 
-            LocalDateTime agora = LocalDateTime.now();
+            LocalDateTime agora = FusoHorarioOperacao.agora();
             validarEAplicarGavetaParaEstornoDinheiro(
                     pedido,
                     List.of(pagamento),
@@ -1412,7 +1413,7 @@ public class PedidoCaixaService {
         if (totalAprovado.compareTo(pedido.getTotal()) >= 0 && pedido.getTotal().compareTo(ZERO) > 0) {
             reservaEstoqueService.efetivarReservasOuBaixarEstoque(pedido, itens, operadorUsuarioId, "PEDIDO");
             pedido.setStatus(StatusPedidoCaixa.CONCLUIDO);
-            pedido.setConcluidoEm(LocalDateTime.now());
+            pedido.setConcluidoEm(FusoHorarioOperacao.agora());
             businessEventLogger.success("cash.order.completed", "cash_order", pedido.getId());
             return;
         }
@@ -1936,7 +1937,7 @@ public class PedidoCaixaService {
             String motivo,
             Map<UUID, OrderPointResultado> resultadosPoint
     ) {
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         List<ItemPedidoEntity> itens = itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedido.getId());
         List<PagamentoPedidoEntity> pagamentos =
                 pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedido.getId());
@@ -2012,7 +2013,7 @@ public class PedidoCaixaService {
             String motivo,
             OrderPointResultado resultadoPoint
     ) {
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         if (pagamento.getStatus() == StatusPagamentoPedido.ESTORNADO) {
             List<ItemPedidoEntity> itens = itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedido.getId());
             List<PagamentoPedidoEntity> pagamentos =

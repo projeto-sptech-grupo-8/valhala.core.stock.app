@@ -10,6 +10,7 @@ import valhalla.core.stock.app.modules.caixa.fiscal.enums.AmbienteFiscal;
 import valhalla.core.stock.app.modules.caixa.fiscal.enums.StatusNotaFiscal;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.ProdutoTipo;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -57,7 +58,7 @@ public class EmissorFiscalSimuladoAdapter implements ProvedorEmissaoFiscal {
     public ResultadoEmissaoFiscal emitirNfce(SolicitacaoEmissaoFiscal solicitacao) {
         LocalDateTime emissao = solicitacao.dataEmissao() != null
                 ? solicitacao.dataEmissao()
-                : LocalDateTime.now();
+                : FusoHorarioOperacao.agora();
 
         String serie = normalizarSerie(solicitacao.serie());
         long numeroSeq = solicitacao.numeroSequencial();
@@ -145,7 +146,7 @@ public class EmissorFiscalSimuladoAdapter implements ProvedorEmissaoFiscal {
 
     @Override
     public ResultadoCancelamentoFiscal cancelarNfce(NotaFiscalEntity notaFiscal, String motivo) {
-        LocalDateTime canceladaEm = LocalDateTime.now();
+        LocalDateTime canceladaEm = FusoHorarioOperacao.agora();
         long sufixo = Math.abs(notaFiscal.getId() != null ? notaFiscal.getId().hashCode() : 1L) % 1_000_000_000L;
         String protocoloCancelamento = "135"
                 + String.valueOf(canceladaEm.getYear()).substring(2)

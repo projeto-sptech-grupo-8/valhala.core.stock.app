@@ -42,11 +42,11 @@ import valhalla.core.stock.app.shared.logging.BusinessEventLogger;
 import valhalla.core.stock.app.shared.pagination.DirecaoOrdenacao;
 import valhalla.core.stock.app.shared.pagination.Paginacao;
 import valhalla.core.stock.app.shared.pagination.RespostaPaginadaDto;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -143,8 +143,8 @@ public class SessaoCaixaService {
         sessao.setStatus(StatusSessaoCaixa.ABERTA);
         sessao.setFundoTroco(escala(dto.fundoTroco()));
         sessao.setObservacaoAbertura(normalizarTexto(dto.observacao()));
-        sessao.setAbertaEm(LocalDateTime.now());
-        sessao.setAtualizadoEm(LocalDateTime.now());
+        sessao.setAbertaEm(FusoHorarioOperacao.agora());
+        sessao.setAtualizadoEm(FusoHorarioOperacao.agora());
 
         SessaoCaixaEntity sessaoSalva = salvarSessao(sessao);
 
@@ -310,7 +310,7 @@ public class SessaoCaixaService {
         movimentacao.setValor(escala(dto.valor()));
         movimentacao.setMotivo(dto.motivo().trim());
         movimentacao.setUsuarioId(usuarioId);
-        movimentacao.setOcorridoEm(LocalDateTime.now());
+        movimentacao.setOcorridoEm(FusoHorarioOperacao.agora());
 
         MovimentacaoCaixaEntity movimentacaoSalva =
                 movimentacaoCaixaRepository.saveAndFlush(movimentacao);
@@ -395,7 +395,7 @@ public class SessaoCaixaService {
         sessao.setResumoFechamento(serializarResumo(resumo));
         sessao.setObservacaoFechamento(normalizarTexto(dto.observacao()));
         sessao.setJustificativaDivergencia(justificativa);
-        sessao.setFechadaEm(LocalDateTime.now());
+        sessao.setFechadaEm(FusoHorarioOperacao.agora());
         sessao.setFechadaPorUsuarioId(usuarioId);
         sessao.setStatus(
                 possuiDiferenca ? StatusSessaoCaixa.EM_FECHAMENTO : StatusSessaoCaixa.FECHADA
@@ -475,7 +475,7 @@ public class SessaoCaixaService {
 
         sessao.setStatus(StatusSessaoCaixa.FECHADA);
         sessao.setDivergenciaResolvidaPorUsuarioId(usuarioId);
-        sessao.setDivergenciaResolvidaEm(LocalDateTime.now());
+        sessao.setDivergenciaResolvidaEm(FusoHorarioOperacao.agora());
 
         String observacao = normalizarTexto(dto == null ? null : dto.observacao());
         if (observacao != null) {

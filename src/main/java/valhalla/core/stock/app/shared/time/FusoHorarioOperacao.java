@@ -1,5 +1,7 @@
 package valhalla.core.stock.app.shared.time;
 
+import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 
@@ -17,5 +19,13 @@ public final class FusoHorarioOperacao {
 
     public static LocalDateTime agora() {
         return LocalDateTime.now(ZONA);
+    }
+
+    public static LocalDate hoje() {
+        return LocalDate.now(ZONA);
+    }
+
+    public static Clock relogio() {
+        return Clock.system(ZONA);
     }
 }

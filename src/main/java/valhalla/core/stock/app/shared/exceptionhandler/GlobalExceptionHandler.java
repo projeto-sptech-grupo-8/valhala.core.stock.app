@@ -3,14 +3,23 @@ package valhalla.core.stock.app.shared.exceptionhandler;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.OptimisticLockException;
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.ErrorResponse;
+import org.springframework.web.ErrorResponseException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import valhalla.core.stock.app.shared.error.CnpjAlreadyExistsException;
@@ -22,6 +31,7 @@ import valhalla.core.stock.app.shared.error.ProfileNotFoundException;
 import valhalla.core.stock.app.shared.error.UserDeletionConflictException;
 import valhalla.core.stock.app.shared.logging.RequestFailureContext;
 import valhalla.core.stock.app.shared.error.AccessConfigurationConflictException;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 import valhalla.core.stock.app.modules.caixa.exception.AutorizacaoCaixaNegadaException;
 import valhalla.core.stock.app.modules.caixa.exception.CaixaEstadoInvalidoException;
 import valhalla.core.stock.app.modules.caixa.exception.CaixaJaExisteException;
@@ -45,7 +55,6 @@ import valhalla.core.stock.app.modules.estoque.exception.CategoriaPossuiProdutos
 import valhalla.core.stock.app.modules.estoque.exception.EstoqueReservadoConflitoException;
 import valhalla.core.stock.app.modules.estoque.exception.ProdutoPossuiMovimentacoesException;
 
-import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -376,6 +385,69 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), Map.of());
     }
 
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiErrorResponse> handleAccessDenied(AccessDeniedException exception) {
+        throw exception;
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiErrorResponse> handleHttpMessageNotReadable(HttpMessageNotReadableException exception) {
+        return buildResponse(HttpStatus.BAD_REQUEST, "Corpo da requisição inválido ou malformado", Map.of());
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiErrorResponse> handleMissingRequestParameter(
+            MissingServletRequestParameterException exception
+    ) {
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                "Parâmetro de consulta obrigatório ausente",
+                Map.of(exception.getParameterName(), "Parâmetro obrigatório")
+        );
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiErrorResponse> handleDataIntegrityViolation(DataIntegrityViolationException exception) {
+        LOGGER.atWarn().addKeyValue("event", "persistence.integrity.violation")
+                .log("Data integrity violation", exception);
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                "A operação violou uma restrição de integridade dos dados. Verifique os valores informados e tente novamente.",
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler({
+            ErrorResponseException.class,
+            HttpRequestMethodNotSupportedException.class,
+            HttpMediaTypeNotSupportedException.class,
+            NoResourceFoundException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleHttpErrorResponse(ErrorResponse exception) {
+        HttpStatus status = HttpStatus.resolve(exception.getStatusCode().value());
+        if (status == null) {
+            status = HttpStatus.INTERNAL_SERVER_ERROR;
+        }
+        String mensagem = switch (status) {
+            case NOT_FOUND -> "Recurso não encontrado";
+            case METHOD_NOT_ALLOWED -> "Método HTTP não suportado para este endpoint";
+            case UNSUPPORTED_MEDIA_TYPE -> "Tipo de mídia não suportado";
+            default -> status.getReasonPhrase();
+        };
+        return buildResponse(status, mensagem, Map.of());
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiErrorResponse> handleUnexpectedException(Exception exception) {
+        LOGGER.atError().addKeyValue("event", "http.unexpected.error")
+                .log("Unexpected unhandled exception", exception);
+        return buildResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Erro interno inesperado. Tente novamente mais tarde.",
+                Map.of()
+        );
+    }
+
     private ResponseEntity<ApiErrorResponse> buildResponse(
             HttpStatus status,
             String message,
@@ -383,7 +455,7 @@ public class GlobalExceptionHandler {
     ) {
         RequestFailureContext.markFailure("HTTP_" + status.value(), message);
         ApiErrorResponse response = new ApiErrorResponse(
-                LocalDateTime.now(),
+                FusoHorarioOperacao.agora(),
                 status.value(),
                 message,
                 fieldErrors

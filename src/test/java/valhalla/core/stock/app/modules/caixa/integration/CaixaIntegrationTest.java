@@ -15,6 +15,7 @@ import valhalla.core.stock.app.modules.caixa.pedido.entity.PagamentoPedidoEntity
 import valhalla.core.stock.app.modules.caixa.sessao.entity.SessaoCaixaEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.enums.StatusPagamentoPedido;
 import valhalla.core.stock.app.modules.establishments.entity.EstablishmentEntity;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.util.List;
 import java.util.UUID;
@@ -848,6 +849,7 @@ class CaixaIntegrationTest extends CaixaIntegrationTestSupport {
                 .andExpect(jsonPath("$.fieldErrors.pagamentosPendentes").value("PENDENTE: 1"));
 
         pagamento.setStatus(StatusPagamentoPedido.CANCELADO);
+        pagamento.setCanceladoEm(FusoHorarioOperacao.agora());
         pagamentoPedidoRepository.saveAndFlush(pagamento);
 
         mockMvc.perform(post("/caixa/sessoes/{id}/fechamento", sessaoId)

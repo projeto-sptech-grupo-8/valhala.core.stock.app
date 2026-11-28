@@ -7,6 +7,7 @@ import org.hibernate.Session;
 import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.SequenciaDocumentoEntity;
 import valhalla.core.stock.app.modules.caixa.pedido.entity.SequenciaDocumentoId;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.time.LocalDateTime;
 import java.util.Locale;
@@ -34,7 +35,7 @@ public class SequenciaDocumentoRepositoryCustomImpl implements SequenciaDocument
                             """)
                     .setParameter("estabelecimentoId", estabelecimentoId)
                     .setParameter("tipo", tipo)
-                    .setParameter("agora", LocalDateTime.now())
+                    .setParameter("agora", FusoHorarioOperacao.agora())
                     .getSingleResult();
             return ((Number) resultado).longValue();
         }
@@ -45,7 +46,7 @@ public class SequenciaDocumentoRepositoryCustomImpl implements SequenciaDocument
                 id,
                 LockModeType.PESSIMISTIC_WRITE
         );
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         if (sequencia == null) {
             SequenciaDocumentoEntity nova = new SequenciaDocumentoEntity();
             nova.setEstabelecimentoId(estabelecimentoId);

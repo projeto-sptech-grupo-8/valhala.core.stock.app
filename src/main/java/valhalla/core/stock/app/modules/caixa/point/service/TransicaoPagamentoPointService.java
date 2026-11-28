@@ -31,6 +31,7 @@ import java.util.UUID;
 import valhalla.core.stock.app.modules.caixa.pedido.service.ReservaEstoqueService;
 import valhalla.core.stock.app.modules.caixa.sessao.service.AuditoriaCaixaService;
 import valhalla.core.stock.app.modules.caixa.sessao.service.EventoAuditoriaCaixa;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Service
 public class TransicaoPagamentoPointService {
@@ -184,7 +185,7 @@ public class TransicaoPagamentoPointService {
         if ("canceled".equals(statusMp) || "cancelled".equals(statusMp)) {
             if (pagamento.getStatus() != StatusPagamentoPedido.CANCELADO) {
                 pagamento.setStatus(StatusPagamentoPedido.CANCELADO);
-                pagamento.setCanceladoEm(LocalDateTime.now());
+                pagamento.setCanceladoEm(FusoHorarioOperacao.agora());
                 pagamento.setCanceladoPorUsuarioId(atorUsuarioId);
                 if (pagamento.getMotivoCancelamento() == null) {
                     pagamento.setMotivoCancelamento("Cancelado na Point Smart 2");
@@ -254,7 +255,7 @@ public class TransicaoPagamentoPointService {
             OrigemAuditoriaCaixa origemAuditoria,
             UUID atorUsuarioId
     ) {
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         pagamento.setStatus(StatusPagamentoPedido.APROVADO);
         pagamento.setPagoEm(agora);
         PagamentoPedidoEntity pagamentoSalvo = pagamentoPedidoRepository.saveAndFlush(pagamento);

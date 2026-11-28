@@ -13,6 +13,7 @@ import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.entity.UserStatus;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.modules.users.service.UserAccessHistoryService;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.time.LocalDateTime;
 import java.util.Locale;
@@ -66,7 +67,7 @@ public class AutorizadorOperacaoCaixaService {
                 );
             }
             String emailNormalizado = autorizadorEmail.trim().toLowerCase(Locale.ROOT);
-            LocalDateTime agora = LocalDateTime.now();
+            LocalDateTime agora = FusoHorarioOperacao.agora();
             UserEntity autorizador = userRepository.findWithAccessGraphByEmailIgnoreCase(emailNormalizado)
                     .filter(u -> u.getStatus() == UserStatus.ATIVO)
                     .filter(u -> u.getLockedUntil() == null || !u.getLockedUntil().isAfter(agora))

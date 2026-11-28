@@ -51,10 +51,10 @@ import valhalla.core.stock.app.modules.auth.security.CsrfTokenValidationFilter;
 import valhalla.core.stock.app.shared.config.CorsProperties;
 import valhalla.core.stock.app.shared.exceptionhandler.ApiErrorResponse;
 import valhalla.core.stock.app.shared.logging.RequestFailureContext;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
@@ -178,7 +178,7 @@ public class SecurityConfig {
         objectMapper.writeValue(
                 response.getOutputStream(),
                 new ApiErrorResponse(
-                        LocalDateTime.now(),
+                        FusoHorarioOperacao.agora(),
                         status.value(),
                         message,
                         Map.of()

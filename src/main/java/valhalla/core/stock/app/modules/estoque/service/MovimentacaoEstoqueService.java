@@ -43,6 +43,7 @@ import valhalla.core.stock.app.modules.estoque.service.ControleLotesEstoque.Aloc
 import valhalla.core.stock.app.modules.estoque.repository.ProdutoRepository;
 import valhalla.core.stock.app.modules.estoque.strategy.EstrategiaMovimentacaoEstoque;
 import valhalla.core.stock.app.modules.estoque.strategy.MovimentacaoCommand;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 import valhalla.core.stock.app.modules.estoque.strategy.PoliticaLote;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
@@ -559,7 +560,7 @@ public class MovimentacaoEstoqueService {
         }
 
         String motivoPadrao = "Venda concluída - Pedido #" + pedido.getNumero();
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         for (ItemPedidoEntity item : itens) {
             ProdutoEntity produto = produtosDoPedido.get(item.getProdutoId());
             if (produto.getTipo() == ProdutoTipo.PADRAO) {
@@ -712,7 +713,7 @@ public class MovimentacaoEstoqueService {
                         .collect(Collectors.groupingBy(vinculo -> vinculo.getMovimentacao().getId()));
 
         String motivoEstorno = "Estorno do pedido #" + pedido.getNumero();
-        LocalDateTime agora = LocalDateTime.now();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
         for (MovimentacaoEstoqueEntity saida : saidas) {
             UUID produtoId = saida.getEstoque().getProduto().getId();
             EstoqueEntity estoque = estoques.get(produtoId);
@@ -892,7 +893,7 @@ public class MovimentacaoEstoqueService {
         movimentacao.setNumeroNotaFiscal(command.numeroNotaFiscal());
         movimentacao.setOrigemDrinkId(command.origemDrinkId());
         movimentacao.setReceitaAplicada(command.receitaAplicada());
-        movimentacao.setOcorridoEm(LocalDateTime.now());
+        movimentacao.setOcorridoEm(FusoHorarioOperacao.agora());
         return movimentacaoEstoqueRepository.save(movimentacao);
     }
 

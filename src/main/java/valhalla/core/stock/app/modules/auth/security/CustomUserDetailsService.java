@@ -10,9 +10,9 @@ import org.springframework.stereotype.Service;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
 import valhalla.core.stock.app.modules.accesscontrol.security.PermissionResolver;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.text.Normalizer;
-import java.time.LocalDateTime;
 import java.util.Locale;
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -35,7 +35,7 @@ public class CustomUserDetailsService implements UserDetailsService {
                 .authorities(authoritiesFor(user))
                 .disabled(!user.isActive())
                 .accountLocked(user.getLockedUntil() != null
-                        && user.getLockedUntil().isAfter(LocalDateTime.now()))
+                        && user.getLockedUntil().isAfter(FusoHorarioOperacao.agora()))
                 .build();
     }
 

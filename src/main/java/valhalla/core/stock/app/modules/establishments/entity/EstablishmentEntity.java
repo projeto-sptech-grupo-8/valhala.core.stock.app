@@ -2,6 +2,7 @@ package valhalla.core.stock.app.modules.establishments.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -41,6 +42,6 @@ public class EstablishmentEntity {
     @Column(name = "atualizado_em", nullable = false)
     private LocalDateTime updatedAt;
 
-    @PrePersist void prePersist() { createdAt = LocalDateTime.now(); updatedAt = createdAt; if (active == null) active = true; }
-    @PreUpdate void preUpdate() { updatedAt = LocalDateTime.now(); }
+    @PrePersist void prePersist() { createdAt = FusoHorarioOperacao.agora(); updatedAt = createdAt; if (active == null) active = true; }
+    @PreUpdate void preUpdate() { updatedAt = FusoHorarioOperacao.agora(); }
 }

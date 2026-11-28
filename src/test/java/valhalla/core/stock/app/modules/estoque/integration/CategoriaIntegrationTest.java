@@ -10,6 +10,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -24,6 +26,7 @@ import valhalla.core.stock.app.modules.estoque.repository.CategoriaRepository;
 import valhalla.core.stock.app.modules.users.entity.UserEntity;
 import valhalla.core.stock.app.modules.users.entity.UserStatus;
 import valhalla.core.stock.app.modules.users.repository.UserRepository;
+import valhalla.core.stock.app.support.EmbeddedPostgresTestDatabase;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -52,12 +55,18 @@ class CategoriaIntegrationTest {
     private EstablishmentEntity estabelecimento;
     private final Map<String, String> tokensCsrfPorAccessToken = new HashMap<>();
 
+    @DynamicPropertySource
+    static void configurarBanco(DynamicPropertyRegistry registry) {
+        EmbeddedPostgresTestDatabase.registrarPropriedades(registry);
+    }
+
     @BeforeEach
     void prepararDados() {
         estabelecimento = entityManager.merge(EstablishmentEntity.builder()
                 .corporateName("Meraki LTDA")
                 .tradeName("Meraki")
                 .cnpj("12345678000199")
+                .active(true)
                 .build());
     }
 
@@ -254,11 +263,13 @@ class CategoriaIntegrationTest {
     }
 
     private Cookie autenticarComPermissao(String nomePerfil, String email, String codigoPermissao) throws Exception {
-        FuncionalidadeEntity funcionalidade = funcionalidadeRepository.save(FuncionalidadeEntity.builder()
-                .code(codigoPermissao)
-                .name(codigoPermissao)
-                .description("Permissão de teste")
-                .build());
+        FuncionalidadeEntity funcionalidade = funcionalidadeRepository.findByCodeIn(Set.of(codigoPermissao)).stream()
+                .findFirst()
+                .orElseGet(() -> funcionalidadeRepository.saveAndFlush(FuncionalidadeEntity.builder()
+                        .code(codigoPermissao)
+                        .name(codigoPermissao)
+                        .description("Permissão de teste")
+                        .build()));
         return autenticarComPermissoes(nomePerfil, email, Set.of(funcionalidade));
     }
 

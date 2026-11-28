@@ -10,6 +10,7 @@ import valhalla.core.stock.app.modules.estoque.entity.MovimentacaoLoteEntity;
 import valhalla.core.stock.app.modules.estoque.repository.LoteEstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoLoteRepository;
 import valhalla.core.stock.app.modules.estoque.strategy.PoliticaLote;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -46,7 +47,7 @@ public class ControleLotesEstoque {
             LoteEstoqueRepository loteEstoqueRepository,
             MovimentacaoLoteRepository movimentacaoLoteRepository
     ) {
-        this(loteEstoqueRepository, movimentacaoLoteRepository, Clock.systemDefaultZone());
+        this(loteEstoqueRepository, movimentacaoLoteRepository, FusoHorarioOperacao.relogio());
     }
 
     ControleLotesEstoque(

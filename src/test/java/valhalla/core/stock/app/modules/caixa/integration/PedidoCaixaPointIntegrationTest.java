@@ -12,7 +12,6 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.caixa.point.client.MockMercadoPagoPointClient;
 import valhalla.core.stock.app.modules.caixa.point.client.dto.OrderPointResultado;
 import valhalla.core.stock.app.modules.caixa.configuracao.entity.CaixaEntity;
@@ -39,6 +38,7 @@ import valhalla.core.stock.app.modules.estoque.entity.ProdutoEntity;
 import valhalla.core.stock.app.modules.estoque.entity.UnidadeConsumoDrink;
 import valhalla.core.stock.app.modules.estoque.repository.EstoqueRepository;
 import valhalla.core.stock.app.modules.estoque.repository.MovimentacaoEstoqueRepository;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -57,7 +57,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@Transactional
 @ActiveProfiles("test")
 @TestPropertySource(properties = {
         "app.mercado-pago.point.modo=MOCK",
@@ -106,6 +105,11 @@ class PedidoCaixaPointIntegrationTest extends CaixaIntegrationTestSupport {
     @Autowired
     private TransicaoPagamentoPointService transicaoPagamentoPointService;
 
+    @Override
+    protected boolean limpaBancoPorTruncate() {
+        return true;
+    }
+
     @BeforeEach
     void prepararAmbientePoint() {
         mockPointClient.limparEstadoMock();
@@ -113,9 +117,7 @@ class PedidoCaixaPointIntegrationTest extends CaixaIntegrationTestSupport {
     }
 
     @AfterEach
-    void limparTabelasFase2() {
-        eventoWebhookRepository.deleteAllInBatch();
-        reservaEstoqueRepository.deleteAllInBatch();
+    void limparEstadoPoint() {
         mockPointClient.limparEstadoMock();
         rateLimiterCaixaService.limpar();
     }
@@ -456,7 +458,7 @@ class PedidoCaixaPointIntegrationTest extends CaixaIntegrationTestSupport {
 
         // Simula pagamento antigo (> 20s) já pago na maquininha sem webhook entregue
         PagamentoPedidoEntity entityRec = pagamentoPedidoRepository.findById(UUID.fromString(pagRecId)).orElseThrow();
-        entityRec.setSolicitadoEm(LocalDateTime.now().minusMinutes(1));
+        entityRec.setSolicitadoEm(FusoHorarioOperacao.agora().minusMinutes(1));
         pagamentoPedidoRepository.saveAndFlush(entityRec);
         mockPointClient.atualizarStatusMock(orderRecId, "processed", "accredited", "accredited");
 
@@ -484,7 +486,11 @@ class PedidoCaixaPointIntegrationTest extends CaixaIntegrationTestSupport {
         String pagExpId = JsonPath.read(resExp.getResponse().getContentAsString(), "$.pagamentos[0].id");
 
         List<ReservaEstoqueEntity> resVencidas = reservaEstoqueRepository.findByPedidoIdOrderByIdAsc(UUID.fromString(pedidoExpId));
-        resVencidas.forEach(r -> r.setExpiraEm(LocalDateTime.now().minusMinutes(1)));
+        LocalDateTime agora = FusoHorarioOperacao.agora();
+        resVencidas.forEach(r -> {
+            r.setCriadoEm(agora.minusMinutes(10));
+            r.setExpiraEm(agora.minusMinutes(1));
+        });
         reservaEstoqueRepository.saveAllAndFlush(resVencidas);
 
         int expirados = reconciliacaoScheduler.expirarReservasVencidas();

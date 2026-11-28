@@ -19,6 +19,7 @@ import valhalla.core.stock.app.modules.caixa.exception.IntegracaoMercadoPagoExce
 import valhalla.core.stock.app.modules.caixa.exception.WebhookAssinaturaInvalidaException;
 import valhalla.core.stock.app.modules.caixa.point.repository.EventoWebhookPagamentoRepository;
 import valhalla.core.stock.app.modules.caixa.pedido.repository.PagamentoPedidoRepository;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 import java.time.LocalDateTime;
 import java.util.Locale;
@@ -263,14 +264,14 @@ public class WebhookMercadoPagoPointService {
                     ? existente.getAtualizadoEm()
                     : existente.getRecebidoEm();
             if (referencia != null
-                    && referencia.isAfter(LocalDateTime.now().minusSeconds(TIMEOUT_PROCESSAMENTO_SEGUNDOS))) {
+                    && referencia.isAfter(FusoHorarioOperacao.agora().minusSeconds(TIMEOUT_PROCESSAMENTO_SEGUNDOS))) {
                 return new ClaimWebhookResult(existente.getId(), false, StatusProcessamentoWebhook.PROCESSANDO);
             }
         }
 
         existente.setStatusProcessamento(StatusProcessamentoWebhook.PROCESSANDO);
         existente.setTentativas(existente.getTentativas() + 1);
-        existente.setAtualizadoEm(LocalDateTime.now());
+        existente.setAtualizadoEm(FusoHorarioOperacao.agora());
         existente.setErro(null);
         eventoWebhookRepository.saveAndFlush(existente);
         return new ClaimWebhookResult(existente.getId(), true, StatusProcessamentoWebhook.PROCESSANDO);
@@ -297,7 +298,7 @@ public class WebhookMercadoPagoPointService {
             }
             if (statusDestino == StatusProcessamentoWebhook.PROCESSADO
                     || statusDestino == StatusProcessamentoWebhook.IGNORADO) {
-                entity.setProcessadoEm(LocalDateTime.now());
+                entity.setProcessadoEm(FusoHorarioOperacao.agora());
             }
             entity.setErro(erro);
             eventoWebhookRepository.saveAndFlush(entity);

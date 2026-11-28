@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import valhalla.core.stock.app.modules.caixa.pedido.service.ReservaEstoqueService;
+import valhalla.core.stock.app.shared.time.FusoHorarioOperacao;
 
 @Component
 public class ReconciliacaoPointScheduler {
@@ -78,7 +79,7 @@ public class ReconciliacaoPointScheduler {
     }
 
     public int reconciliarPagamentosPendentes() {
-        LocalDateTime limite = LocalDateTime.now().minusSeconds(pointProperties.reconciliacaoAtrasoSegundos());
+        LocalDateTime limite = FusoHorarioOperacao.agora().minusSeconds(pointProperties.reconciliacaoAtrasoSegundos());
         List<PagamentoPedidoEntity> pendentes = pagamentoPedidoRepository
                 .buscarPagamentosPointParaReconciliacao(STATUS_RECONCILIACAO, limite);
 
@@ -110,7 +111,7 @@ public class ReconciliacaoPointScheduler {
 
     public int expirarReservasVencidas() {
         List<UUID> pedidosExpirados = reservaEstoqueRepository
-                .listarPedidosComReservasExpiradas(LocalDateTime.now());
+                .listarPedidosComReservasExpiradas(FusoHorarioOperacao.agora());
 
         int pedidosTratados = 0;
         for (UUID pedidoId : pedidosExpirados) {
