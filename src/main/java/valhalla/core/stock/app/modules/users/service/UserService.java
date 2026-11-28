@@ -8,6 +8,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -15,6 +16,7 @@ import org.springframework.util.StringUtils;
 import valhalla.core.stock.app.modules.accesscontrol.entity.FuncionalidadeEntity;
 import valhalla.core.stock.app.modules.accesscontrol.entity.ProfileEntity;
 import valhalla.core.stock.app.modules.accesscontrol.repository.ProfileRepository;
+import valhalla.core.stock.app.modules.accesscontrol.security.PermissionResolver;
 import valhalla.core.stock.app.modules.auth.security.CustomUserDetailsService;
 import valhalla.core.stock.app.modules.auth.service.TokenStateService;
 import valhalla.core.stock.app.modules.users.dto.RequisicaoAtualizacaoUsuarioDto;
@@ -121,10 +123,17 @@ public class UserService {
         boolean isManager = UserAuthorizationService.isManagerRole(authentication);
         UUID actorId = authenticatedUserId(authentication);
         boolean isSelf = actorId != null && actorId.equals(idUsuario);
-        if (!isManager && !isSelf && isManagerProfile(user.getProfile())) {
-            throw new AccessDeniedException(
-                    "Apenas gerente pode alterar a conta de um gerente"
-            );
+        if (!isManager && !isSelf) {
+            if (isManagerProfile(user.getProfile())) {
+                throw new AccessDeniedException(
+                        "Apenas gerente pode alterar a conta de um gerente"
+                );
+            }
+            if (!atorPossuiTodasPermissoes(authentication, PermissionResolver.effectiveCodes(user))) {
+                throw new AccessDeniedException(
+                        "Não é permitido alterar a conta de um usuário com permissões superiores às suas"
+                );
+            }
         }
 
         boolean canEditUsers = userAuthorizationService
@@ -167,6 +176,7 @@ public class UserService {
                     throw new EmailAlreadyExistsException("Email informado já está em uso por outro usuário");
                 }
                 user.setEmail(novoEmail);
+                authenticationChanged = true;
             }
         }
 
@@ -240,10 +250,17 @@ public class UserService {
         boolean isManager = UserAuthorizationService.isManagerRole(authentication);
         UUID actorId = authenticatedUserId(authentication);
         boolean isSelf = actorId != null && actorId.equals(idUsuario);
-        if (!isManager && !isSelf && isManagerProfile(user.getProfile())) {
-            throw new AccessDeniedException(
-                    "Apenas gerente pode excluir a conta de um gerente"
-            );
+        if (!isManager && !isSelf) {
+            if (isManagerProfile(user.getProfile())) {
+                throw new AccessDeniedException(
+                        "Apenas gerente pode excluir a conta de um gerente"
+                );
+            }
+            if (!atorPossuiTodasPermissoes(authentication, PermissionResolver.effectiveCodes(user))) {
+                throw new AccessDeniedException(
+                        "Não é permitido excluir a conta de um usuário com permissões superiores às suas"
+                );
+            }
         }
 
         try {
@@ -315,6 +332,17 @@ public class UserService {
         if (!atorPermissoes.containsAll(perfilPermissoes)) {
             throw new AccessDeniedException("Não é permitido atribuir um perfil com permissões superiores às suas");
         }
+    }
+
+    private boolean atorPossuiTodasPermissoes(Authentication authentication, Set<String> permissoesAlvo) {
+        if (permissoesAlvo == null || permissoesAlvo.isEmpty()) {
+            return true;
+        }
+        Set<String> atorPermissoes = authentication == null ? Set.of()
+                : authentication.getAuthorities().stream()
+                        .map(GrantedAuthority::getAuthority)
+                        .collect(java.util.stream.Collectors.toSet());
+        return atorPermissoes.containsAll(permissoesAlvo);
     }
 
     private boolean isManagerProfile(ProfileEntity profile) {

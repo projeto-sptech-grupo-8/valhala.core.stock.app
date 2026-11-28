@@ -179,7 +179,7 @@ class WebhookMercadoPagoPointServiceTest {
         novo.setId(40L);
         when(eventoWebhookRepository.buscarPorProvedorEEventoParaAtualizacao("MERCADO_PAGO", "EVT-ERR"))
                 .thenReturn(Optional.empty());
-        when(eventoWebhookRepository.findByProvedorAndRequestId("MERCADO_PAGO", "req-err"))
+        when(eventoWebhookRepository.buscarPorProvedorERequestIdParaAtualizacao("MERCADO_PAGO", "req-err"))
                 .thenReturn(Optional.empty());
         when(eventoWebhookRepository.saveAndFlush(any(EventoWebhookPagamentoEntity.class)))
                 .thenAnswer(inv -> {
@@ -215,7 +215,7 @@ class WebhookMercadoPagoPointServiceTest {
         EventoWebhookPagamentoEntity emProcessamentoRecente = new EventoWebhookPagamentoEntity();
         emProcessamentoRecente.setId(50L);
         emProcessamentoRecente.setStatusProcessamento(StatusProcessamentoWebhook.PROCESSANDO);
-        emProcessamentoRecente.setAtualizadoEm(LocalDateTime.now());
+        emProcessamentoRecente.setAtualizadoEm(valhalla.core.stock.app.shared.time.FusoHorarioOperacao.agora());
         when(eventoWebhookRepository.buscarPorProvedorEEventoParaAtualizacao("MERCADO_PAGO", "EVT-PROC"))
                 .thenReturn(Optional.of(emProcessamentoRecente));
 
@@ -227,7 +227,9 @@ class WebhookMercadoPagoPointServiceTest {
         verify(mercadoPagoPointClient, never()).consultarOrder("ORD-PROC");
 
         // Evento travado em PROCESSANDO há > 60s pode ser retomado
-        emProcessamentoRecente.setAtualizadoEm(LocalDateTime.now().minusSeconds(90));
+        emProcessamentoRecente.setAtualizadoEm(
+                valhalla.core.stock.app.shared.time.FusoHorarioOperacao.agora().minusSeconds(90)
+        );
         emProcessamentoRecente.setTentativas(1);
         when(eventoWebhookRepository.buscarPorIdParaAtualizacao(50L))
                 .thenReturn(Optional.of(emProcessamentoRecente));
@@ -240,5 +242,30 @@ class WebhookMercadoPagoPointServiceTest {
         );
         assertThat(retomado).isEqualTo(StatusProcessamentoWebhook.IGNORADO);
         assertThat(emProcessamentoRecente.getTentativas()).isEqualTo(2);
+    }
+
+    @Test
+    void processarWebhookRecuperaColisaoDeRequestIdViaLockPessimista() {
+        EventoWebhookPagamentoEntity vencedor = new EventoWebhookPagamentoEntity();
+        vencedor.setId(60L);
+        vencedor.setStatusProcessamento(StatusProcessamentoWebhook.PROCESSADO);
+
+        when(eventoWebhookRepository.buscarPorProvedorEEventoParaAtualizacao("MERCADO_PAGO", "EVT-RACE"))
+                .thenReturn(Optional.empty());
+        when(eventoWebhookRepository.buscarPorProvedorERequestIdParaAtualizacao("MERCADO_PAGO", "req-race"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(vencedor));
+        when(eventoWebhookRepository.saveAndFlush(any(EventoWebhookPagamentoEntity.class)))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException("duplicate key"));
+
+        StatusProcessamentoWebhook resultado = service.processarWebhook(
+                "{\"id\":\"EVT-RACE\",\"type\":\"order\",\"data\":{\"id\":\"ORD-RACE\"}}",
+                "ORD-RACE", null, null, "sig", "req-race", "127.0.0.1"
+        );
+
+        assertThat(resultado).isEqualTo(StatusProcessamentoWebhook.PROCESSADO);
+        verify(eventoWebhookRepository, org.mockito.Mockito.times(2))
+                .buscarPorProvedorERequestIdParaAtualizacao("MERCADO_PAGO", "req-race");
+        verify(mercadoPagoPointClient, never()).consultarOrder("ORD-RACE");
     }
 }

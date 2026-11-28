@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 import valhalla.core.stock.app.modules.caixa.configuracao.entity.CaixaEntity;
@@ -31,7 +30,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
-@TestPropertySource(properties = "app.mercado-pago.point.reconciliacao-ativa-habilitada=false")
 class NotaFiscalCaixaIntegrationTest extends CaixaIntegrationTestSupport {
 
     private static final String[] PERMISSOES_ATENDENTE = {

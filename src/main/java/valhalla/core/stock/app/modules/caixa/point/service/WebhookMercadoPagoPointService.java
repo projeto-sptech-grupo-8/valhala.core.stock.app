@@ -247,8 +247,7 @@ public class WebhookMercadoPagoPointService {
         Optional<EventoWebhookPagamentoEntity> opt = eventoWebhookRepository
                 .buscarPorProvedorEEventoParaAtualizacao(PROVEDOR_MERCADO_PAGO, eventoExternoId);
         if (opt.isEmpty() && requestId != null) {
-            opt = eventoWebhookRepository.findByProvedorAndRequestId(PROVEDOR_MERCADO_PAGO, requestId)
-                    .flatMap(e -> eventoWebhookRepository.buscarPorIdParaAtualizacao(e.getId()));
+            opt = eventoWebhookRepository.buscarPorProvedorERequestIdParaAtualizacao(PROVEDOR_MERCADO_PAGO, requestId);
         }
         if (opt.isEmpty()) {
             return null;

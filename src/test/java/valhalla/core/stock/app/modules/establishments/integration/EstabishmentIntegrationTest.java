@@ -51,7 +51,7 @@ class EstabishmentIntegrationTest {
         establishment = entityManager.merge(EstablishmentEntity.builder()
                 .corporateName("Adega Meraki LTDA")
                 .tradeName("Adega Meraki")
-                .cnpj("12345678000199")
+                .cnpj("12345678000195")
                 .contactEmail("contato@meraki.com.br")
                 .phone("1140000000")
                 .address("R. das Bebidas, 420")
@@ -60,7 +60,7 @@ class EstabishmentIntegrationTest {
         outroEstabelecimento = entityManager.merge(EstablishmentEntity.builder()
                 .corporateName("Outra Adega LTDA")
                 .tradeName("Outra Adega")
-                .cnpj("98765432000110")
+                .cnpj("98765432000198")
                 .build());
 
         ProfileEntity gerenteProfile = profileRepository.save(ProfileEntity.builder()
@@ -104,7 +104,7 @@ class EstabishmentIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(establishment.getId().toString()))
                 .andExpect(jsonPath("$.nome").value("Adega Meraki"))
-                .andExpect(jsonPath("$.cnpj").value("12345678000199"))
+                .andExpect(jsonPath("$.cnpj").value("12345678000195"))
                 .andExpect(jsonPath("$.emailContato").value("contato@meraki.com.br"))
                 .andExpect(jsonPath("$.telefone").value("1140000000"))
                 .andExpect(jsonPath("$.endereco").value("R. das Bebidas, 420"))
@@ -128,7 +128,7 @@ class EstabishmentIntegrationTest {
                         .content("""
                                 {
                                   "nome": "Adega Meraki Boutique",
-                                  "cnpj": "11.222.333/0001-44",
+                                  "cnpj": "11.222.333/0001-81",
                                   "emailContato": "Novo@Meraki.com.br",
                                   "telefone": "(11) 99999-8888",
                                   "endereco": "Av. Paulista, 1000"
@@ -136,7 +136,7 @@ class EstabishmentIntegrationTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.nome").value("Adega Meraki Boutique"))
-                .andExpect(jsonPath("$.cnpj").value("11222333000144"))
+                .andExpect(jsonPath("$.cnpj").value("11222333000181"))
                 .andExpect(jsonPath("$.emailContato").value("novo@meraki.com.br"))
                 .andExpect(jsonPath("$.telefone").value("(11) 99999-8888"))
                 .andExpect(jsonPath("$.endereco").value("Av. Paulista, 1000"));
@@ -148,7 +148,7 @@ class EstabishmentIntegrationTest {
                         .content("""
                                 {
                                   "nome": "Adega Meraki Central",
-                                  "cnpj": "11222333000144",
+                                  "cnpj": "11222333000181",
                                   "emailContato": "central@meraki.com.br",
                                   "telefone": "",
                                   "endereco": "Rua Vergueiro, 200"
@@ -163,7 +163,7 @@ class EstabishmentIntegrationTest {
         mockMvc.perform(get("/estabelecimento").cookie(tokenGerente))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.nome").value("Adega Meraki Central"))
-                .andExpect(jsonPath("$.cnpj").value("11222333000144"))
+                .andExpect(jsonPath("$.cnpj").value("11222333000181"))
                 .andExpect(jsonPath("$.emailContato").value("central@meraki.com.br"))
                 .andExpect(jsonPath("$.endereco").value("Rua Vergueiro, 200"));
     }

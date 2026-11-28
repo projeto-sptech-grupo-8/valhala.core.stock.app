@@ -32,6 +32,7 @@ public interface EstoqueRepository extends JpaRepository<EstoqueEntity, Integer>
                    coalesce(sum(case when e.estoqueMinimo > 0 then 1 else 0 end), 0) as produtosComMinimo,
                    coalesce(sum(case when e.estoqueMinimo is null or e.estoqueMinimo <= 0 then 1 else 0 end), 0) as produtosSemMinimo,
                    coalesce(sum(case when e.quantidadeAtual <= 0 then 1 else 0 end), 0) as zerados,
+                   coalesce(sum(case when (e.estoqueMinimo is null or e.estoqueMinimo <= 0) and e.quantidadeAtual <= 0 then 1 else 0 end), 0) as zeradosSemMinimo,
                    coalesce(sum(case when e.estoqueMinimo > 0 and e.quantidadeAtual > 0 and e.quantidadeAtual < e.estoqueMinimo then 1 else 0 end), 0) as criticos,
                    coalesce(sum(case when e.estoqueMinimo > 0 and e.quantidadeAtual >= e.estoqueMinimo then 1 else 0 end), 0) as saudaveis
             from EstoqueEntity e

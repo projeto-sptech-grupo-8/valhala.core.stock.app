@@ -1,6 +1,9 @@
 # This is a basic workflow to help you get started with Actions
 name: CI
 
+permissions:
+  contents: read
+
 # Controls when the workflow will run
 on:
   # Triggers the workflow on push or pull request events but only for the "main" branch
@@ -85,7 +88,7 @@ jobs:
 
       - name: Junit Test Dashboard
         if: always()
-        uses: janisz/action@v2
+        uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
         with:
           paths: 'target/surefire-reports/TEST-*.xml'
           output: 'test-report.md'

@@ -234,7 +234,7 @@ class NotaFiscalCaixaServiceTest {
                 .id(estabelecimentoId)
                 .corporateName("Adega Meraki LTDA")
                 .tradeName("Adega Meraki")
-                .cnpj("12345678000199")
+                .cnpj("12345678000195")
                 .build();
         when(establishmentRepository.findById(estabelecimentoId)).thenReturn(Optional.of(estab));
 
@@ -281,7 +281,7 @@ class NotaFiscalCaixaServiceTest {
                 .thenAnswer(inv -> inv.getArgument(0));
 
         NotaFiscalDetalheResponseDto detalhe = service.emitirNfce(
-                new EmitirNfceRequestDto(pedidoId, "123.456.789-01", "João Silva")
+                new EmitirNfceRequestDto(pedidoId, "123.456.789-09", "João Silva")
         );
 
         assertThat(detalhe.status()).isEqualTo(StatusNotaFiscal.AUTORIZADA);
@@ -416,7 +416,7 @@ class NotaFiscalCaixaServiceTest {
         pedido.setDesconto(BigDecimal.ZERO);
         when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoId)).thenReturn(List.of());
         when(establishmentRepository.findById(estabId)).thenReturn(Optional.of(
-                EstablishmentEntity.builder().id(estabId).corporateName("Adega").tradeName("Adega").cnpj("12345678000199").build()
+                EstablishmentEntity.builder().id(estabId).corporateName("Adega").tradeName("Adega").cnpj("12345678000195").build()
         ));
         when(produtoRepository.findAllById(any())).thenReturn(List.of());
         when(sequenciaDocumentoRepository.proximoNumero(estabId, "NFCE")).thenReturn(11L);
@@ -435,11 +435,18 @@ class NotaFiscalCaixaServiceTest {
         when(itemNotaFiscalRepository.save(any(ItemNotaFiscalEntity.class))).thenAnswer(inv -> inv.getArgument(0));
 
         NotaFiscalDetalheResponseDto detalheCnpj = service.emitirNfce(
-                new EmitirNfceRequestDto(pedidoId, "12.345.678/0001-99", "   ")
+                new EmitirNfceRequestDto(pedidoId, "12.345.678/0001-95", "   ")
         );
-        assertThat(detalheCnpj.contraparteDocumento()).isEqualTo("12345678000199");
+        assertThat(detalheCnpj.contraparteDocumento()).isEqualTo("12345678000195");
         assertThat(detalheCnpj.itens().getFirst().cfop()).isEqualTo("5405");
         assertThat(detalheCnpj.itens().getFirst().unidadeMedida()).isEqualTo("UN");
+
+        assertThatThrownBy(() -> service.emitirNfce(new EmitirNfceRequestDto(pedidoId, "123.456.789-01", "Cliente")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("documento do consumidor informado é inválido");
+        assertThatThrownBy(() -> service.emitirNfce(new EmitirNfceRequestDto(pedidoId, "12.345.678/0001-99", "Empresa")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("documento do consumidor informado é inválido");
 
         // listarNotasFiscais com filtros em branco / sem dígitos e página vazia
         when(notaFiscalRepository.findAll(any(Specification.class), any(Pageable.class)))

@@ -784,6 +784,101 @@ class MovimentacaoEstoqueServiceTest {
     }
 
     @Test
+    void bloqueiaMovimentacaoEDrinkQuandoConsomeLotesValidosAbaixoDaReservaMesmoComLoteVencido() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        autenticar(estabelecimentoId);
+
+        ProdutoEntity cerveja = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Heineken");
+        EstoqueEntity estoque = estoque(cerveja, "15");
+        estoque.setId(50);
+        estoque.setQuantidadeReservada(new BigDecimal("6"));
+        LoteEstoqueEntity vencido = lote(estoque, 1L, "L-VENC", LocalDate.now().minusDays(2), "5");
+        LoteEstoqueEntity valido = lote(estoque, 2L, "L-OK", LocalDate.now().plusDays(15), "10");
+
+        when(produtoRepository.findById(cerveja.getId())).thenReturn(Optional.of(cerveja));
+        when(estoqueRepository.findByProdutoIdForUpdate(cerveja.getId())).thenReturn(Optional.of(estoque));
+        when(loteEstoqueRepository.findAllByEstoqueId(50)).thenReturn(List.of(vencido, valido));
+
+        assertThatThrownBy(() -> movimentacaoEstoqueService.registrarMovimentacao(
+                new MovimentacaoRequestDto(
+                        cerveja.getId(), TipoMovimentacaoEstoque.SAIDA, new BigDecimal("5"),
+                        "Saída operacional", null, null
+                )
+        )).isInstanceOf(EstoqueReservadoConflitoException.class)
+                .hasMessageContaining("6 reservado(s)")
+                .satisfies(ex -> {
+                    var conflito = (EstoqueReservadoConflitoException) ex;
+                    assertThat(conflito.getDisponivelLivre()).isEqualByComparingTo("4");
+                    assertThat(conflito.getReservado()).isEqualByComparingTo("6");
+                });
+
+        verify(estoqueRepository, never()).save(any());
+        verify(movimentacaoEstoqueRepository, never()).save(any());
+
+        ProdutoEntity drink = produto(estabelecimentoId, ProdutoTipo.DRINK, false, "Gin Tônica");
+        ProdutoEntity tonica = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Tônica");
+        EstoqueEntity estoqueTonica = estoque(tonica, "9");
+        estoqueTonica.setId(51);
+        estoqueTonica.setQuantidadeReservada(new BigDecimal("3"));
+        LoteEstoqueEntity tonicaVencida = lote(estoqueTonica, 3L, "T-VENC", LocalDate.now().minusDays(1), "5");
+        LoteEstoqueEntity tonicaValida = lote(estoqueTonica, 4L, "T-OK", LocalDate.now().plusDays(10), "4");
+
+        when(produtoRepository.findById(drink.getId())).thenReturn(Optional.of(drink));
+        when(composicaoDrinkRepository.findAllByDrinkIdOrderByIdAsc(drink.getId()))
+                .thenReturn(List.of(composicao(drink, tonica, "1", UnidadeConsumoDrink.UN)));
+        when(estoqueRepository.findAllByProdutoIdInForUpdate(any())).thenReturn(List.of(estoqueTonica));
+        when(loteEstoqueRepository.findAllByEstoqueId(51)).thenReturn(List.of(tonicaVencida, tonicaValida));
+
+        assertThatThrownBy(() -> movimentacaoEstoqueService.registrarSaidaDrink(
+                new SaidaDrinkRequestDto(drink.getId(), new BigDecimal("2"), "Consumo")
+        )).isInstanceOf(EstoqueReservadoConflitoException.class)
+                .hasMessageContaining("Tônica");
+
+        verify(estoqueRepository, never()).save(any());
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void exibeRotuloWebhookOuSistemaQuandoMovimentacaoNaoTemUsuario() {
+        UUID estabelecimentoId = UUID.randomUUID();
+        autenticar(estabelecimentoId);
+        ProdutoEntity produto = produto(estabelecimentoId, ProdutoTipo.PADRAO, false, "Red Bull");
+        EstoqueEntity estoque = estoque(produto, "10");
+
+        MovimentacaoEstoqueEntity movWebhook = new MovimentacaoEstoqueEntity();
+        movWebhook.setId(101L);
+        movWebhook.setEstoque(estoque);
+        movWebhook.setUsuarioId(null);
+        movWebhook.setOrigem("WEBHOOK");
+        movWebhook.setTipo(TipoMovimentacaoEstoque.SAIDA);
+        movWebhook.setQuantidade(BigDecimal.ONE);
+        movWebhook.setSaldoAnterior(new BigDecimal("11"));
+        movWebhook.setSaldoPosterior(BigDecimal.TEN);
+        movWebhook.setOcorridoEm(LocalDateTime.now());
+
+        MovimentacaoEstoqueEntity movSistema = new MovimentacaoEstoqueEntity();
+        movSistema.setId(102L);
+        movSistema.setEstoque(estoque);
+        movSistema.setUsuarioId(null);
+        movSistema.setOrigem("SISTEMA");
+        movSistema.setTipo(TipoMovimentacaoEstoque.ENTRADA);
+        movSistema.setQuantidade(BigDecimal.ONE);
+        movSistema.setSaldoAnterior(BigDecimal.TEN);
+        movSistema.setSaldoPosterior(new BigDecimal("11"));
+        movSistema.setOcorridoEm(LocalDateTime.now());
+
+        when(movimentacaoEstoqueRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(movWebhook, movSistema), PageRequest.of(0, 20), 2));
+
+        var resultado = movimentacaoEstoqueService.listarMovimentacoes(
+                null, null, null, null, null, 0, 20, "ocorridoEm", DirecaoOrdenacao.DESC
+        );
+
+        assertThat(resultado.itens()).extracting(MovimentacaoResponseDto::usuarioNome)
+                .containsExactly("Webhook / Point", "Sistema");
+    }
+
+    @Test
     void converteEntradaEmFardoParaMlQuandoProdutoEhFracionado() {
         UUID estabelecimentoId = UUID.randomUUID();
         autenticar(estabelecimentoId);

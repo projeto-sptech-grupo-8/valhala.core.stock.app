@@ -600,9 +600,9 @@ class PedidoCaixaServiceTest {
         UUID sessaoAtualId = UUID.randomUUID();
         SessaoCaixaEntity sessaoAtual = sessao(sessaoAtualId, estabId, userId, StatusSessaoCaixa.ABERTA);
         sessaoAtual.setFundoTroco(new BigDecimal("80.00"));
-        when(sessaoCaixaRepository.findFirstByEstabelecimentoIdAndOperadorUsuarioIdAndStatusOrderByAbertaEmDesc(
-                estabId, userId, StatusSessaoCaixa.ABERTA
-        )).thenReturn(Optional.of(sessaoAtual));
+        when(sessaoCaixaRepository.buscarIdsPorOperadorEStatus(
+                estabId, userId, StatusSessaoCaixa.ABERTA, PageRequest.of(0, 1)
+        )).thenReturn(List.of(sessaoAtualId));
         when(sessaoCaixaRepository.buscarParaAtualizacao(sessaoAtualId)).thenReturn(Optional.of(sessaoAtual));
         when(pagamentoPedidoRepository.findBySessaoCaixaIdOrderByCriadoEmAsc(sessaoAtualId)).thenReturn(List.of());
         when(movimentacaoCaixaRepository.findBySessaoCaixaIdOrderByOcorridoEmAsc(sessaoAtualId)).thenReturn(List.of());
@@ -933,14 +933,14 @@ class PedidoCaixaServiceTest {
 
         SessaoCaixaEntity sessaoOrigemFechada = sessao(sessaoId, estabId, userId, StatusSessaoCaixa.FECHADA);
         when(sessaoCaixaRepository.buscarParaAtualizacao(sessaoId)).thenReturn(Optional.of(sessaoOrigemFechada));
-        when(sessaoCaixaRepository.findFirstByEstabelecimentoIdAndOperadorUsuarioIdAndStatusOrderByAbertaEmDesc(
-                estabId, userId, StatusSessaoCaixa.ABERTA
-        )).thenReturn(Optional.empty());
+        when(sessaoCaixaRepository.buscarIdsPorOperadorEStatus(
+                estabId, userId, StatusSessaoCaixa.ABERTA, PageRequest.of(0, 1)
+        )).thenReturn(List.of());
 
         // Nem operador nem autorizador têm sessão aberta -> SessaoCaixaEstadoInvalidoException
-        when(sessaoCaixaRepository.findFirstByEstabelecimentoIdAndOperadorUsuarioIdAndStatusOrderByAbertaEmDesc(
-                estabId, gerenteId, StatusSessaoCaixa.ABERTA
-        )).thenReturn(Optional.empty());
+        when(sessaoCaixaRepository.buscarIdsPorOperadorEStatus(
+                estabId, gerenteId, StatusSessaoCaixa.ABERTA, PageRequest.of(0, 1)
+        )).thenReturn(List.of());
         assertThatThrownBy(() -> service.estornarPagamento(
                 pedidoId, pagDinheiroId, new EstornarPedidoCaixaRequestDto("Sem gaveta", "g@m.com", "123")
         )).isInstanceOf(SessaoCaixaEstadoInvalidoException.class);
@@ -949,9 +949,9 @@ class PedidoCaixaServiceTest {
         UUID sessaoGerenteId = UUID.randomUUID();
         SessaoCaixaEntity sessaoGerente = sessao(sessaoGerenteId, estabId, gerenteId, StatusSessaoCaixa.ABERTA);
         sessaoGerente.setFundoTroco(new BigDecimal("100.00"));
-        when(sessaoCaixaRepository.findFirstByEstabelecimentoIdAndOperadorUsuarioIdAndStatusOrderByAbertaEmDesc(
-                estabId, gerenteId, StatusSessaoCaixa.ABERTA
-        )).thenReturn(Optional.of(sessaoGerente));
+        when(sessaoCaixaRepository.buscarIdsPorOperadorEStatus(
+                estabId, gerenteId, StatusSessaoCaixa.ABERTA, PageRequest.of(0, 1)
+        )).thenReturn(List.of(sessaoGerenteId));
         when(sessaoCaixaRepository.buscarParaAtualizacao(sessaoGerenteId)).thenReturn(Optional.of(sessaoGerente));
         when(pagamentoPedidoRepository.findBySessaoCaixaIdOrderByCriadoEmAsc(sessaoGerenteId)).thenReturn(List.of());
         when(movimentacaoCaixaRepository.findBySessaoCaixaIdOrderByOcorridoEmAsc(sessaoGerenteId)).thenReturn(List.of());
@@ -1001,5 +1001,122 @@ class PedidoCaixaServiceTest {
         i.setPrecoUnitario(new BigDecimal(subtotal));
         i.setSubtotal(new BigDecimal(subtotal));
         return i;
+    }
+
+    @Test
+    void conciliarPagamentoNaoMutateComprovanteQuandoAutorizadorNega() {
+        UUID estabId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID pedidoId = UUID.randomUUID();
+        UUID pagamentoId = UUID.randomUUID();
+        when(contextoCaixa.estabelecimentoId()).thenReturn(estabId);
+        when(contextoCaixa.usuarioId()).thenReturn(userId);
+
+        PedidoEntity pedido = pedidoBase(estabId, userId, UUID.randomUUID(), "50.00");
+        pedido.setId(pedidoId);
+        PagamentoPedidoEntity pag = new PagamentoPedidoEntity();
+        pag.setId(pagamentoId);
+        pag.setPedidoId(pedidoId);
+        pag.setForma(FormaPagamentoCaixa.PIX);
+        pag.setStatus(StatusPagamentoPedido.ACAO_NECESSARIA);
+        pag.setValor(new BigDecimal("50.00"));
+        pag.setComprovanteReferencia("COMP-ANTIGO");
+
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
+        when(pagamentoPedidoRepository.buscarParaAtualizacao(pagamentoId, pedidoId)).thenReturn(Optional.of(pag));
+        when(autorizadorOperacaoCaixaService.exigirAutorizador(
+                eq("CAIXA_RESOLVER_DIVERGENCIA"), any(), any(), any()
+        )).thenThrow(new AccessDeniedException("Autorizador sem permissão"));
+
+        assertThatThrownBy(() -> service.conciliarPagamento(
+                pedidoId, pagamentoId,
+                new ConciliarPagamentoPedidoRequestDto(true, "Conferido", "COMP-NOVO", "g@m.com", "123")
+        )).isInstanceOf(AccessDeniedException.class);
+
+        assertThat(pag.getStatus()).isEqualTo(StatusPagamentoPedido.ACAO_NECESSARIA);
+        assertThat(pag.getComprovanteReferencia()).isEqualTo("COMP-ANTIGO");
+        verify(pagamentoPedidoRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void estornarPedidoEmDinheiroSomaSessoesEncerradasERevalidaSessaoAbertaAposLock() {
+        UUID estabId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID gerenteId = UUID.randomUUID();
+        UUID pedidoId = UUID.randomUUID();
+        UUID sessaoFechada1Id = UUID.randomUUID();
+        UUID sessaoFechada2Id = UUID.randomUUID();
+        UUID sessaoAtualId = UUID.randomUUID();
+        when(contextoCaixa.estabelecimentoId()).thenReturn(estabId);
+        when(contextoCaixa.usuarioId()).thenReturn(userId);
+        when(autorizadorOperacaoCaixaService.exigirAutorizador(eq("CAIXA_ESTORNAR"), any(), any(), any()))
+                .thenReturn(new AutorizadorOperacaoCaixaService.AutorizadorResolvido(gerenteId, "Gerente"));
+
+        PedidoEntity pedido = pedidoBase(estabId, userId, sessaoFechada1Id, "110.00");
+        pedido.setId(pedidoId);
+        pedido.setStatus(StatusPedidoCaixa.CONCLUIDO);
+        when(pedidoRepository.findById(pedidoId)).thenReturn(Optional.of(pedido));
+        when(pedidoRepository.buscarPorIdParaAtualizacao(pedidoId)).thenReturn(Optional.of(pedido));
+        when(itemPedidoRepository.findByPedidoIdOrderByIdAsc(pedidoId)).thenReturn(List.of());
+        when(pedidoRepository.saveAndFlush(any(PedidoEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        PagamentoPedidoEntity pag1 = new PagamentoPedidoEntity();
+        pag1.setId(UUID.randomUUID());
+        pag1.setPedidoId(pedidoId);
+        pag1.setSessaoCaixaId(sessaoFechada1Id);
+        pag1.setProvedor("INTERNO");
+        pag1.setForma(FormaPagamentoCaixa.DINHEIRO);
+        pag1.setStatus(StatusPagamentoPedido.APROVADO);
+        pag1.setValor(new BigDecimal("60.00"));
+
+        PagamentoPedidoEntity pag2 = new PagamentoPedidoEntity();
+        pag2.setId(UUID.randomUUID());
+        pag2.setPedidoId(pedidoId);
+        pag2.setSessaoCaixaId(sessaoFechada2Id);
+        pag2.setProvedor("INTERNO");
+        pag2.setForma(FormaPagamentoCaixa.DINHEIRO);
+        pag2.setStatus(StatusPagamentoPedido.APROVADO);
+        pag2.setValor(new BigDecimal("50.00"));
+
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoId)).thenReturn(List.of(pag1, pag2));
+        when(sessaoCaixaRepository.buscarParaAtualizacao(sessaoFechada1Id))
+                .thenReturn(Optional.of(sessao(sessaoFechada1Id, estabId, userId, StatusSessaoCaixa.FECHADA)));
+        when(sessaoCaixaRepository.buscarParaAtualizacao(sessaoFechada2Id))
+                .thenReturn(Optional.of(sessao(sessaoFechada2Id, estabId, userId, StatusSessaoCaixa.FECHADA)));
+
+        // Sessão retornada pelo lookup scalar foi fechada concorrentemente antes do lock -> 409/estado inválido
+        SessaoCaixaEntity sessaoRecemFechada = sessao(sessaoAtualId, estabId, userId, StatusSessaoCaixa.FECHADA);
+        sessaoRecemFechada.setFundoTroco(new BigDecimal("200.00"));
+        when(sessaoCaixaRepository.buscarIdsPorOperadorEStatus(
+                estabId, userId, StatusSessaoCaixa.ABERTA, PageRequest.of(0, 1)
+        )).thenReturn(List.of(sessaoAtualId));
+        when(sessaoCaixaRepository.buscarParaAtualizacao(sessaoAtualId)).thenReturn(Optional.of(sessaoRecemFechada));
+
+        assertThatThrownBy(() -> service.estornarPedido(
+                pedidoId, new EstornarPedidoCaixaRequestDto("Sessão fechou", "g@m.com", "123")
+        )).isInstanceOf(SessaoCaixaEstadoInvalidoException.class);
+        verify(movimentacaoCaixaRepository, never()).saveAndFlush(any());
+
+        // Agora sessão aberta com R$ 100 (individualmente paga 60 ou 50, mas soma 110 > 100 -> SaldoInsuficiente)
+        SessaoCaixaEntity sessaoAtual = sessao(sessaoAtualId, estabId, userId, StatusSessaoCaixa.ABERTA);
+        sessaoAtual.setFundoTroco(new BigDecimal("100.00"));
+        when(sessaoCaixaRepository.buscarParaAtualizacao(sessaoAtualId)).thenReturn(Optional.of(sessaoAtual));
+
+        assertThatThrownBy(() -> service.estornarPedido(
+                pedidoId, new EstornarPedidoCaixaRequestDto("Sem saldo para soma", "g@m.com", "123")
+        )).isInstanceOf(SaldoInsuficienteCaixaException.class);
+        verify(movimentacaoCaixaRepository, never()).saveAndFlush(any());
+
+        // Com R$ 120 na gaveta atual, registra uma SANGRIA consolidada de R$ 110.00
+        sessaoAtual.setFundoTroco(new BigDecimal("120.00"));
+        PedidoCaixaDetalheResponseDto estornado = service.estornarPedido(
+                pedidoId, new EstornarPedidoCaixaRequestDto("Devolução total", "g@m.com", "123")
+        );
+        assertThat(estornado.status()).isEqualTo(StatusPedidoCaixa.ESTORNADO);
+        ArgumentCaptor<MovimentacaoCaixaEntity> captor = ArgumentCaptor.forClass(MovimentacaoCaixaEntity.class);
+        verify(movimentacaoCaixaRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getSessaoCaixaId()).isEqualTo(sessaoAtualId);
+        assertThat(captor.getValue().getTipo()).isEqualTo(TipoMovimentacaoCaixa.SANGRIA);
+        assertThat(captor.getValue().getValor()).isEqualByComparingTo("110.00");
     }
 }

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -1043,10 +1044,6 @@ public class PedidoCaixaService {
 
         String motivo = normalizarTexto(dto.motivo());
         String comprovante = normalizarTexto(dto.comprovanteReferencia());
-        if (comprovante != null) {
-            pagamento.setComprovanteReferencia(comprovante);
-        }
-
         Map<String, Object> estadoAnterior = snapshotPagamento(pagamento);
         LocalDateTime agora = FusoHorarioOperacao.agora();
         UUID autorizadorId = null;
@@ -1061,6 +1058,9 @@ public class PedidoCaixaService {
             );
             autorizadorId = autorizador.usuarioId();
             autorizadorNome = autorizador.nome();
+            if (comprovante != null) {
+                pagamento.setComprovanteReferencia(comprovante);
+            }
             pagamento.setStatus(StatusPagamentoPedido.APROVADO);
             pagamento.setPagoEm(agora);
         } else {
@@ -1068,6 +1068,9 @@ public class PedidoCaixaService {
                 throw new IllegalArgumentException(
                         "Informe o motivo ao cancelar/rejeitar um pagamento na conciliação manual"
                 );
+            }
+            if (comprovante != null) {
+                pagamento.setComprovanteReferencia(comprovante);
             }
             pagamento.setStatus(StatusPagamentoPedido.CANCELADO);
             pagamento.setCanceladoEm(agora);
@@ -2120,6 +2123,7 @@ public class PedidoCaixaService {
             return;
         }
 
+        BigDecimal totalSessoesEncerradas = ZERO;
         for (Map.Entry<UUID, BigDecimal> entrada : totaisDinheiroPorSessao.entrySet()) {
             UUID sessaoOrigemId = entrada.getKey();
             BigDecimal valorGrupo = entrada.getValue().setScale(2, RoundingMode.HALF_UP);
@@ -2143,61 +2147,73 @@ public class PedidoCaixaService {
                 continue;
             }
 
-            SessaoCaixaEntity sessaoAberta = resolverSessaoAbertaParaEstornoEmDinheiro(
-                    estabelecimentoId,
-                    usuarioId,
-                    autorizadorId
+            totalSessoesEncerradas = totalSessoesEncerradas.add(valorGrupo).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        if (totalSessoesEncerradas.compareTo(ZERO) <= 0) {
+            return;
+        }
+
+        UUID sessaoAbertaId = resolverIdSessaoAbertaParaEstornoEmDinheiro(
+                estabelecimentoId,
+                usuarioId,
+                autorizadorId
+        );
+        SessaoCaixaEntity sessaoTravada = sessaoCaixaRepository
+                .buscarParaAtualizacao(sessaoAbertaId)
+                .orElseThrow(() -> new EntityNotFoundException("Sessão de caixa não encontrada"));
+        if (!sessaoTravada.isAberta()) {
+            throw new SessaoCaixaEstadoInvalidoException(
+                    "É necessário possuir uma sessão de caixa aberta para realizar o estorno em dinheiro de uma sessão encerrada"
             );
-            SessaoCaixaEntity sessaoTravada = sessaoCaixaRepository
-                    .buscarParaAtualizacao(sessaoAberta.getId())
-                    .orElseThrow(() -> new EntityNotFoundException("Sessão de caixa não encontrada"));
-            BigDecimal disponivel = calculadoraFechamentoCaixa.calcularDinheiroDisponivel(
-                    sessaoTravada,
-                    pagamentoPedidoRepository.findBySessaoCaixaIdOrderByCriadoEmAsc(sessaoTravada.getId()),
-                    movimentacaoCaixaRepository.findBySessaoCaixaIdOrderByOcorridoEmAsc(sessaoTravada.getId())
+        }
+        BigDecimal disponivel = calculadoraFechamentoCaixa.calcularDinheiroDisponivel(
+                sessaoTravada,
+                pagamentoPedidoRepository.findBySessaoCaixaIdOrderByCriadoEmAsc(sessaoTravada.getId()),
+                movimentacaoCaixaRepository.findBySessaoCaixaIdOrderByOcorridoEmAsc(sessaoTravada.getId())
+        );
+        BigDecimal comprometidoMesmaSessao = totaisDinheiroPorSessao.getOrDefault(sessaoTravada.getId(), ZERO);
+        if (comprometidoMesmaSessao.add(totalSessoesEncerradas).compareTo(disponivel) > 0) {
+            throw new SaldoInsuficienteCaixaException(
+                    "Não há dinheiro suficiente no caixa para realizar o estorno em espécie",
+                    disponivel
             );
-            if (valorGrupo.compareTo(disponivel) > 0) {
-                throw new SaldoInsuficienteCaixaException(
-                        "Não há dinheiro suficiente no caixa para realizar o estorno em espécie",
-                        disponivel
-                );
-            }
-            if (registrarSangriaSeSessaoEncerrada) {
-                MovimentacaoCaixaEntity sangria = new MovimentacaoCaixaEntity();
-                sangria.setSessaoCaixaId(sessaoTravada.getId());
-                sangria.setTipo(TipoMovimentacaoCaixa.SANGRIA);
-                sangria.setValor(valorGrupo);
-                sangria.setMotivo("Estorno em dinheiro do pedido #" + pedido.getNumero() + ": " + motivo);
-                sangria.setUsuarioId(autorizadorId);
-                sangria.setOcorridoEm(agora);
-                movimentacaoCaixaRepository.saveAndFlush(sangria);
-            }
+        }
+        if (registrarSangriaSeSessaoEncerrada) {
+            MovimentacaoCaixaEntity sangria = new MovimentacaoCaixaEntity();
+            sangria.setSessaoCaixaId(sessaoTravada.getId());
+            sangria.setTipo(TipoMovimentacaoCaixa.SANGRIA);
+            sangria.setValor(totalSessoesEncerradas);
+            sangria.setMotivo("Estorno em dinheiro do pedido #" + pedido.getNumero() + ": " + motivo);
+            sangria.setUsuarioId(autorizadorId);
+            sangria.setOcorridoEm(agora);
+            movimentacaoCaixaRepository.saveAndFlush(sangria);
         }
     }
 
-    private SessaoCaixaEntity resolverSessaoAbertaParaEstornoEmDinheiro(
+    private UUID resolverIdSessaoAbertaParaEstornoEmDinheiro(
             UUID estabelecimentoId,
             UUID usuarioId,
             UUID autorizadorId
     ) {
-        Optional<SessaoCaixaEntity> doOperador = sessaoCaixaRepository
-                .findFirstByEstabelecimentoIdAndOperadorUsuarioIdAndStatusOrderByAbertaEmDesc(
-                        estabelecimentoId,
-                        usuarioId,
-                        StatusSessaoCaixa.ABERTA
-                );
-        if (doOperador.isPresent()) {
-            return doOperador.get();
+        List<UUID> doOperador = sessaoCaixaRepository.buscarIdsPorOperadorEStatus(
+                estabelecimentoId,
+                usuarioId,
+                StatusSessaoCaixa.ABERTA,
+                PageRequest.of(0, 1)
+        );
+        if (!doOperador.isEmpty()) {
+            return doOperador.getFirst();
         }
         if (autorizadorId != null && !autorizadorId.equals(usuarioId)) {
-            Optional<SessaoCaixaEntity> doAutorizador = sessaoCaixaRepository
-                    .findFirstByEstabelecimentoIdAndOperadorUsuarioIdAndStatusOrderByAbertaEmDesc(
-                            estabelecimentoId,
-                            autorizadorId,
-                            StatusSessaoCaixa.ABERTA
-                    );
-            if (doAutorizador.isPresent()) {
-                return doAutorizador.get();
+            List<UUID> doAutorizador = sessaoCaixaRepository.buscarIdsPorOperadorEStatus(
+                    estabelecimentoId,
+                    autorizadorId,
+                    StatusSessaoCaixa.ABERTA,
+                    PageRequest.of(0, 1)
+            );
+            if (!doAutorizador.isEmpty()) {
+                return doAutorizador.getFirst();
             }
         }
         throw new SessaoCaixaEstadoInvalidoException(

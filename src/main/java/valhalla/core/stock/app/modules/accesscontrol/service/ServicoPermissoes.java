@@ -132,6 +132,7 @@ public class ServicoPermissoes {
         }
         Set<String> codigosNormalizados = conjuntoVazioQuandoNulo(codigos);
         garantirAtorPossuiPermissoes(codigosNormalizados, autenticacao);
+        establishmentRepository.findByIdForUpdate(perfil.getEstablishment().getId());
         perfil.setFunctionalities(carregarFuncionalidadesPorCodigo(codigosNormalizados));
         garantirAoMenosUmUsuarioAtivoPodeCriarUsuarios(perfil.getEstablishment().getId());
         userRepository.findAllByProfile_Id(idPerfil)
@@ -167,7 +168,23 @@ public class ServicoPermissoes {
                 .filter(item -> item.efeito() == PermissionEffect.GRANT)
                 .map(SobrescritaPermissaoUsuarioDto::codigoFuncionalidade)
                 .collect(Collectors.toSet());
-        garantirAtorPossuiPermissoes(codigosConcedidos, autenticacao);
+        Set<String> efetivasAntes = PermissionResolver.effectiveCodes(usuario);
+        Set<String> efetivasDepois = usuario.getProfile() == null || usuario.getProfile().getFunctionalities() == null
+                ? new LinkedHashSet<>()
+                : usuario.getProfile().getFunctionalities().stream()
+                        .map(FuncionalidadeEntity::getCode)
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+        for (SobrescritaPermissaoUsuarioDto sobrescrita : sobrescritas) {
+            if (sobrescrita.efeito() == PermissionEffect.GRANT) {
+                efetivasDepois.add(sobrescrita.codigoFuncionalidade());
+            } else if (sobrescrita.efeito() == PermissionEffect.REVOKE) {
+                efetivasDepois.remove(sobrescrita.codigoFuncionalidade());
+            }
+        }
+        Set<String> permissoesValidar = new LinkedHashSet<>(efetivasDepois);
+        permissoesValidar.removeAll(efetivasAntes);
+        permissoesValidar.addAll(codigosConcedidos);
+        garantirAtorPossuiPermissoes(permissoesValidar, autenticacao);
         Set<FuncionalidadeEntity> funcionalidades = carregarFuncionalidadesPorCodigo(sobrescritas.stream()
                 .map(SobrescritaPermissaoUsuarioDto::codigoFuncionalidade).collect(java.util.stream.Collectors.toSet()));
         java.util.Map<String, FuncionalidadeEntity> porCodigo = funcionalidades.stream()
@@ -178,6 +195,7 @@ public class ServicoPermissoes {
                     .functionality(porCodigo.get(sobrescrita.codigoFuncionalidade()))
                     .effect(sobrescrita.efeito()).build());
         }
+        establishmentRepository.findByIdForUpdate(usuario.getEstablishment().getId());
         // A coleção tem orphanRemoval: precisa ser a mesma instância. O flush remove as antigas antes
         // de inserir as novas (o Hibernate insere antes de remover no mesmo flush e violaria a unicidade).
         usuario.getFunctionalityOverrides().clear();
@@ -201,6 +219,7 @@ public class ServicoPermissoes {
         if (!podeCriarUsuarios(usuario)) {
             return;
         }
+        establishmentRepository.findByIdForUpdate(usuario.getEstablishment().getId());
         boolean anotherAdministratorExists = userRepository
                 .findAllByEstablishment_Id(usuario.getEstablishment().getId()).stream()
                 .anyMatch(candidato -> !candidato.getId().equals(usuario.getId())
@@ -253,6 +272,7 @@ public class ServicoPermissoes {
     }
 
     private void garantirAoMenosUmUsuarioAtivoPodeCriarUsuarios(UUID idEstabelecimento) {
+        establishmentRepository.findByIdForUpdate(idEstabelecimento);
         boolean possuiAdministrador = userRepository.findAllByEstablishment_Id(idEstabelecimento).stream()
                 .anyMatch(this::podeCriarUsuarios);
         if (!possuiAdministrador) {

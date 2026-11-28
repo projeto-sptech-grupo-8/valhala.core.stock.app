@@ -823,7 +823,7 @@ public class NotaFiscalCaixaService {
                     "O documento do consumidor deve ser um CPF (11 dígitos) ou CNPJ (14 dígitos) válido"
             );
         }
-        if (apenasDigitos.chars().distinct().count() == 1) {
+        if (!valhalla.core.stock.app.shared.validation.ValidadorDocumentoFiscal.isCpfOuCnpjValido(apenasDigitos)) {
             throw new IllegalArgumentException(
                     "O documento do consumidor informado é inválido"
             );

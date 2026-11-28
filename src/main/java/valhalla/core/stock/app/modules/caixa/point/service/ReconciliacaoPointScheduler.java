@@ -137,6 +137,12 @@ public class ReconciliacaoPointScheduler {
                 if (!podeExpirarLocalmente) {
                     continue;
                 }
+            } else if (pagamento.getStatus() == StatusPagamentoPedido.PENDENTE_CONCILIACAO) {
+                log.warn(
+                        "Pagamento {} em PENDENTE_CONCILIACAO sem orderExternaId aguarda conciliação manual; não expirado automaticamente",
+                        pagamento.getId()
+                );
+                continue;
             }
 
             transicaoPagamentoPointService.expirarPagamentoPorTimeout(
@@ -224,7 +230,15 @@ public class ReconciliacaoPointScheduler {
                         OrigemAuditoriaCaixa.SISTEMA,
                         null
                 );
-                return STATUS_PENDENTES_EXPIRACAO.contains(atualizado.getStatus());
+                if (STATUS_PENDENTES_EXPIRACAO.contains(atualizado.getStatus())) {
+                    log.warn(
+                            "Cancelamento da Order {} foi rejeitado pelo Mercado Pago, mas o pagamento {} segue pendente ({}); mantendo para próximo ciclo",
+                            orderExternaId,
+                            pagamento.getId(),
+                            atualizado.getStatus()
+                    );
+                }
+                return false;
             } catch (RuntimeException reex) {
                 log.warn(
                         "Falha ao reconsultar Order {} após rejeição de cancelamento do pagamento {}; mantendo para próximo ciclo: {}",

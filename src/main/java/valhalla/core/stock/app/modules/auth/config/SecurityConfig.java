@@ -284,16 +284,34 @@ public class SecurityConfig {
 
         OAuth2TokenValidator<Jwt> validator = stateValidator == null
                 ? new DelegatingOAuth2TokenValidator<>(
-                        JwtValidators.createDefault(),
+                        JwtValidators.createDefaultWithIssuer(properties.issuer()),
+                        audienceValidator(properties.audience()),
                         purposeValidator(purpose)
                 )
                 : new DelegatingOAuth2TokenValidator<>(
-                        JwtValidators.createDefault(),
+                        JwtValidators.createDefaultWithIssuer(properties.issuer()),
+                        audienceValidator(properties.audience()),
                         purposeValidator(purpose),
                         stateValidator
                 );
         decoder.setJwtValidator(validator);
         return decoder;
+    }
+
+    private OAuth2TokenValidator<Jwt> audienceValidator(String expectedAudience) {
+        return token -> {
+            java.util.List<String> audience = token.getAudience();
+            if (audience != null && audience.contains(expectedAudience)) {
+                return OAuth2TokenValidatorResult.success();
+            }
+
+            OAuth2Error error = new OAuth2Error(
+                    "invalid_token",
+                    "Token com audiência inválida",
+                    null
+            );
+            return OAuth2TokenValidatorResult.failure(error);
+        };
     }
 
     private OAuth2TokenValidator<Jwt> purposeValidator(String expectedPurpose) {

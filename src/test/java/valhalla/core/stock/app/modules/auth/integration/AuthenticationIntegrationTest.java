@@ -658,23 +658,17 @@ class AuthenticationIntegrationTest {
                 .andExpect(jsonPath("$.telefone").value("11999999999"))
                 .andExpect(jsonPath("$.atualizadoEm").isNotEmpty());
 
-        // Exige senhaAtual correta na autoedição de senha/e-mail
-        mockMvc.perform(patch("/usuario/me")
-                        .cookie(accessToken)
-                        .with(csrf(accessToken))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"password\":\"nova-senha-atendente\"}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("Informe a senha atual correta para alterar seu e-mail ou senha"));
-
-        // O token continua identificando o proprietário pelo userId mesmo após trocar o e-mail.
+        // Troca de e-mail revoga imediatamente os tokens anteriores.
         mockMvc.perform(patch("/usuario/me")
                         .cookie(accessToken)
                         .with(csrf(accessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"phone\":\"11888888888\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.telefone").value("11888888888"));
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/auth/refresh").cookie(refreshToken).with(csrf(accessToken)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Refresh token inválido"));
 
         MvcResult secondLogin = performLogin(
                 "atendente.novo@meraki.com",
@@ -683,23 +677,30 @@ class AuthenticationIntegrationTest {
         Cookie secondAccessToken = requireCookie(secondLogin, "accessToken");
         Cookie secondRefreshToken = requireCookie(secondLogin, "refreshToken");
 
+        // Exige senhaAtual correta na autoedição de senha/e-mail
+        mockMvc.perform(patch("/usuario/me")
+                        .cookie(secondAccessToken)
+                        .with(csrf(secondAccessToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"nova-senha-atendente\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Informe a senha atual correta para alterar seu e-mail ou senha"));
+
+        // Após reautenticação com o novo e-mail, o token identifica o proprietário pelo userId.
+        mockMvc.perform(patch("/usuario/me")
+                        .cookie(secondAccessToken)
+                        .with(csrf(secondAccessToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"11888888888\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.telefone").value("11888888888"));
+
         mockMvc.perform(patch("/usuario/me")
                         .cookie(secondAccessToken)
                         .with(csrf(secondAccessToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"password\":\"nova-senha-atendente\",\"senhaAtual\":\"senha-atendente\"}"))
                 .andExpect(status().isOk());
-
-        mockMvc.perform(patch("/usuario/me")
-                        .cookie(accessToken)
-                        .with(csrf(accessToken))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phone\":\"11777777777\"}"))
-                .andExpect(status().isUnauthorized());
-
-        mockMvc.perform(post("/auth/refresh").cookie(refreshToken).with(csrf(accessToken)))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.message").value("Refresh token inválido"));
 
         mockMvc.perform(patch("/usuario/me")
                         .cookie(secondAccessToken)

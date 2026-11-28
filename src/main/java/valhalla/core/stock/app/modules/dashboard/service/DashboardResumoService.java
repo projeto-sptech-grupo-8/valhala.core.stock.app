@@ -142,7 +142,8 @@ public class DashboardResumoService {
         long produtosComMinimo = resumo.getProdutosComMinimo();
         int saudePercentual;
         if (produtosComMinimo > 0) {
-            saudePercentual = Math.toIntExact(Math.round((resumo.getSaudaveis() * 100.0) / produtosComMinimo));
+            long denominadorSaude = produtosComMinimo + resumo.getZeradosSemMinimo();
+            saudePercentual = Math.toIntExact(Math.round((resumo.getSaudaveis() * 100.0) / denominadorSaude));
         } else if (totalProdutos > 0 && zerados > 0) {
             saudePercentual = Math.toIntExact(Math.round(((totalProdutos - zerados) * 100.0) / totalProdutos));
         } else {
@@ -249,7 +250,7 @@ public class DashboardResumoService {
                         ? DirecaoMovimentacaoDashboard.ENTRADA
                         : DirecaoMovimentacaoDashboard.SAIDA,
                 movimentacao.getQuantidade(),
-                nomesUsuarios.getOrDefault(movimentacao.getUsuarioId(), "Usuário não encontrado"),
+                resolverNomeUsuario(movimentacao, nomesUsuarios),
                 movimentacao.getMotivo()
         );
     }
@@ -261,12 +262,21 @@ public class DashboardResumoService {
     private Map<UUID, String> nomesUsuarios(List<MovimentacaoEstoqueEntity> movimentacoes) {
         Set<UUID> idsUsuarios = movimentacoes.stream()
                 .map(MovimentacaoEstoqueEntity::getUsuarioId)
+                .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toSet());
         if (idsUsuarios.isEmpty()) {
             return Map.of();
         }
         return userRepository.findAllById(idsUsuarios).stream()
                 .collect(Collectors.toMap(UserEntity::getId, UserEntity::getName));
+    }
+
+    private String resolverNomeUsuario(MovimentacaoEstoqueEntity movimentacao, Map<UUID, String> nomesUsuarios) {
+        UUID usuarioId = movimentacao.getUsuarioId();
+        if (usuarioId == null) {
+            return "WEBHOOK".equalsIgnoreCase(movimentacao.getOrigem()) ? "Webhook / Point" : "Sistema";
+        }
+        return nomesUsuarios.getOrDefault(usuarioId, "Usuário não encontrado");
     }
 
     private UUID obterIdEstabelecimentoAutenticado() {

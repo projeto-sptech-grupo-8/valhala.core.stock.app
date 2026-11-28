@@ -2,7 +2,6 @@ package valhalla.core.stock.app.modules.accesscontrol.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
 import java.util.HashSet;
@@ -36,7 +35,6 @@ public class ProfileEntity {
     @Column(name = "criado_em", nullable = false)
     private LocalDateTime createdAt;
 
-    @UpdateTimestamp
     @Column(name = "atualizado_em", nullable = false)
     private LocalDateTime updatedAt;
 
@@ -51,6 +49,13 @@ public class ProfileEntity {
 
     @PrePersist
     private void prePersist() {
-        createdAt = FusoHorarioOperacao.agora();
+        LocalDateTime agora = FusoHorarioOperacao.agora();
+        createdAt = agora;
+        updatedAt = agora;
+    }
+
+    @PreUpdate
+    private void preUpdate() {
+        updatedAt = FusoHorarioOperacao.agora();
     }
 }

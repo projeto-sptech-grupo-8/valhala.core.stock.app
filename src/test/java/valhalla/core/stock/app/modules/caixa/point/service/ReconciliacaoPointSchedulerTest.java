@@ -161,4 +161,49 @@ class ReconciliacaoPointSchedulerTest {
                 eq(pedidoOrfao), eq(StatusReservaEstoque.EXPIRADA), any()
         );
     }
+
+    @Test
+    void naoExpiraPendenteConciliacaoSemOrderExternaNemOrderComCancelamentoRejeitado4xx() {
+        ReconciliacaoPointScheduler scheduler = new ReconciliacaoPointScheduler(
+                props(true), pagamentoPedidoRepository, reservaEstoqueRepository,
+                mercadoPagoPointClient, transicaoPagamentoPointService, reservaEstoqueService
+        );
+
+        UUID pedidoConciliacao = UUID.randomUUID();
+        PagamentoPedidoEntity pagConciliacao = new PagamentoPedidoEntity();
+        pagConciliacao.setId(UUID.randomUUID());
+        pagConciliacao.setProvedor("MERCADO_PAGO");
+        pagConciliacao.setStatus(StatusPagamentoPedido.PENDENTE_CONCILIACAO);
+        pagConciliacao.setOrderExternaId(null);
+
+        UUID pedidoRejeicao4xx = UUID.randomUUID();
+        PagamentoPedidoEntity pagRejeicao4xx = new PagamentoPedidoEntity();
+        pagRejeicao4xx.setId(UUID.randomUUID());
+        pagRejeicao4xx.setProvedor("MERCADO_PAGO");
+        pagRejeicao4xx.setStatus(StatusPagamentoPedido.PENDENTE_NA_POINT);
+        pagRejeicao4xx.setOrderExternaId("ORD-4XX");
+
+        OrderPointResultado resAtiva = new OrderPointResultado(
+                "ORD-4XX", "created", "created", null, null, null, new BigDecimal("50.00"), "{}"
+        );
+
+        when(reservaEstoqueRepository.listarPedidosComReservasExpiradas(any()))
+                .thenReturn(List.of(pedidoConciliacao, pedidoRejeicao4xx));
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoConciliacao))
+                .thenReturn(List.of(pagConciliacao));
+        when(pagamentoPedidoRepository.findByPedidoIdOrderByCriadoEmAsc(pedidoRejeicao4xx))
+                .thenReturn(List.of(pagRejeicao4xx));
+        when(mercadoPagoPointClient.consultarOrder("ORD-4XX")).thenReturn(resAtiva);
+        when(transicaoPagamentoPointService.aplicarResultadoOrder(
+                eq(pagRejeicao4xx.getId()), eq(resAtiva), eq(OrigemAuditoriaCaixa.SISTEMA), eq(null)
+        )).thenReturn(pagRejeicao4xx);
+        when(mercadoPagoPointClient.cancelarOrder(eq("ORD-4XX"), any()))
+                .thenThrow(new IntegracaoMercadoPagoException("Cancelamento rejeitado", HttpStatus.BAD_REQUEST, false));
+
+        scheduler.expirarReservasVencidas();
+
+        verify(mercadoPagoPointClient, never()).cancelarOrder(eq(null), any());
+        verify(transicaoPagamentoPointService, never()).expirarPagamentoPorTimeout(any(), any());
+        verify(reservaEstoqueService, never()).liberarReservasAtivasDoPedido(any(), any(), any());
+    }
 }

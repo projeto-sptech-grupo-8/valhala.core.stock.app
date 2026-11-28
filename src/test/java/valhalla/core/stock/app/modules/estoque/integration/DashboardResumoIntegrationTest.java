@@ -106,6 +106,19 @@ class DashboardResumoIntegrationTest extends EstoqueIntegrationTestSupport {
                 .andExpect(jsonPath("$.estoque.alertas.length()").value(1))
                 .andExpect(jsonPath("$.estoque.alertas[0].nome").value("Produto zerado sem minimo"))
                 .andExpect(jsonPath("$.estoque.alertas[0].status").value("ZERADO"));
+
+        ProdutoEntity saudavelComMinimo = produtoPadrao("Produto saudavel com minimo", categoria, false, "10");
+        definirEstoqueMinimo(saudavelComMinimo, "5");
+
+        mockMvc.perform(get("/dashboard/resumo").cookie(operador))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estoque.totalProdutos").value(3))
+                .andExpect(jsonPath("$.estoque.produtosComMinimoDefinido").value(1))
+                .andExpect(jsonPath("$.estoque.produtosSemMinimoDefinido").value(2))
+                .andExpect(jsonPath("$.estoque.criticos").value(1))
+                .andExpect(jsonPath("$.estoque.zerados").value(1))
+                .andExpect(jsonPath("$.estoque.saudaveis").value(1))
+                .andExpect(jsonPath("$.estoque.saudePercentual").value(50));
     }
 
     private void definirEstoqueMinimo(ProdutoEntity produto, String minimo) {

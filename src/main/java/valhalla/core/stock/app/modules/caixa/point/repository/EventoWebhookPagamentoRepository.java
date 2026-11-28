@@ -27,6 +27,17 @@ public interface EventoWebhookPagamentoRepository extends JpaRepository<EventoWe
     );
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select e from EventoWebhookPagamentoEntity e
+            where e.provedor = :provedor
+              and e.requestId = :requestId
+            """)
+    Optional<EventoWebhookPagamentoEntity> buscarPorProvedorERequestIdParaAtualizacao(
+            @Param("provedor") String provedor,
+            @Param("requestId") String requestId
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select e from EventoWebhookPagamentoEntity e where e.id = :id")
     Optional<EventoWebhookPagamentoEntity> buscarPorIdParaAtualizacao(@Param("id") Long id);
 }
